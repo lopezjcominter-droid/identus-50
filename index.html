@@ -2162,7 +2162,22 @@
           }
         }
 
-        // UPDATE existing units
+        // UPDATE existing units (systems are updated in place: no delete-all + reinsert)
+        // Load the current system rows once
+        const existingMap = new Map(); const rowsByUnit = new Map(); let rowsOk = true;
+        for (let from = 0; ; from += 1000) {
+          const { data: rows, error: rowsErr } = await sbClient.from('unit_systems_status').select('id,unit_id,system_id,progress,status,photos,events').range(from, from + 999);
+          if (rowsErr) { rowsOk = false; console.error('❌ Could not read system rows:', rowsErr); break; }
+          if (!rows || !rows.length) break;
+          rows.forEach(r => {
+            const k = r.unit_id + '|' + r.system_id;
+            if (!existingMap.has(k)) existingMap.set(k, r);
+            if (!rowsByUnit.has(r.unit_id)) rowsByUnit.set(r.unit_id, []);
+            rowsByUnit.get(r.unit_id).push(r);
+          });
+          if (rows.length < 1000) break;
+        }
+        const toInsert = [];
         for (const u of unitsWithIds) {
           const { error: updateError } = await sbClient
             .from('units')
@@ -2177,19 +2192,29 @@
             console.error(`❌ Error updating unit ${u.id}:`, updateError);
             continue;
           }
+          if (!rowsOk) continue; // never touch systems if the current rows could not be read
 
-          // Update systems: delete existing rows then re-insert
-          await sbClient.from('unit_systems_status').delete().eq('unit_id', u.id);
-          const systemsToInsert = activeSystemsOf(u).map(sys => ({
-            unit_id: u.id,
-            system_id: sys,
-            progress: u.systems[sys]?.progress || 0,
-            status: u.systems[sys]?.status || 'Behind',
-            photos: u.systems[sys]?.photos || 0,
-            events: JSON.stringify(u.systems[sys]?.events || [])
-          }));
-          const { error: sysError } = await sbClient.from('unit_systems_status').insert(systemsToInsert);
-          if (sysError) console.error(`❌ Error inserting systems for unit ${u.id}:`, sysError);
+          const active = activeSystemsOf(u);
+          for (const sys of active) {
+            const sd = u.systems[sys] || {};
+            const events = sd.events || [];
+            const payload = { progress: sd.progress || 0, status: sd.status || 'Behind', photos: sd.photos || 0, events: JSON.stringify(events) };
+            const ex = existingMap.get(u.id + '|' + sys);
+            if (!ex) { toInsert.push({ unit_id: u.id, system_id: sys, ...payload }); continue; }
+            let exEvents = ex.events; try { if (typeof exEvents === 'string') exEvents = JSON.parse(exEvents); } catch (e) {}
+            const same = ex.progress === payload.progress && ex.status === payload.status && (ex.photos || 0) === payload.photos && JSON.stringify(exEvents || []) === payload.events;
+            if (!same) {
+              const { error: upErr } = await sbClient.from('unit_systems_status').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', ex.id);
+              if (upErr) console.error(`❌ Error updating ${sys} for unit ${u.id}:`, upErr);
+            }
+          }
+          // remove rows only for systems that are no longer active on this unit
+          const extra = (rowsByUnit.get(u.id) || []).filter(r => !active.includes(r.system_id)).map(r => r.id);
+          if (extra.length) await sbClient.from('unit_systems_status').delete().in('id', extra);
+        }
+        for (let k = 0; k < toInsert.length; k += 500) {
+          const { error: sysError } = await sbClient.from('unit_systems_status').insert(toInsert.slice(k, k + 500));
+          if (sysError) console.error('❌ Error inserting systems:', sysError);
         }
 
         if (unitsWithIds.length > 0) {
