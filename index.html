@@ -2363,6 +2363,8 @@
 
     let isSyncing = false;
     async function manualSync() {
+      location.reload();
+      return;
       if (isSyncing) return;
       isSyncing = true;
       const icon = document.getElementById('syncIcon');
