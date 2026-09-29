@@ -5784,7 +5784,7 @@
     // Inactive until AUTH_REQUIRED = true (or open the page with ?login=1 to test).
     // =====================================================================
     (function () {
-      const AUTH_REQUIRED = false;   // <-- switched to true once login is verified
+      const AUTH_REQUIRED = true;   // <-- switched to true once login is verified
       const $ = id => document.getElementById(id);
       const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
       window.userRole = null; window.userName = '';
