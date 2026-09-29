@@ -1780,10 +1780,6 @@
       try {
         await loadData();
 
-        // ⚡ AUTO-FIX: Correct any misassigned building_ids in Supabase
-        // This ensures Building 1 = 36 units, Building 2 = 30 units, Building 3 = 30 units
-        await fixBuildingAssignments();
-
         await loadPunchlist();
         setupFilterUI();
         renderUnits();
@@ -1795,6 +1791,15 @@
 
         // 🔄 Enable realtime sync - subscribes to Supabase changes
         subscribeToRealtimeUpdates();
+
+        // ⚡ AUTO-FIX after UI ready
+        isSyncing = true;
+        await fixBuildingAssignments();
+        await loadData();
+        renderUnits();
+        updateMetrics();
+        updateCharts();
+        setTimeout(() => { isSyncing = false; }, 1000);
 
         console.log('✅ App initialized successfully');
       } catch (error) {
