@@ -976,7 +976,6 @@
           <button class="btn btn-secondary" onclick="backupData()">💾 Backup</button>
           <button class="btn btn-secondary" onclick="document.getElementById('restoreInput').click()">📂 Restore</button>
           <input type="file" id="restoreInput" accept=".json" style="display:none" onchange="restoreData(this)">
-          <button class="btn btn-warning" onclick="fixBuildingAssignments(true)" title="Fix Building assignments manually">🔧 Fix Buildings</button>
           <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear Data</button>
           <button class="btn btn-secondary" onclick="promptSetupPassword()" title="Configure project buildings and units (admin only)">⚙️ Project Setup</button>
           <button class="btn btn-primary" onclick="openAddUnitModal()">+ Full Add Unit</button>
@@ -2213,6 +2212,9 @@
     }
 
     function clearAllData() {
+      const pw = prompt('🔐 Enter admin password to clear all data:');
+      if (pw === null) return;
+      if (pw !== '3010') { alert('❌ Incorrect password.'); return; }
       if (confirm('Are you sure you want to delete all data? This action cannot be undone.')) {
         if (!sbClient) {
           console.error('Cannot clear data: Supabase unavailable');
