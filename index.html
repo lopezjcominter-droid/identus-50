@@ -1793,13 +1793,7 @@
         subscribeToRealtimeUpdates();
 
         // ⚡ AUTO-FIX after UI ready
-        isSyncing = true;
-        await fixBuildingAssignments();
-        await loadData();
-        renderUnits();
-        updateMetrics();
-        updateCharts();
-        setTimeout(() => { isSyncing = false; }, 1000);
+        fixBuildingAssignments();
 
         console.log('✅ App initialized successfully');
       } catch (error) {
