@@ -1479,16 +1479,44 @@
     // ===== SUPABASE CONFIGURATION =====
     let SUPABASE_URL = localStorage.getItem('cfg_supabase_url') || 'https://kihsukzcbohmxovbyisi.supabase.co';
     let SUPABASE_KEY = localStorage.getItem('cfg_supabase_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHN1a3pjYm9obXhvdmJ5aXNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjEzMjEsImV4cCI6MjEwNTkzNzMyMX0.91APDO6eQ25ZkdOsBXMj_Uhv0EtkfWULn2N5jEfAGZA';
-    function getProjectName() { return localStorage.getItem('cfg_project_name') || 'Ability Housing'; }
+    // Project name/address are shared through the Supabase `projects` table (same for every device)
+    let sharedProject = null;
+    function getProjectName() { return (sharedProject && sharedProject.name) || localStorage.getItem('cfg_project_name') || 'Ability Housing'; }
+    function getProjectAddress() { return (sharedProject && sharedProject.address) || (localStorage.getItem('cfg_project_address') ?? '5121 North Pine Hills Road'); }
     function applyProjectName() {
       const n = getProjectName();
       const el = document.getElementById('projectNameLabel');
       if (el) el.textContent = n;
       const ad = document.getElementById('projectAddressLabel');
-      if (ad) { const a = (localStorage.getItem('cfg_project_address') ?? '5121 North Pine Hills Road'); ad.textContent = a ? '📍 ' + a : ''; }
+      if (ad) { const a = getProjectAddress(); ad.textContent = a ? '📍 ' + a : ''; }
       document.title = 'Identus 50 – ' + n;
     }
-    window.addEventListener('DOMContentLoaded', applyProjectName);
+    async function loadSharedProject() {
+      for (let i = 0; i < 20 && !sbClient; i++) await new Promise(r => setTimeout(r, 500));
+      if (!sbClient) return;
+      try {
+        const { data } = await sbClient.from('projects').select('name,address').eq('id', PROJECT_ID).maybeSingle();
+        // Ignore the original seed placeholders until a real name/address is saved
+        if (data) sharedProject = {
+          name: data.name && data.name !== 'Identus 50' ? data.name : '',
+          address: data.address && data.address !== '123 Biscayne Ave' ? data.address : ''
+        };
+        applyProjectName();
+      } catch (e) { console.warn('loadSharedProject', e); }
+    }
+    async function saveSharedProject(name, address) {
+      localStorage.setItem('cfg_project_name', name);
+      localStorage.setItem('cfg_project_address', address);
+      sharedProject = { name, address };
+      applyProjectName();
+      try {
+        const { data, error } = await sbClient.from('projects').update({ name, address }).eq('id', PROJECT_ID).select('id');
+        if (error || !data || data.length === 0) {
+          alert('Saved on this device only. To share it with every device, Supabase must allow updates on the "projects" table.');
+        }
+      } catch (e) { console.warn('saveSharedProject', e); }
+    }
+    window.addEventListener('DOMContentLoaded', () => { applyProjectName(); loadSharedProject(); });
     let PROJECT_ID = localStorage.getItem('cfg_project_id') || 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
     const proxyFetch = (u, o) => fetch(u, o);
 
@@ -2408,7 +2436,7 @@
       }
 
       document.getElementById('setupProjectName').value = getProjectName();
-      document.getElementById('setupProjectAddress').value = (localStorage.getItem('cfg_project_address') ?? '5121 North Pine Hills Road');
+      document.getElementById('setupProjectAddress').value = getProjectAddress();
     }
 
     function closeProjectSetup() {
@@ -2490,10 +2518,8 @@
       if (newKey) { SUPABASE_KEY = newKey; localStorage.setItem('cfg_supabase_key', newKey); }
       if (newPid) { PROJECT_ID = newPid; localStorage.setItem('cfg_project_id', newPid); }
 
-      const pn = (document.getElementById('setupProjectName').value || '').trim();
-      if (pn) localStorage.setItem('cfg_project_name', pn);
-      localStorage.setItem('cfg_project_address', (document.getElementById('setupProjectAddress').value || '').trim());
-      applyProjectName();
+      const pn = (document.getElementById('setupProjectName').value || '').trim() || getProjectName();
+      await saveSharedProject(pn, (document.getElementById('setupProjectAddress').value || '').trim());
       const rows = [...document.querySelectorAll('#setupBuildingsList > div')];
       if (rows.length === 0) { alert('Add at least one building.'); return; }
 
