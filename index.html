@@ -1173,9 +1173,15 @@
           <button class="modal-close" type="button" onclick="closeQuickAddModal()">✕</button>
         </div>
 
-        <div class="form-group" style="display:none">
-          <select class="form-select" id="quickBuilding">
+        <div class="form-group">
+          <label class="form-label">Building</label>
+          <select class="form-select" id="quickBuilding" required>
             <option value="">Select Building</option>
+            <option value="Building 1">Building 1</option>
+            <option value="Building 2">Building 2</option>
+            <option value="Building 3">Building 3</option>
+            <option value="Clubhouse">Clubhouse</option>
+            <option value="Parking">Parking</option>
           </select>
         </div>
 
@@ -1263,7 +1269,7 @@
 
         <div class="form-group">
           <label class="form-label">Progress %</label>
-          <input type="number" class="form-input" id="eventProgress" min="0" max="100" value="0" required>
+          <input type="number" class="form-input" id="eventProgress" min="0" max="100" value="0" required oninput="document.getElementById('eventStatus').value = progressToStatus(Math.min(100, Math.max(0, parseInt(this.value) || 0)))">
         </div>
 
         <div class="form-group">
@@ -3029,7 +3035,7 @@
       if (!unit) return;
 
       // Auto-set building and floor (hidden fields)
-      document.getElementById('quickBuilding').value = unit.building_id || unit.building;
+      document.getElementById('quickBuilding').value = unit.building;
       const floorInput = document.getElementById('quickFloor');
       if (floorInput) floorInput.value = unit.floor;
 
@@ -3071,13 +3077,14 @@
 
     function saveQuickUnit(event) {
       event.preventDefault();
-      const building = document.getElementById('quickBuilding').value;
       const apt = document.getElementById('quickUnit').value;
       const floor = document.getElementById('quickFloor').value;
       const system = document.getElementById('quickSystem').value;
       const progress = parseInt(document.getElementById('quickProgress').value);
       const hasPhoto = document.getElementById('quickPhoto').files.length > 0;
 
+      let building = document.getElementById('quickBuilding').value;
+      if (!building) { const m = data.find(u => u.apt === apt); if (m) building = m.building; }
       if (!apt || !building) { alert('Por favor selecciona o ingresa una unidad y edificio válidos.'); return; }
 
       // Check if unit already exists (match by apt only if building is empty, or by both)
