@@ -5592,7 +5592,7 @@
         const nB = d.filter(u => hasStatus(u, 'Behind')).length, nR = d.filter(u => hasStatus(u, 'At Risk')).length, nS = d.filter(isStale).length;
         const chip = (k, label) => `<button type="button" data-k="${k}" style="padding:6px 12px;border-radius:16px;border:1px solid ${qf[k] ? '#0B5394' : '#D1D5DB'};background:${qf[k] ? '#0B5394' : '#fff'};color:${qf[k] ? '#fff' : '#374151'};font-size:12px;font-weight:600;cursor:pointer;">${label}</button>`;
         box.innerHTML = chip('behind', `🔴 Behind (${nB})`) + chip('risk', `🟠 At Risk (${nR})`) + chip('stale', `🕒 No update in`) +
-          `<select id="qfDays" style="padding:5px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px;">${[3, 7, 14].map(n => `<option value="${n}" ${qf.days === n ? 'selected' : ''}>${n} days (${d.filter(u => { const t = lastUpdate(u); return !t || (Date.now() - t) > n * 864e5; }).length})</option>`).join('')}</select>` +
+          `<select id="qfDays" style="padding:5px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px;">${[7, 30, 60, 90].map(n => `<option value="${n}" ${qf.days === n ? 'selected' : ''}>${n} days</option>`).join('')}</select><span style="font-size:12px;color:#6B7280;">→ ${nS} of ${d.length} units</span>` +
           `<button type="button" id="qfClear" style="padding:6px 10px;border:none;background:none;color:#6B7280;font-size:12px;cursor:pointer;">✖ Clear</button>` +
           `<button type="button" id="qfBell" style="padding:6px 12px;border-radius:16px;border:1px solid #D1D5DB;background:#fff;font-size:12px;cursor:pointer;margin-left:auto;">${notifOn() ? '🔔 Alerts on' : '🔕 Enable alerts'}</button>`;
         box.querySelectorAll('button[data-k]').forEach(b => b.onclick = () => { qf[b.dataset.k] = !qf[b.dataset.k]; refreshList(); });
@@ -5649,6 +5649,32 @@
         if (outbox.length) { flushOutbox(); return; }
         try { await loadData(); renderUnits(); updateMetrics(); updateCharts(); } catch (e) {}
       }, 180000);
+
+      // ---------- Keep scroll position while searching the units list (phone/tablet) ----------
+      wrap('handleUnitsSearch', o => function () {
+        const c = $('unitsContainer');
+        if (c && !c.dataset.hold) { c.style.minHeight = c.offsetHeight + 'px'; c.dataset.hold = '1'; }
+        const y = window.scrollY;
+        const r = o.apply(this, arguments);
+        window.scrollTo(0, y);
+        return r;
+      });
+      const si = $('unitsSearchInput');
+      if (si && !si.parentNode.classList.contains('search-wrap')) {
+        const w = document.createElement('span');
+        w.className = 'search-wrap'; w.style.cssText = 'position:relative;display:inline-flex;align-items:center;margin-left:-8px;';
+        si.parentNode.insertBefore(w, si); w.appendChild(si);
+        si.style.marginLeft = '0'; si.style.paddingRight = '28px';
+        const x = document.createElement('button');
+        x.type = 'button'; x.textContent = '×'; x.setAttribute('aria-label', 'Clear search');
+        x.style.cssText = 'display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:none;font-size:18px;line-height:1;color:#6B7280;cursor:pointer;padding:2px 4px;';
+        w.appendChild(x);
+        const sync = () => { x.style.display = si.value ? 'block' : 'none'; };
+        si.addEventListener('input', sync);
+        x.addEventListener('mousedown', e => e.preventDefault());
+        x.addEventListener('click', () => { si.value = ''; sync(); handleUnitsSearch(); si.focus(); });
+      }
+      if (si) si.addEventListener('blur', () => { const c = $('unitsContainer'); if (c) { c.style.minHeight = ''; delete c.dataset.hold; } });
 
       // ---------- Weekly summary ----------
       function weeklyData() {
