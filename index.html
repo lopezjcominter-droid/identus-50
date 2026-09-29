@@ -1482,7 +1482,7 @@
       const el = document.getElementById('projectNameLabel');
       if (el) el.textContent = 'Project: ' + n;
       const ad = document.getElementById('projectAddressLabel');
-      if (ad) { const a = localStorage.getItem('cfg_project_address') || ''; ad.textContent = a ? '📍 ' + a : ''; }
+      if (ad) { const a = (localStorage.getItem('cfg_project_address') ?? '5121 North Pine Hills Road'); ad.textContent = a ? '📍 ' + a : ''; }
       document.title = 'Identus 50 – ' + n;
     }
     window.addEventListener('DOMContentLoaded', applyProjectName);
@@ -2405,7 +2405,7 @@
       }
 
       document.getElementById('setupProjectName').value = getProjectName();
-      document.getElementById('setupProjectAddress').value = localStorage.getItem('cfg_project_address') || '';
+      document.getElementById('setupProjectAddress').value = (localStorage.getItem('cfg_project_address') ?? '5121 North Pine Hills Road');
     }
 
     function closeProjectSetup() {
