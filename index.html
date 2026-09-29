@@ -1408,7 +1408,7 @@
       </div>
       <div style="padding:20px;display:flex;flex-direction:column;gap:20px;">
         <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;font-size:13px;color:#1E40AF;">
-          ♻️ <strong>Replicable:</strong> Change the Supabase URL, Key &amp; Project ID below to deploy this app for a different project. Configure buildings, then click Apply.
+          ♻️ <strong>Replicable:</strong> Change the Supabase URL, Key &amp; Project ID below to deploy this app for a different project. Existing data is never deleted: only missing buildings and units are added.
         </div>
 
         <!-- Supabase Connection (scalable to other projects) -->
@@ -1451,7 +1451,7 @@
 
         <div style="display:flex;gap:10px;justify-content:flex-end;padding-top:10px;border-top:1px solid #E5E7EB;">
           <button onclick="closeProjectSetup()" style="padding:8px 16px;border:1px solid #D1D5DB;background:white;border-radius:6px;cursor:pointer;font-size:14px;">Cancel</button>
-          <button onclick="applyProjectSetup()" style="padding:8px 16px;background:#DC2626;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">⚠️ Apply & Sync to Supabase</button>
+          <button onclick="applyProjectSetup()" style="padding:8px 16px;background:#DC2626;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">⚠️ Add Missing Buildings/Units</button>
         </div>
       </div>
     </div>
@@ -2472,7 +2472,7 @@
       const rows = [...document.querySelectorAll('#setupBuildingsList > div')];
       if (rows.length === 0) { alert('Add at least one building.'); return; }
 
-      const confirmed = confirm('⚠️ WARNING: This will DELETE all existing units and system data in Supabase and recreate them. Continue?');
+      const confirmed = confirm('This will ADD any missing buildings and units to Supabase. Existing units, progress, photos and history will NOT be changed or deleted. Continue?');
       if (!confirmed) return;
 
       const residentialConfigs = [];
@@ -2535,15 +2535,9 @@
           }
         }
 
-        // Step 3: Delete existing units and system statuses
-        try {
-          const oldUnits = await (await fetch(`${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}&select=id`, { headers: hdrs })).json();
-          const oldIds = Array.isArray(oldUnits) ? oldUnits.map(u => u.id) : [];
-          for (let i = 0; i < oldIds.length; i += 50) {
-            await fetch(`${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=in.(${oldIds.slice(i, i + 50).join(',')})`, { method: 'DELETE', headers: hdrs });
-          }
-        } catch (e) { console.warn('status cleanup', e); }
-        await fetch(`${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}`, { method: 'DELETE', headers: hdrs });
+        // Step 3: Load existing units (nothing is deleted)
+        const exUnitsRaw = await (await fetch(`${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}&select=unit_number`, { headers: hdrs })).json();
+        const existingNums = new Set(Array.isArray(exUnitsRaw) ? exUnitsRaw.map(u => String(u.unit_number)) : []);
 
         // Step 4: Build new units array
         const newUnits = [];
@@ -2558,10 +2552,18 @@
           newUnits.push({ unit_number: cfg.name, floor: 'Ground', building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
         });
 
+        // Only add units that do not exist yet
+        const toAdd = newUnits.filter(u => !existingNums.has(String(u.unit_number)));
+        if (toAdd.length === 0) {
+          alert('Nothing to add: all these buildings and units already exist. No data was changed.');
+          closeProjectSetup();
+          return;
+        }
+
         // Insert units
         const insRes = await fetch(`${SUPABASE_URL}/rest/v1/units`, {
           method: 'POST', headers: jsonHdrs,
-          body: JSON.stringify(newUnits)
+          body: JSON.stringify(toAdd)
         });
         const inserted = await insRes.json();
         if (!Array.isArray(inserted)) throw new Error(JSON.stringify(inserted));
@@ -2598,7 +2600,7 @@
           btn.textContent = `⏳ Systems... ${Math.min(i + 500, ussRows.length)}/${ussRows.length}`;
         }
 
-        alert(`✅ Done! Created ${inserted.length} units, ${ussRows.length} system status rows across ${residentialConfigs.length} building(s) + ${specialConfigs.length} special unit(s).`);
+        alert(`✅ Done! Added ${inserted.length} new units, ${ussRows.length} system status rows across ${residentialConfigs.length} building(s) + ${specialConfigs.length} special unit(s).`);
         closeProjectSetup();
         await loadData();
         renderUnits();
@@ -2609,7 +2611,7 @@
       } catch (err) {
         alert('❌ Error: ' + err.message);
       } finally {
-        if (btn) { btn.textContent = '⚠️ Apply & Sync to Supabase'; btn.disabled = false; }
+        if (btn) { btn.textContent = '⚠️ Add Missing Buildings/Units'; btn.disabled = false; }
       }
     }
 
