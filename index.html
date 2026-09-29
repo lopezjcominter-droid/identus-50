@@ -5574,30 +5574,44 @@
       };
 
       // ---------- Pending filters ----------
-      const qf = { behind: false, risk: false, stale: false, days: 7 };
-      const lastUpdate = u => { let t = 0; Object.values(u.systems || {}).forEach(s => (s.events || []).forEach(e => { const x = Date.parse(e.timestamp); if (x > t) t = x; })); return t; };
-      const isStale = u => { const t = lastUpdate(u); return !t || (Date.now() - t) > qf.days * 864e5; };
-      const hasStatus = (u, st) => Object.values(u.systems || {}).some(s => s.status === st);
+      const qf = { behind: false, risk: false, phase: '', sys: '', nophoto: false };
+      const sysVals = u => Object.values(u.systems || {});
+      const lastUpdate = u => { let t = 0; sysVals(u).forEach(s => (s.events || []).forEach(e => { const x = Date.parse(e.timestamp); if (x > t) t = x; })); return t; };
+      const hasStatus = (u, st) => sysVals(u).some(s => s.status === st);
+      const phaseOf = u => { const v = sysVals(u); if (!v.length) return 'none'; if (v.every(s => (s.progress || 0) >= 100)) return 'done'; if (v.every(s => (s.progress || 0) === 0)) return 'new'; return 'work'; };
+      const photoCount = s => Math.max(s.photos || 0, (s.events || []).reduce((n, e) => n + ((e.images || []).length || 0), 0));
+      const noPhotoDone = u => sysVals(u).some(s => (s.progress || 0) >= 100 && photoCount(s) === 0);
       wrap('shouldShowUnit', o => function (u) {
         if (!o.apply(this, arguments)) return false;
         if (qf.behind && !hasStatus(u, 'Behind')) return false;
         if (qf.risk && !hasStatus(u, 'At Risk')) return false;
-        if (qf.stale && !isStale(u)) return false;
+        if (qf.phase && phaseOf(u) !== qf.phase) return false;
+        if (qf.sys) { const s = (u.systems || {})[qf.sys]; if (!s || (s.progress || 0) >= 100) return false; }
+        if (qf.nophoto && !noPhotoDone(u)) return false;
         return true;
       });
       function refreshList() { try { renderUnits(); if (typeof updateUnitsCounter === 'function') updateUnitsCounter(); } catch (e) {} renderChips(); }
       function renderChips() {
         const box = $('quickFilters'); if (!box) return;
-        const d = data || [];
-        const nB = d.filter(u => hasStatus(u, 'Behind')).length, nR = d.filter(u => hasStatus(u, 'At Risk')).length, nS = d.filter(isStale).length;
-        const chip = (k, label) => `<button type="button" data-k="${k}" style="padding:6px 12px;border-radius:16px;border:1px solid ${qf[k] ? '#0B5394' : '#D1D5DB'};background:${qf[k] ? '#0B5394' : '#fff'};color:${qf[k] ? '#fff' : '#374151'};font-size:12px;font-weight:600;cursor:pointer;">${label}</button>`;
-        box.innerHTML = chip('behind', `🔴 Behind (${nB})`) + chip('risk', `🟠 At Risk (${nR})`) + chip('stale', `🕒 No update in`) +
-          `<select id="qfDays" style="padding:5px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px;">${[3, 7, 14].map(n => `<option value="${n}" ${qf.days === n ? 'selected' : ''}>${n} days (${d.filter(u => { const t = lastUpdate(u); return !t || (Date.now() - t) > n * 864e5; }).length})</option>`).join('')}</select>` +
+        const d = window.data || data || [];
+        const cnt = f => d.filter(f).length;
+        const on = (a) => a ? 'border:1px solid #0B5394;background:#0B5394;color:#fff;' : 'border:1px solid #D1D5DB;background:#fff;color:#374151;';
+        const chip = (attr, active, label) => `<button type="button" ${attr} style="padding:6px 12px;border-radius:16px;${on(active)}font-size:12px;font-weight:600;cursor:pointer;">${label}</button>`;
+        const sysOpts = SYSTEMS.map(sn => `<option value="${esc(sn)}" ${qf.sys === sn ? 'selected' : ''}>${esc(sn)} (${cnt(u => u.systems && u.systems[sn] && (u.systems[sn].progress || 0) < 100)})</option>`).join('');
+        box.innerHTML =
+          chip('data-p="new"', qf.phase === 'new', `⚪ Not started (${cnt(u => phaseOf(u) === 'new')})`) +
+          chip('data-p="work"', qf.phase === 'work', `🔧 In work (${cnt(u => phaseOf(u) === 'work')})`) +
+          chip('data-p="done"', qf.phase === 'done', `✅ Done (${cnt(u => phaseOf(u) === 'done')})`) +
+          chip('data-k="behind"', qf.behind, `🔴 Behind (${cnt(u => hasStatus(u, 'Behind'))})`) +
+          chip('data-k="risk"', qf.risk, `🟠 At Risk (${cnt(u => hasStatus(u, 'At Risk'))})`) +
+          chip('data-k="nophoto"', qf.nophoto, `📷 Done without photo (${cnt(noPhotoDone)})`) +
+          `<select id="qfSys" style="padding:5px;border:1px solid ${qf.sys ? '#0B5394' : '#D1D5DB'};border-radius:6px;font-size:12px;"><option value="">Pending in system…</option>${sysOpts}</select>` +
           `<button type="button" id="qfClear" style="padding:6px 10px;border:none;background:none;color:#6B7280;font-size:12px;cursor:pointer;">✖ Clear</button>` +
           `<button type="button" id="qfBell" style="padding:6px 12px;border-radius:16px;border:1px solid #D1D5DB;background:#fff;font-size:12px;cursor:pointer;margin-left:auto;">${notifOn() ? '🔔 Alerts on' : '🔕 Enable alerts'}</button>`;
+        box.querySelectorAll('button[data-p]').forEach(b => b.onclick = () => { qf.phase = qf.phase === b.dataset.p ? '' : b.dataset.p; refreshList(); });
         box.querySelectorAll('button[data-k]').forEach(b => b.onclick = () => { qf[b.dataset.k] = !qf[b.dataset.k]; refreshList(); });
-        $('qfDays').onchange = e => { qf.days = parseInt(e.target.value); refreshList(); };
-        $('qfClear').onclick = () => { qf.behind = qf.risk = qf.stale = false; refreshList(); };
+        $('qfSys').onchange = e => { qf.sys = e.target.value; refreshList(); };
+        $('qfClear').onclick = () => { qf.behind = qf.risk = qf.nophoto = false; qf.phase = ''; qf.sys = ''; refreshList(); };
         $('qfBell').onclick = enableAlerts;
       }
       function injectChips() {
