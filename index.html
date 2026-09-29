@@ -2711,7 +2711,23 @@
             ${building} (${count})
           </button>
         `;
-      }).join('');
+      }).join('') + (() => {
+        const allOn = BUILDINGS.every(b => filters.buildings.has(b));
+        return `<button class="building-btn ${allOn ? 'active' : ''}" onclick="selectAllBuildings()" style="padding: 8px 14px; border-radius: 6px; border: 1px solid #E5E7EB; background: ${allOn ? '#EFF6FF' : '#F3F4F6'}; color: ${allOn ? '#1E3A8A' : '#6B7280'}; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s;">All</button>`;
+      })();
+    }
+
+    function selectAllBuildings() {
+      BUILDINGS.forEach(b => filters.buildings.add(b));
+      document.querySelectorAll('#buildingFilters .filter-option').forEach(l => {
+        l.classList.add('active');
+        const cb = l.querySelector('input'); if (cb) cb.checked = true;
+      });
+      setupBuildingButtons();
+      renderUnits();
+      updateMetrics();
+      updateCharts();
+      updateUnitsCounter();
     }
 
     function toggleBuildingFilter(building, event) {
@@ -2730,6 +2746,7 @@
         btn.classList.add('active');
       }
 
+      setupBuildingButtons();
       renderUnits();
       updateMetrics();
       updateCharts();
