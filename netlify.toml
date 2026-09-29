@@ -1,13 +1,12 @@
 [build]
-  command = "echo 'Static site - no build needed'"
-    publish = "."
+  command = "echo static"
+  publish = "."
 
-    [[redirects]]
-      from = "/*"
-        to = "/index.html"
-          status = 200
+[functions]
+  directory = "netlify/functions"
 
-          [[redirects]]
-            from = "/.netlify/functions/*"
-              to = "/.netlify/functions/*"
-                status = 200
+[[redirects]]
+  from = "/api/supabase-proxy"
+  to = "/.netlify/functions/supabase-proxy"
+  status = 200
+  force = true
