@@ -3234,11 +3234,7 @@
       try {
         if (!u.id || !sbClient) return;
         const sd = u.systems[system];
-        await sbClient.from('unit_systems_status').delete().match({ unit_id: u.id, system_id: system });
-        await sbClient.from('unit_systems_status').insert({
-          unit_id: u.id, system_id: system, progress: sd.progress || 0, status: sd.status || 'Behind',
-          photos: sd.photos || 0, events: JSON.stringify(sd.events || []), updated_at: new Date().toISOString()
-        });
+        await syncUnitSystemSafe(u, system);
       } catch (e) { console.warn('sync photo delete failed', e); }
     }
 
@@ -3269,7 +3265,6 @@
         sd.photos = Math.max(0, (sd.photos || 0) - (last.photos || 0));
         const ec = document.getElementById('eventContent'); if (ec) ec.innerHTML = generateEventsForSystem(u, system);
         const pc = document.getElementById('photoContent'); if (pc) pc.innerHTML = generatePhotosForSystem(u, system);
-        try { await saveData(); } catch (e) {}
         renderUnits(); updateMetrics(); updateCharts();
         await syncUnitSystem(u, system);
       });
@@ -3557,7 +3552,12 @@
         });
       }
 
-      await saveData();
+      if (unit && unit.id && sbClient) {
+        // Update only this unit/system (no delete-all + reinsert: faster and never leaves a system "not applicable")
+        try { await syncUnitSystemSafe(unit, system); } catch (e) { console.warn('⚠️ unit system sync failed:', e); }
+      } else {
+        await saveData();
+      }
       renderUnits();
       updateMetrics();
       updateCharts();
@@ -3570,16 +3570,7 @@
           try {
 
             // 1. Sync unit_systems_status
-            await sbClient.from('unit_systems_status').delete().match({ unit_id: unit.id, system_id: system });
-            await sbClient.from('unit_systems_status').insert({
-              unit_id: unit.id,
-              system_id: system,
-              progress: progress,
-              status: status,
-              photos: unit.systems[system].photos || 0,
-              events: JSON.stringify(unit.systems[system].events || []),
-              updated_at: new Date().toISOString()
-            });
+            // (already saved above by syncUnitSystemSafe)
 
             // 2. Insert inspection_event
             // First resolve system UUID from inspection_systems
@@ -3970,7 +3961,11 @@
         });
       }
 
-      saveData();
+      if (existingUnit && existingUnit.id && sbClient) {
+        try { await syncUnitSystemSafe(existingUnit, system); } catch (e) { console.warn('⚠️ quick sync failed:', e); }
+      } else {
+        saveData();
+      }
       renderUnits();
       updateMetrics();
       updateCharts();
@@ -5396,6 +5391,18 @@
     // =====================================================================
     (function () {
       const $ = id => document.getElementById(id);
+      // Update the row for one unit+system; insert only if it does not exist yet (never delete first)
+      async function upsertSystemRow(row) {
+        const { data: upd, error } = await sbClient.from('unit_systems_status').update(row).eq('unit_id', row.unit_id).eq('system_id', row.system_id).select('id');
+        if (error) throw error;
+        if (upd && upd.length) return;
+        const { error: e2 } = await sbClient.from('unit_systems_status').insert(row);
+        if (e2) throw e2;
+      }
+      window.syncUnitSystemSafe = async function (u, system) {
+        const sd = u.systems[system]; if (!u.id || !sd) return;
+        await upsertSystemRow({ unit_id: u.id, system_id: system, progress: sd.progress || 0, status: sd.status || 'Behind', photos: sd.photos || 0, events: JSON.stringify(sd.events || []), updated_at: new Date().toISOString() });
+      };
       const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
       const wrap = (name, make) => { try { const o = window[name]; if (typeof o === 'function') window[name] = make(o); } catch (e) { console.warn('wrap failed', name, e); } };
 
@@ -5467,9 +5474,7 @@
                   if (String(ev.images[i]).startsWith('data:')) ev.images[i] = await uploadToStorage(ev.images[i], `photos/${PROJECT_ID}/${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}.jpg`, 'image/jpeg');
                 }
               }
-              await sbClient.from('unit_systems_status').delete().match({ unit_id: e.unit_id, system_id: e.system_id });
-              const { error } = await sbClient.from('unit_systems_status').insert({ unit_id: e.unit_id, system_id: e.system_id, progress: e.progress, status: e.status, photos: e.photos, events: JSON.stringify(evs), updated_at: new Date().toISOString() });
-              if (error) throw error;
+              await upsertSystemRow({ unit_id: e.unit_id, system_id: e.system_id, progress: e.progress, status: e.status, photos: e.photos, events: JSON.stringify(evs), updated_at: new Date().toISOString() });
               outbox = outbox.filter(x => entryKey(x) !== entryKey(e)); done++;
             } catch (err) { console.warn('flush failed', err); break; }
           }
