@@ -1538,6 +1538,13 @@
               closedAt: item.closed_at || null
             };
           });
+          try {
+            const { data: phRows } = await sbClient.from('photos').select('photo_url,photo_path').like('photo_path', 'punchlist/%');
+            (phRows || []).forEach(r => {
+              const it = punchlist.find(x => x.id === r.photo_path.split('/')[1]);
+              if (it) { it.photos.push(r.photo_url); it.photoCount = it.photos.length; }
+            });
+          } catch (e) { console.warn('punch photos load failed', e); }
           console.log('✅ Loaded', punchlist.length, 'items from Supabase');
           return;
         }
@@ -2589,20 +2596,28 @@
 
     function generatePhotosForSystem(unit, system) {
       const sysData = unit.systems[system];
-      if (!sysData || sysData.photos === 0) {
+      const imgs = [];
+      ((sysData && sysData.events) || []).forEach(ev => (ev.images || []).forEach(b => imgs.push(b)));
+      if (!sysData || (sysData.photos === 0 && imgs.length === 0)) {
         return '<p style="color: #9CA3AF; text-align: center; padding: 20px;">No photos recorded</p>';
       }
-
       let html = '<div class="photo-grid">';
-      for (let i = 0; i < sysData.photos; i++) {
-        html += `<div class="photo-item" style="position: relative;">
-          📷
-          <button style="position: absolute; top: -5px; right: -5px; background: #EF4444; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; font-size: 12px; cursor: pointer; padding: 0;" onclick="deletePhoto('${unit.apt}', '${unit.building}', '${unit.floor}', '${system}', ${i})">×</button>
-        </div>`;
-      }
+      imgs.forEach(b => {
+        html += `<div class="photo-item" style="padding:0;overflow:hidden;"><img src="${b}" style="width:100%;height:100%;object-fit:cover;cursor:pointer;" onclick="openPhotoFull(this.src)"></div>`;
+      });
+      const missing = Math.max(0, (sysData.photos || 0) - imgs.length);
+      for (let i = 0; i < missing; i++) html += '<div class="photo-item" title="Foto sin imagen guardada">📷</div>';
       html += '</div>';
-      html += `<p style="font-size: 12px; color: #6B7280; text-align: center;">${sysData.photos} photo(s) recorded</p>`;
+      html += `<p style="font-size: 12px; color: #6B7280; text-align: center;">${Math.max(sysData.photos || 0, imgs.length)} photo(s) recorded</p>`;
       return html;
+    }
+
+    function openPhotoFull(src) {
+      const o = document.createElement('div');
+      o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
+      o.innerHTML = `<img src="${src}" style="max-width:95vw;max-height:95vh;border-radius:8px;">`;
+      o.onclick = () => o.remove();
+      document.body.appendChild(o);
     }
 
     function deletePhoto(apt, building, floor, system, photoIndex) {
@@ -2636,6 +2651,7 @@
             <div class="event-time">${date}</div>
             <div class="event-notes">${event.notes}</div>
             ${event.photos > 0 ? `<div class="event-photos">📸 ${event.photos} photo(s)</div>` : ''}
+            ${(event.images || []).map(b => `<img src="${b}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;margin:4px 4px 0 0;cursor:pointer;" onclick="openPhotoFull(this.src)">`).join('')}
           </div>
         `;
       });
@@ -2747,7 +2763,10 @@
         unit.systems[system].events.push({
           timestamp: new Date().toISOString(),
           notes: notes,
-          photos: photoFiles.length
+          photos: photoFiles.length,
+          images: photoBase64,
+          progress: progress,
+          status: status
         });
       }
 
@@ -2771,6 +2790,8 @@
               system_id: system,
               progress: progress,
               status: status,
+              photos: unit.systems[system].photos || 0,
+              events: JSON.stringify(unit.systems[system].events || []),
               updated_at: new Date().toISOString()
             });
 
@@ -3075,7 +3096,7 @@
       document.getElementById('quickPhotoStatus').textContent = this.files.length > 0 ? '✓ Photo selected' : 'No photo';
     });
 
-    function saveQuickUnit(event) {
+    async function saveQuickUnit(event) {
       event.preventDefault();
       const apt = document.getElementById('quickUnit').value;
       const floor = document.getElementById('quickFloor').value;
@@ -3086,6 +3107,9 @@
       let building = document.getElementById('quickBuilding').value;
       if (!building) { const m = data.find(u => u.apt === apt); if (m) building = m.building; }
       if (!apt || !building) { alert('Por favor selecciona o ingresa una unidad y edificio válidos.'); return; }
+      const qFiles = Array.from(document.getElementById('quickPhoto').files);
+      const qImages = qFiles.length > 0 ? await readAndCompressPhotos(qFiles, 0.6) : [];
+      const qEvent = { timestamp: new Date().toISOString(), notes: `Quick add - ${progress}% complete`, photos: qFiles.length, images: qImages, progress: progress, status: progress === 100 ? 'Completed' : progress >= 21 ? 'In Progress' : progress >= 1 ? 'At Risk' : 'Behind' };
 
       // Check if unit already exists (match by apt only if building is empty, or by both)
       const existingUnit = data.find(u => u.apt === apt && (building ? u.building === building : true));
@@ -3095,8 +3119,8 @@
         existingUnit.systems[system] = {
           progress: progress,
           status: status,
-          photos: (existingUnit.systems[system]?.photos || 0) + (hasPhoto ? 1 : 0),
-          events: existingUnit.systems[system]?.events || []
+          photos: (existingUnit.systems[system]?.photos || 0) + qFiles.length,
+          events: [...(existingUnit.systems[system]?.events || []), qEvent]
         };
       } else {
         // Create new unit with all systems initialized
@@ -3107,8 +3131,8 @@
             systems[sys] = {
               progress: progress,
               status: status,
-              photos: hasPhoto ? 1 : 0,
-              events: []
+              photos: qFiles.length,
+              events: [qEvent]
             };
           } else {
             systems[sys] = {
@@ -3901,7 +3925,7 @@
             <div class="issue-meta">
               <span class="issue-badge" style="background: ${statusColor}; color: white;">Status: ${item.status}</span>
               <span class="issue-badge">Assigned: ${item.assignee}</span>
-              <span class="issue-badge">📸 ${item.photoCount} photo(s)</span>
+              <span class="issue-badge">📸 ${item.photoCount} photo(s)</span>${(item.photos || []).map(b => `<img src="${b}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;margin-left:6px;vertical-align:middle;cursor:pointer;" onclick="openPhotoFull(this.src)">`).join('')}
             </div>
             <div style="font-size: 11px; color: #6B7280; padding: 8px 0; border-top: 1px solid #E5E7EB; margin-top: 8px;">
               <div>Created: ${createdDate}</div>
