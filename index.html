@@ -1025,7 +1025,7 @@
               <canvas id="progressChart"></canvas>
             </div>
             <div class="chart-container">
-              <div class="chart-title">Timeline by System</div>
+              <div class="chart-title">Project Timeline (Weekly Progress)</div>
               <canvas id="ganttChart"></canvas>
             </div>
           </div>
@@ -3941,26 +3941,41 @@
         }]
       });
 
-      // Physical Progress Over Time Chart - Overall Project (Weekly accuracy, Monthly labels)
-      const weekLabels = [];
-      const monthLabels = ['Sep', 'Oct', 'Nov', 'Dec'];
-      for (let i = 0; i < 12; i++) {
-        weekLabels.push(`W${i + 1}`);
+      // Overall project progress by week of each month (real history from update events)
+      const _now = new Date();
+      const _mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      let _earliest = _now;
+      filtered.forEach(unit => Object.values(unit.systems || {}).forEach(s => (s.events || []).forEach(ev => {
+        const d = new Date(ev.timestamp); if (!isNaN(d) && d < _earliest) _earliest = d;
+      })));
+      // Start at the month of the first update; always show at least 3 months
+      let _y = _earliest.getFullYear(), _m = _earliest.getMonth();
+      const _cnt = Math.max(3, (_now.getFullYear() - _y) * 12 + (_now.getMonth() - _m) + 1);
+      const displayLabels = [];
+      const progressOverTime = [];
+      for (let k = 0; k < _cnt; k++) {
+        const yy = _y + Math.floor((_m + k) / 12), mm = (_m + k) % 12;
+        const lastDay = new Date(yy, mm + 1, 0).getDate();
+        [[1, 7], [8, 14], [15, 21], [22, lastDay]].forEach(([s, e], wi) => {
+          displayLabels.push(`${_mn[mm]} W${wi + 1}`);
+          const weekStart = new Date(yy, mm, s, 0, 0, 0);
+          const weekEnd = new Date(yy, mm, e, 23, 59, 59);
+          if (weekStart > _now) { progressOverTime.push(null); return; }
+          if (weekEnd >= _now) { progressOverTime.push(overallProgress); return; }
+          let tp = 0, ts = 0;
+          filtered.forEach(unit => Array.from(filters.systems).forEach(sys => {
+            const sd = unit.systems[sys]; if (!sd) return;
+            ts++;
+            let last = 0, lastT = 0;
+            (sd.events || []).forEach(ev => {
+              const t = new Date(ev.timestamp).getTime();
+              if (!isNaN(t) && t <= weekEnd.getTime() && t >= lastT) { lastT = t; last = ev.progress || 0; }
+            });
+            tp += last;
+          }));
+          progressOverTime.push(ts > 0 ? Math.round(tp / ts) : 0);
+        });
       }
-
-      const currentWeek = Math.ceil((new Date() - new Date('2026-09-01')) / (1000 * 60 * 60 * 24 * 7));
-      const progressOverTime = weekLabels.map((w, i) => {
-        const weekNum = i + 1;
-        // Only show calculated progress if overallProgress > 0; otherwise, show actual progress at current/future weeks
-        if (weekNum < currentWeek) {
-          // For past weeks, show proportional progress only if project has started (overallProgress > 0)
-          return overallProgress > 0 ? Math.min(100, Math.round((weekNum / 12) * overallProgress)) : 0;
-        } else {
-          return overallProgress;
-        }
-      });
-
-      const displayLabels = ['Sep W1', 'Sep W2', 'Sep W3', 'Sep W4', 'Oct W1', 'Oct W2', 'Oct W3', 'Oct W4', 'Nov W1', 'Nov W2', 'Nov W3', 'Nov W4'];
 
       const ganttCtx = document.getElementById('ganttChart').getContext('2d');
       if (charts.gantt) charts.gantt.destroy();
