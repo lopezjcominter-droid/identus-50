@@ -929,9 +929,12 @@
         <div class="logo-text">
           <h3>Identus 50</h3>
           <p>QA/QC Inspection</p>
-          <p id="projectNameLabel" style="margin-top:2px;font-weight:600;"></p>
-          <p id="projectAddressLabel" style="margin-top:1px;font-size:11px;"></p>
         </div>
+      </div>
+
+      <div style="margin: 0 0 20px; padding: 10px 12px; background: #F3F4F6; border-radius: 8px;">
+        <div id="projectNameLabel" style="font-size: 14px; font-weight: 700; color: #111827;"></div>
+        <div id="projectAddressLabel" style="font-size: 11px; color: #6B7280; margin-top: 2px;"></div>
       </div>
 
       <div class="filter-group" style="margin-bottom: 20px;">
@@ -1480,7 +1483,7 @@
     function applyProjectName() {
       const n = getProjectName();
       const el = document.getElementById('projectNameLabel');
-      if (el) el.textContent = 'Project: ' + n;
+      if (el) el.textContent = n;
       const ad = document.getElementById('projectAddressLabel');
       if (ad) { const a = (localStorage.getItem('cfg_project_address') ?? '5121 North Pine Hills Road'); ad.textContent = a ? '📍 ' + a : ''; }
       document.title = 'Identus 50 – ' + n;
