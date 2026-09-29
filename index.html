@@ -6,6 +6,17 @@
   <title>Identus 50</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700&display=swap">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // Monitor Supabase library loading
+    window.addEventListener('load', () => {
+      if (window.supabase && window.supabase.createClient) {
+        console.log('✅ Supabase library loaded successfully');
+      } else {
+        console.warn('⚠️ Supabase library not available after window load');
+      }
+    });
+  </script>
   <style>
     * {
       margin: 0;
@@ -928,8 +939,7 @@
           <button class="btn btn-secondary" onclick="backupData()">💾 Backup</button>
           <button class="btn btn-secondary" onclick="document.getElementById('restoreInput').click()">📂 Restore</button>
           <input type="file" id="restoreInput" accept=".json" style="display:none" onchange="restoreData(this)">
-          <button class="btn btn-secondary" onclick="promptSetupPassword()" title="Configure project buildings and units (admin only)">⚙️ Project Setup</button>
-          <button class="btn btn-warning" onclick="fixBuildingAssignments()" title="Fix Building assignments">🔧 Fix Buildings</button>
+          <button class="btn btn-warning" onclick="fixBuildingAssignments(true)" title="Fix Building assignments manually">🔧 Fix Buildings</button>
           <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear Data</button>
           <button class="btn btn-primary" onclick="openAddUnitModal()">+ Full Add Unit</button>
           <button class="btn btn-primary" onclick="openQuickAddModal()">📱 Quick Add</button>
@@ -1350,64 +1360,6 @@
     </div>
   </div>
 
-  <!-- Project Setup Modal -->
-  <div class="modal" id="projectSetupModal">
-    <div class="modal-content" style="max-width:600px;max-height:90vh;overflow-y:auto;">
-      <div class="modal-header">
-        <h2>⚙️ Project Setup</h2>
-        <button class="close-btn" onclick="closeProjectSetup()">✕</button>
-      </div>
-      <div style="padding:20px;display:flex;flex-direction:column;gap:20px;">
-        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;font-size:13px;color:#1E40AF;">
-          ♻️ <strong>Replicable:</strong> Change the Supabase URL, Key &amp; Project ID below to deploy this app for a different project. Configure buildings, then click Apply.
-        </div>
-
-        <!-- Supabase Connection (scalable to other projects) -->
-        <details id="supabaseConfigDetails" style="border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;">
-          <summary style="padding:12px 14px;font-size:13px;font-weight:600;cursor:pointer;background:#F9FAFB;list-style:none;display:flex;justify-content:space-between;align-items:center;">
-            🔌 Supabase Connection <span id="supabaseConfigStatus" style="font-size:11px;font-weight:400;color:#6B7280;">▼</span>
-          </summary>
-          <div style="padding:14px;display:flex;flex-direction:column;gap:10px;background:white;">
-            <div>
-              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:4px;">SUPABASE URL</label>
-              <input id="setupSupabaseUrl" type="text" style="width:100%;padding:7px;border:1px solid #D1D5DB;border-radius:5px;font-size:12px;font-family:monospace;" placeholder="https://xxxx.supabase.co">
-            </div>
-            <div>
-              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:4px;">ANON KEY</label>
-              <input id="setupSupabaseKey" type="password" style="width:100%;padding:7px;border:1px solid #D1D5DB;border-radius:5px;font-size:12px;font-family:monospace;" placeholder="eyJhbGci...">
-            </div>
-            <div>
-              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:4px;">PROJECT ID (UUID)</label>
-              <input id="setupProjectId" type="text" style="width:100%;padding:7px;border:1px solid #D1D5DB;border-radius:5px;font-size:12px;font-family:monospace;" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-            </div>
-            <div style="font-size:11px;color:#9CA3AF;">These values are saved in your browser's local storage and applied immediately when you click Apply.</div>
-          </div>
-        </details>
-
-        <div>
-          <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Project Name</label>
-          <input id="setupProjectName" type="text" style="width:100%;padding:8px;border:1px solid #D1D5DB;border-radius:6px;font-size:14px;" placeholder="e.g. Identus 50">
-        </div>
-
-        <div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-            <label style="font-size:13px;font-weight:600;">Buildings & Special Units</label>
-            <div style="display:flex;gap:6px;">
-              <button onclick="addSetupBuilding({type:'special'})" style="font-size:12px;padding:4px 10px;background:#D97706;color:white;border:none;border-radius:6px;cursor:pointer;">+ Special Unit</button>
-              <button onclick="addSetupBuilding()" style="font-size:12px;padding:4px 10px;background:#1E40AF;color:white;border:none;border-radius:6px;cursor:pointer;">+ Building</button>
-            </div>
-          </div>
-          <div id="setupBuildingsList" style="display:flex;flex-direction:column;gap:10px;"></div>
-        </div>
-
-        <div style="display:flex;gap:10px;justify-content:flex-end;padding-top:10px;border-top:1px solid #E5E7EB;">
-          <button onclick="closeProjectSetup()" style="padding:8px 16px;border:1px solid #D1D5DB;background:white;border-radius:6px;cursor:pointer;font-size:14px;">Cancel</button>
-          <button onclick="applyProjectSetup()" style="padding:8px 16px;background:#DC2626;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">⚠️ Apply & Sync to Supabase</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <script>
   function toggleSidebar() {
     const container = document.getElementById('container');
@@ -1418,40 +1370,40 @@
 
   
     // ===== SUPABASE CONFIGURATION =====
-    // To replicate this app for a new project, change these 3 values:
-    let SUPABASE_URL = localStorage.getItem('cfg_supabase_url') || 'https://kihsukzcbohmxovbyisi.supabase.co';
-    let SUPABASE_KEY = localStorage.getItem('cfg_supabase_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHN1a3pjYm9obXhvdmJ5aXNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjEzMjEsImV4cCI6MjEwNTkzNzMyMX0.91APDO6eQ25ZkdOsBXMj_Uhv0EtkfWULn2N5jEfAGZA';
-    let PROJECT_ID = localStorage.getItem('cfg_project_id') || 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
+    const SUPABASE_URL = 'https://kihsukzcbohmxovbyisi.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHN1a3pjYm9obXhvdmJ5aXNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjEzMjEsImV4cCI6MjEwNTkzNzMyMX0.91APDO6eQ25ZkdOsBXMj_Uhv0EtkfWULn2N5jEfAGZA';
 
-    // Proxy wrapper: redirect all Supabase API calls through Netlify Functions
-    async function proxyFetch(urlOrPath, options = {}) {
-      // If URL starts with /, it's already a proxy path
-      if (typeof urlOrPath === 'string' && urlOrPath.startsWith('/api/')) {
-        return fetch(urlOrPath, options);
-      }
+    let sbClient = null;
 
-      // If it contains SUPABASE_URL, convert to proxy path
-      if (typeof urlOrPath === 'string' && urlOrPath.includes(SUPABASE_URL)) {
-        const url = new URL(urlOrPath);
-        let path = url.pathname.replace('/rest/v1/', '');
-        const query = url.search;
-        const proxyPath = `/api/supabase-proxy?path=${path}${query}`;
-
-        // Remove auth headers for proxy (backend handles it)
-        const cleanOptions = { ...options };
-        if (cleanOptions.headers) {
-          delete cleanOptions.headers.apikey;
-          delete cleanOptions.headers.Authorization;
+    // Initialize Supabase with retry logic to handle async script loading
+    function initializeSupabase() {
+      try {
+        if (window.supabase && window.supabase.createClient) {
+          sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+          console.log('✅ Supabase client initialized successfully');
+          return true;
+        } else {
+          console.warn('⏳ Supabase library not yet loaded, will retry...');
+          return false;
         }
-        return fetch(proxyPath, cleanOptions);
+      } catch (err) {
+        console.error('❌ Supabase initialization error:', err);
+        return false;
       }
-
-      // Not a Supabase call, use regular fetch
-      return fetch(urlOrPath, options);
     }
 
-    // REST-only: no Supabase JS client needed
-    const sbHeaders = () => ({ 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` });
+    // Attempt initial initialization
+    if (!initializeSupabase()) {
+      // If initialization fails, retry after a short delay
+      setTimeout(() => {
+        if (!initializeSupabase()) {
+          // Third attempt after longer delay
+          setTimeout(() => {
+            initializeSupabase();
+          }, 1000);
+        }
+      }, 500);
+    }
 
     function switchMainTab(tab, btn) {
       document.getElementById('dashboardTab').style.display = tab === 'dashboard' ? 'block' : 'none';
@@ -1515,37 +1467,14 @@
           };
 
           if (event.id && isUuid) {
-            const updRes = await fetch(
-              `${SUPABASE_URL}/rest/v1/punch_list?id=eq.${event.id}`,
-              {
-                method: 'PATCH',
-                headers: {
-                  'apikey': SUPABASE_KEY,
-                  'Authorization': `Bearer ${SUPABASE_KEY}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  ...punchPayload,
-                  updated_at: new Date().toISOString()
-                })
-              }
-            );
-            if (!updRes.ok) console.error('punch_list update error');
+            const { error: updErr } = await sbClient.from('punch_list').update({
+              ...punchPayload,
+              updated_at: new Date().toISOString()
+            }).eq('id', event.id);
+            if (updErr) console.error('punch_list update error:', updErr);
           } else {
-            const insRes = await fetch(
-              `${SUPABASE_URL}/rest/v1/punch_list`,
-              {
-                method: 'POST',
-                headers: {
-                  'apikey': SUPABASE_KEY,
-                  'Authorization': `Bearer ${SUPABASE_KEY}`,
-                  'Content-Type': 'application/json',
-                  'Prefer': 'return=representation'
-                },
-                body: JSON.stringify(punchPayload)
-              }
-            );
-            const insData = insRes.ok ? await insRes.json() : [];
+            const { data: insData, error: insErr } = await sbClient.from('punch_list').insert(punchPayload).select();
+            if (insErr) console.error('punch_list insert error:', insErr);
             if (insData && insData[0]) event.id = insData[0].id;
           }
         }
@@ -1562,21 +1491,27 @@
     }
 
     async function loadPunchlist() {
+      // Wait for Supabase to initialize (up to 3 seconds)
+      let attempts = 0;
+      while (!sbClient && attempts < 6) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        attempts++;
+      }
+
+      if (!sbClient) {
+        console.error('❌ Supabase not available for punch list');
+        punchlist = [];
+        return;
+      }
+
       try {
+        const { data: plData, error } = await sbClient
+          .from('punch_list')
+          .select('*')
+          .eq('project_id', 'a71f40ad-aa85-4686-9757-a3c13fd262a0')
+          .order('created_at', { ascending: false });
 
-
-        // Load punch list via REST API
-        const plRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/punch_list?project_id=eq.${PROJECT_ID}`,
-          {
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`
-            }
-          }
-        );
-
-        const plData = plRes.ok ? await plRes.json() : [];
+        if (error) throw error;
 
         if (plData && plData.length > 0) {
           punchlist = plData.map(item => {
@@ -1601,13 +1536,12 @@
           return;
         }
       } catch (err) {
-        console.warn('⚠️ Failed to load punch list from Supabase (non-fatal):', err);
+        console.error('❌ Failed to load punch list from Supabase:', err);
+        throw err;
       }
 
-      if (punchlist.length === 0) {
-        punchlist = [];
-        console.log('No punch list data found');
-      }
+      punchlist = [];
+      console.log('No punch list data found');
     }
 
     function generateTestData() {
@@ -1668,8 +1602,26 @@
     async function init() {
       console.log('🚀 Initializing app...');
 
+      // Wait for Supabase to be ready
+      let attempts = 0;
+      while (!sbClient && attempts < 10) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        attempts++;
+      }
+
+      if (!sbClient) {
+        console.error('❌ Supabase failed to initialize');
+        alert('Error: Cannot connect to Supabase. Please refresh the page.');
+        return;
+      }
+
       try {
         await loadData();
+
+        // ⚡ AUTO-FIX: Correct any misassigned building_ids in Supabase
+        // This ensures Building 1 = 36 units, Building 2 = 30 units, Building 3 = 30 units
+        await fixBuildingAssignments();
+
         await loadPunchlist();
         setupFilterUI();
         renderUnits();
@@ -1679,9 +1631,8 @@
         setupModal();
         updateUnitsCounter();
 
-        // 🔄 DISABLED: Realtime sync requires sbClient (Supabase client library)
-        // Since we migrated to REST API, realtime subscriptions can be re-enabled later
-        // subscribeToRealtimeUpdates();
+        // 🔄 Enable realtime sync - subscribes to Supabase changes
+        subscribeToRealtimeUpdates();
 
         console.log('✅ App initialized successfully');
       } catch (error) {
@@ -1692,75 +1643,52 @@
 
     async function loadData() {
       try {
-        // Load from Supabase using proxy (avoids CORS/firewall issues)
-        console.log('📥 Loading units from Supabase...');
-        console.log('📦 Project ID:', PROJECT_ID);
-        const hdrs = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
-        let units = [];
-        try {
-          console.log('🔄 Attempting to fetch units...');
-          const unitsRes = await proxyFetch(
-            `${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}`,
-            { headers: hdrs, mode: 'cors' }
-          );
-          console.log('📊 Response status:', unitsRes.status);
-          if (!unitsRes.ok) throw new Error(`REST API error: ${unitsRes.status} ${unitsRes.statusText}`);
-          units = await unitsRes.json();
-          // Sort by unit_number in JavaScript instead of in query (avoids index issues)
-          units.sort((a, b) => (a.unit_number || '').localeCompare(b.unit_number || ''));
-          console.log(`✅ Loaded ${units.length} units from REST API`);
-        } catch (e) {
-          console.error('❌ Units REST query failed:', e.message);
-          console.log('⚠️ Falling back to local/test data...');
-          data = generateTestData();
-          updateLastUpdated();
-          return;
+        // Wait for Supabase to initialize (up to 5 seconds)
+        let attempts = 0;
+        while (!sbClient && attempts < 10) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          attempts++;
         }
+
+        if (!sbClient) {
+          console.error('❌ Supabase client failed to initialize');
+          // Mantener data anterior si existe
+          if (data && data.length > 0) {
+            console.log('⚠️ Using cached data from previous session');
+            return;
+          }
+          throw new Error('Supabase connection failed');
+        }
+
+        // Load from Supabase
+        const { data: units, error: unitsError } = await sbClient
+          .from('units')
+          .select('id, unit_number, floor, building_id, project_id')
+          .order('unit_number', { ascending: true });
+
+        if (unitsError) throw unitsError;
 
         if (!units || units.length === 0) {
           console.log('📝 No units found, generating test data...');
           data = generateTestData();
-          console.log('✅ Test data loaded');
+          await syncDataToSupabase();
+          console.log('✅ Test data synced to Supabase');
           return;
         }
 
-        // Load system status — filter by unit_ids (project_id may not exist on this table)
-        console.log('📥 Loading system status...');
-        let systemsStatus = [];
-        try {
-          const unitIds = units.map(u => u.id);
-          // Fetch in batches of 100 unit_ids to stay within URL limits
-          for (let i = 0; i < unitIds.length; i += 100) {
-            const batch = unitIds.slice(i, i + 100);
-            const statusRes = await proxyFetch(
-              `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=in.(${batch.map(id => `"${id}"`).join(',')})`,
-              { headers: hdrs, mode: 'cors' }
-            );
-            if (statusRes.ok) {
-              const batch_data = await statusRes.json();
-              systemsStatus = systemsStatus.concat(batch_data);
-            }
-          }
-          console.log(`✅ Loaded ${systemsStatus.length} system statuses from REST API`);
-        } catch (e) {
-          console.warn('Status REST query failed (non-fatal):', e);
-        }
+        // Load system status
+        const { data: systemsStatus, error: statusError } = await sbClient
+          .from('unit_systems_status')
+          .select('unit_id, system_id, progress, status, photos, events');
+
+        if (statusError) throw statusError;
 
         // Load buildings
-        console.log('📥 Loading buildings...');
-        let buildings = [];
-        try {
-          const buildingsRes = await proxyFetch(
-            `${SUPABASE_URL}/rest/v1/buildings?project_id=eq.${PROJECT_ID}`,
-            { headers: hdrs, mode: 'cors' }
-          );
-          if (!buildingsRes.ok) throw new Error(`REST API error: ${buildingsRes.status} ${buildingsRes.statusText}`);
-          buildings = await buildingsRes.json();
-          console.log(`✅ Loaded ${buildings.length} buildings from REST API`);
-        } catch (e) {
-          console.error('Buildings REST query failed:', e);
-          throw e;
-        }
+        const { data: buildings, error: buildingsError } = await sbClient
+          .from('buildings')
+          .select('id, name');
+
+        if (buildingsError) throw buildingsError;
 
         // Store buildings globally and populate select
         sbBuildings = buildings;
@@ -1824,8 +1752,8 @@
     }
 
     async function saveData() {
-      if (!data) {
-        console.warn('⚠️ Cannot save: no data');
+      if (!data || !sbClient) {
+        console.warn('⚠️ Cannot save: data or Supabase unavailable');
         return;
       }
       console.log('💾 Syncing to Supabase...');
@@ -1847,18 +1775,14 @@
     }
 
     async function ensureBuildingsExist() {
+      if (!sbClient) return;
       try {
+        const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
+        const { data: existingBuildings } = await sbClient
+          .from('buildings')
+          .select('name')
+          .eq('project_id', PROJECT_ID);
 
-        const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/buildings?project_id=eq.${PROJECT_ID}&select=name`,
-          {
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`
-            }
-          }
-        );
-        const existingBuildings = res.ok ? await res.json() : [];
         const existingNames = new Set((existingBuildings || []).map(b => b.name));
         const buildingsToCreate = BUILDINGS.filter(name => !existingNames.has(name));
 
@@ -1867,20 +1791,9 @@
             name,
             project_id: PROJECT_ID
           }));
-          const createRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/buildings`,
-            {
-              method: 'POST',
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(buildingRows)
-            }
-          );
-          if (createRes.ok) console.log('✅ Created missing buildings:', buildingsToCreate);
-          else console.warn('⚠️ Error creating buildings');
+          const { error } = await sbClient.from('buildings').insert(buildingRows);
+          if (error) console.warn('⚠️ Error creating buildings:', error);
+          else console.log('✅ Created missing buildings:', buildingsToCreate);
         }
       } catch (err) {
         console.warn('⚠️ Error in ensureBuildingsExist:', err);
@@ -1888,63 +1801,47 @@
     }
 
     async function fixBuildingAssignments() {
+      if (!sbClient) {
+        alert('❌ Supabase not available');
+        return;
+      }
       try {
         if (!confirm('This will fix building assignments for Clubhouse and Parking. Continue?')) return;
 
-
+        const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
 
         // Ensure buildings exist
         await ensureBuildingsExist();
 
         // Load all buildings
-        const buildingsRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/buildings?project_id=eq.${PROJECT_ID}`,
-          {
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`
-            }
-          }
-        );
-        const allBuildings = buildingsRes.ok ? await buildingsRes.json() : [];
+        const { data: allBuildings } = await sbClient
+          .from('buildings')
+          .select('id, name')
+          .eq('project_id', PROJECT_ID);
         const buildingMap = new Map((allBuildings || []).map(b => [b.name, b.id]));
 
         // Fix Clubhouse assignment
         const clubhouseId = buildingMap.get('Clubhouse');
         if (clubhouseId) {
-          const updateRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/units?unit_number=eq.Clubhouse&project_id=eq.${PROJECT_ID}`,
-            {
-              method: 'PATCH',
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({ building_id: clubhouseId })
-            }
-          );
-          if (updateRes.ok) console.log('✅ Fixed Clubhouse building_id');
-          else console.warn('⚠️ Error fixing Clubhouse');
+          const { error } = await sbClient
+            .from('units')
+            .update({ building_id: clubhouseId })
+            .eq('unit_number', 'Clubhouse')
+            .eq('project_id', PROJECT_ID);
+          if (error) console.warn('⚠️ Error fixing Clubhouse:', error);
+          else console.log('✅ Fixed Clubhouse building_id');
         }
 
         // Fix Parking assignment
         const parkingId = buildingMap.get('Parking');
         if (parkingId) {
-          const updateRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/units?unit_number=eq.Parking&project_id=eq.${PROJECT_ID}`,
-            {
-              method: 'PATCH',
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({ building_id: parkingId })
-            }
-          );
-          if (updateRes.ok) console.log('✅ Fixed Parking building_id');
-          else console.warn('⚠️ Error fixing Parking');
+          const { error } = await sbClient
+            .from('units')
+            .update({ building_id: parkingId })
+            .eq('unit_number', 'Parking')
+            .eq('project_id', PROJECT_ID);
+          if (error) console.warn('⚠️ Error fixing Parking:', error);
+          else console.log('✅ Fixed Parking building_id');
         }
 
         alert('✅ Building assignments fixed! Please refresh the page.');
@@ -1961,7 +1858,7 @@
         return;
       }
 
-
+      const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
 
       // Subscribe to unit_systems_status changes (INSERT, UPDATE, DELETE)
       console.log('📡 Subscribing to realtime unit_systems_status updates...');
@@ -2033,29 +1930,33 @@
     }
 
     async function syncDataToSupabase(retryCount = 0) {
+      if (!sbClient) {
+        console.warn('⚠️ Supabase not ready for sync');
+        if (retryCount < 3) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return syncDataToSupabase(retryCount + 1);
+        }
+        return;
+      }
       if (!data || data.length === 0) {
         console.warn('⚠️ No data to sync');
         return;
       }
 
       try {
+        const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
 
+        // Step 1: Ensure all buildings exist in Supabase
+        await ensureBuildingsExist();
 
-        // Step 1: Load buildings via REST API
-        const buildingsRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/buildings?project_id=eq.${PROJECT_ID}`,
-          {
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`,
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-        const allBuildings = buildingsRes.ok ? await buildingsRes.json() : [];
+        // Step 2: Load buildings and create name->id map
+        const { data: allBuildings } = await sbClient
+          .from('buildings')
+          .select('id, name')
+          .eq('project_id', PROJECT_ID);
         const buildingMap = new Map((allBuildings || []).map(b => [b.name, b.id]));
 
-        // Step 2: Update local data with building_ids
+        // Step 3: Update local data with building_ids
         data.forEach(u => {
           if (u.building && !u.building_id) {
             u.building_id = buildingMap.get(u.building) || null;
@@ -2065,7 +1966,7 @@
         const unitsWithoutIds = data.filter(u => !u.id);
         const unitsWithIds = data.filter(u => u.id);
 
-        // INSERT new units via REST API
+        // INSERT new units
         if (unitsWithoutIds.length > 0) {
           const unitsToInsert = unitsWithoutIds.map(u => ({
             unit_number: u.apt,
@@ -2075,28 +1976,21 @@
           }));
 
           console.log(`🔄 Inserting ${unitsToInsert.length} new units...`);
-          const insertRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/units`,
-            {
-              method: 'POST',
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json',
-                'Prefer': 'return=representation'
-              },
-              body: JSON.stringify(unitsToInsert)
-            }
-          );
-          const newUnits = insertRes.ok ? await insertRes.json() : [];
+          const { data: newUnits, error: insertError } = await sbClient
+            .from('units')
+            .insert(unitsToInsert)
+            .select();
+
+          if (insertError) throw insertError;
 
           if (newUnits && newUnits.length > 0) {
             console.log(`✅ Inserted ${newUnits.length} units, mapping IDs...`);
             for (let i = 0; i < unitsWithoutIds.length && i < newUnits.length; i++) {
               unitsWithoutIds[i].id = newUnits[i].id;
             }
+            // ID mapping updated in-memory, Supabase is now authoritative
 
-            // Insert systems for newly inserted units via REST API
+            // Insert systems for newly inserted units
             for (const u of unitsWithoutIds) {
               if (!u.id) continue;
               const systemsToInsert = SYSTEMS.map(sys => ({
@@ -2107,59 +2001,30 @@
                 photos: u.systems[sys]?.photos || 0,
                 events: JSON.stringify(u.systems[sys]?.events || [])
               }));
-              const sysRes = await fetch(
-                `${SUPABASE_URL}/rest/v1/unit_systems_status`,
-                {
-                  method: 'POST',
-                  headers: {
-                    'apikey': SUPABASE_KEY,
-                    'Authorization': `Bearer ${SUPABASE_KEY}`,
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify(systemsToInsert)
-                }
-              );
-              if (!sysRes.ok) console.error(`❌ Error inserting systems for unit ${u.id}`);
+              const { error: sysError } = await sbClient.from('unit_systems_status').insert(systemsToInsert);
+              if (sysError) console.error(`❌ Error inserting systems for unit ${u.id}:`, sysError);
             }
           }
         }
 
-        // UPDATE existing units via REST API
+        // UPDATE existing units
         for (const u of unitsWithIds) {
-          const updateRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/units?id=eq.${u.id}`,
-            {
-              method: 'PATCH',
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                unit_number: u.apt,
-                floor: u.floor,
-                building_id: u.building_id || null
-              })
-            }
-          );
+          const { error: updateError } = await sbClient
+            .from('units')
+            .update({
+              unit_number: u.apt,
+              floor: u.floor,
+              building_id: u.building_id || null
+            })
+            .eq('id', u.id);
 
-          if (!updateRes.ok) {
-            console.error(`❌ Error updating unit ${u.id}`);
+          if (updateError) {
+            console.error(`❌ Error updating unit ${u.id}:`, updateError);
             continue;
           }
 
-          // Delete existing systems and re-insert via REST API
-          await fetch(
-            `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=eq.${u.id}`,
-            {
-              method: 'DELETE',
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`
-              }
-            }
-          );
-
+          // Update systems: delete existing rows then re-insert
+          await sbClient.from('unit_systems_status').delete().eq('unit_id', u.id);
           const systemsToInsert = SYSTEMS.map(sys => ({
             unit_id: u.id,
             system_id: sys,
@@ -2168,39 +2033,20 @@
             photos: u.systems[sys]?.photos || 0,
             events: JSON.stringify(u.systems[sys]?.events || [])
           }));
-          const sysRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/unit_systems_status`,
-            {
-              method: 'POST',
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(systemsToInsert)
-            }
-          );
-          if (!sysRes.ok) console.error(`❌ Error inserting systems for unit ${u.id}`);
+          const { error: sysError } = await sbClient.from('unit_systems_status').insert(systemsToInsert);
+          if (sysError) console.error(`❌ Error inserting systems for unit ${u.id}:`, sysError);
         }
 
         if (unitsWithIds.length > 0) {
           console.log(`✅ Updated ${unitsWithIds.length} existing units with systems`);
         }
 
-        // Verify sync by reloading data
+        // Verify sync succeeded by reloading data from Supabase
         setTimeout(async () => {
           try {
-            const verifyRes = await fetch(
-              `${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}&select=id`,
-              {
-                headers: {
-                  'apikey': SUPABASE_KEY,
-                  'Authorization': `Bearer ${SUPABASE_KEY}`
-                }
-              }
-            );
-            const verifyUnits = verifyRes.ok ? await verifyRes.json() : [];
+            const { data: verifyUnits } = await sbClient.from('units').select('id').eq('project_id', PROJECT_ID);
             console.log(`✅ Sync verified: ${verifyUnits?.length || 0} units in Supabase`);
+            // Recarga completa de datos desde Supabase para garantizar sincronización
             await loadData();
             renderUnits();
             updateMetrics();
@@ -2213,6 +2059,7 @@
 
       } catch (err) {
         console.error('❌ Error syncing to Supabase:', err);
+        // Reintentar una vez más después de 2 segundos
         if (retryCount < 2) {
           console.log(`🔄 Retrying sync (attempt ${retryCount + 2})...`);
           await new Promise(resolve => setTimeout(resolve, 2000));
@@ -2252,38 +2099,32 @@
       }
     }
 
-    async function fixBuildingAssignmentsAuto() {
+    async function fixBuildingAssignments(showAlert = false) {
+      if (!sbClient) {
+        console.error('⚠️ Supabase not available for fixing buildings');
+        return;
+      }
+
+      console.log('🔧 Fixing building assignments based on unit numbers...');
+
       try {
-        console.log('🔧 Fixing building assignments based on unit numbers...');
+        // Get all units
+        const { data: allUnits, error } = await sbClient
+          .from('units')
+          .select('id, unit_number, building_id')
+          .order('unit_number', { ascending: true });
 
-        // Get all units via REST API
-        const unitsRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/units?select=id,unit_number,building_id`,
-          {
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`
-            }
-          }
-        );
-        const allUnits = unitsRes.ok ? await unitsRes.json() : [];
+        if (error) throw error;
 
-        // Get all buildings via REST API
-        const buildingsRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/buildings?select=id,name`,
-          {
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`
-            }
-          }
-        );
-        const buildings = buildingsRes.ok ? await buildingsRes.json() : [];
+        // Get all buildings
+        const { data: buildings } = await sbClient.from('buildings').select('id, name');
         const buildingMap = new Map((buildings || []).map(b => [b.name, b.id]));
+
+        console.log('🏢 Buildings map:', Object.fromEntries(buildingMap));
 
         let updateCount = 0;
 
-        // Determine building from unit_number prefix and fix mismatches
+        // Determine building from unit_number prefix
         for (const unit of allUnits || []) {
           let expectedBuilding = null;
 
@@ -2301,362 +2142,38 @@
           const expectedBuildingId = buildingMap.get(expectedBuilding);
 
           if (expectedBuildingId && unit.building_id !== expectedBuildingId) {
-            console.log(`🔄 Fixing ${unit.unit_number}: → ${expectedBuilding}`);
-            await fetch(
-              `${SUPABASE_URL}/rest/v1/units?id=eq.${unit.id}`,
-              {
-                method: 'PATCH',
-                headers: {
-                  'apikey': SUPABASE_KEY,
-                  'Authorization': `Bearer ${SUPABASE_KEY}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ building_id: expectedBuildingId })
-              }
-            );
+            console.log(`🔄 Fixing unit ${unit.unit_number}: ${unit.building_id} → ${expectedBuildingId} (${expectedBuilding})`);
+            await sbClient.from('units').update({ building_id: expectedBuildingId }).eq('id', unit.id);
             updateCount++;
           }
         }
 
-        console.log(`✅ Fixed ${updateCount} units`);
+        if (updateCount > 0) {
+          console.log(`✅ Fixed ${updateCount} unit building assignments`);
+        } else {
+          console.log('✅ All units have correct building assignments');
+        }
 
-        // Reload data to show updated counts
-        await loadData();
-        renderUnits();
-        updateMetrics();
-        updateCharts();
-        setupBuildingButtons();
-
-        alert(`✅ Fixed ${updateCount} units. Building counts updated!`);
+        // Only reload UI if called manually (showAlert = true)
+        if (showAlert) {
+          await loadData();
+          renderUnits();
+          updateMetrics();
+          updateCharts();
+          setupBuildingButtons();
+          alert(`✅ Fixed ${updateCount} units. Changes applied!`);
+        }
       } catch (err) {
-        console.error('❌ Error:', err);
-        alert('Error: ' + err.message);
+        console.error('❌ Error fixing buildings:', err);
+        if (showAlert) {
+          alert('Error fixing buildings: ' + err.message);
+        }
       }
     }
 
     function updateLastUpdated() {
-      const now = new Date();
-      const date = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-      document.getElementById('lastUpdated').textContent = `Last updated: ${date} ${time}`;
-    }
-
-    // ===== PROJECT SETUP =====
-    let setupBuildingCount = 0;
-
-    function promptSetupPassword() {
-      const password = prompt('🔐 Enter admin password to access Project Setup:');
-      if (password === null) return; // User cancelled
-      if (password === '3010') {
-        openProjectSetup();
-      } else {
-        alert('❌ Incorrect password. Access denied.');
-      }
-    }
-
-    async function openProjectSetup() {
-      setupBuildingCount = 0;
-      const setupList = document.getElementById('setupBuildingsList');
-      setupList.innerHTML = '<div style="padding:12px;text-align:center;color:#6B7280;font-size:13px;">⏳ Loading from Supabase...</div>';
-      document.getElementById('projectSetupModal').style.display = 'flex';
-
-      // Pre-fill connection fields from current config
-      document.getElementById('setupSupabaseUrl').value = SUPABASE_URL;
-      document.getElementById('setupSupabaseKey').value = SUPABASE_KEY;
-      document.getElementById('setupProjectId').value = PROJECT_ID;
-
-      try {
-        const hdrs = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
-
-        // Load buildings from Supabase
-        const bldgRes = await proxyFetch(`${SUPABASE_URL}/rest/v1/buildings?project_id=eq.${PROJECT_ID}`, { headers: hdrs, mode: 'cors' });
-        const buildings = await bldgRes.json();
-
-        // Load units to count actual floors and units per floor per building
-        const unitsRes = await proxyFetch(`${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}&select=id,unit_number,floor,building_id`, { headers: hdrs, mode: 'cors' });
-        const allUnits = await unitsRes.json();
-
-        // Load unit_systems_status to detect which systems are active per building
-        // Use unit_ids from this project's units to filter (project_id may not exist on this table)
-        const unitIds = allUnits.map(u => u.id);
-        let allUSS = [];
-        if (unitIds.length > 0) {
-          // Filter by unit_id using in() — avoids needing project_id on uss table
-          const ussRes = await proxyFetch(
-            `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=in.(${unitIds.slice(0,50).map(id => `"${id}"`).join(',')})&select=unit_id,system_id`,
-            { headers: hdrs, mode: 'cors' }
-          );
-          if (ussRes.ok) allUSS = await ussRes.json();
-        }
-
-        // Map unit_id -> building_id via allUnits
-        const unitIdToBuildingId = {};
-        allUnits.forEach(u => { unitIdToBuildingId[u.id] = u.building_id; });
-
-        // Collect distinct systems per building_id
-        const systemsByBuilding = {}; // building_id -> Set of system names
-        allUSS.forEach(row => {
-          const bId = unitIdToBuildingId[row.unit_id];
-          if (!bId) return;
-          if (!systemsByBuilding[bId]) systemsByBuilding[bId] = new Set();
-          systemsByBuilding[bId].add(row.system_id);
-        });
-
-        // Group units by building_id
-        const unitsByBuilding = {};
-        allUnits.forEach(u => {
-          if (!unitsByBuilding[u.building_id]) unitsByBuilding[u.building_id] = [];
-          unitsByBuilding[u.building_id].push(u);
-        });
-
-        setupList.innerHTML = '';
-        buildings.forEach(b => {
-          const bUnits = unitsByBuilding[b.id] || [];
-          const isSpecial = bUnits.length === 1 || (bUnits.length > 0 && bUnits.every(u => u.floor === 'Ground'));
-          // Active systems: null = all, array = specific ones
-          const activeSystems = systemsByBuilding[b.id] ? [...systemsByBuilding[b.id]] : null;
-          if (isSpecial) {
-            addSetupBuilding({ name: b.name, type: 'special', enabled: true, activeSystems });
-          } else {
-            // Infer floors and units/floor from actual units
-            const floorGroups = {};
-            bUnits.forEach(u => { if (!floorGroups[u.floor]) floorGroups[u.floor] = 0; floorGroups[u.floor]++; });
-            const floors = Object.keys(floorGroups).length || b.floors || 3;
-            const unitsPerFloor = Object.values(floorGroups)[0] || b.units_per_floor || 10;
-            // Infer prefix from first unit number
-            const firstUnit = [...bUnits].sort((a,b) => a.unit_number.localeCompare(b.unit_number))[0];
-            const prefix = firstUnit ? firstUnit.unit_number.charAt(0) : String(buildings.indexOf(b) + 1);
-            addSetupBuilding({ name: b.name, floors, unitsPerFloor, prefix, type: 'residential', activeSystems });
-          }
-        });
-
-        if (buildings.length === 0) {
-          // Fallback if no buildings in Supabase yet
-          addSetupBuilding({ name: 'Building 1', floors: 3, unitsPerFloor: 10, prefix: '1', type: 'residential' });
-        }
-
-      } catch (err) {
-        console.error('openProjectSetup error:', err);
-        setupList.innerHTML = '<div style="padding:12px;color:#DC2626;font-size:13px;">❌ Error loading from Supabase. Check connection settings.</div>';
-      }
-
-      document.getElementById('setupProjectName').value = document.querySelector('.logo-text h3')?.textContent || 'Project';
-    }
-
-    function closeProjectSetup() {
-      document.getElementById('projectSetupModal').style.display = 'none';
-    }
-
-    function renderSystemCheckboxes(activeSystems) {
-      // activeSystems = array of system names that are checked; null = all checked
-      return SYSTEMS.map(sys => {
-        const checked = activeSystems === null || activeSystems.includes(sys) ? 'checked' : '';
-        return `<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap;">
-          <input type="checkbox" ${checked} value="${sys}" style="cursor:pointer;"> ${sys}
-        </label>`;
-      }).join('');
-    }
-
-    function addSetupBuilding({ name = '', floors = 3, unitsPerFloor = 10, prefix = '', type = 'residential', enabled = true, activeSystems = null } = {}) {
-      setupBuildingCount++;
-      const id = `setupBuilding_${setupBuildingCount}`;
-      const isSpecial = type === 'special';
-      const div = document.createElement('div');
-      div.id = id;
-      div.dataset.type = type;
-      div.style.cssText = `background:${isSpecial ? '#FFFBEB' : '#F9FAFB'};border:1px solid ${isSpecial ? '#FDE68A' : '#E5E7EB'};border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px;`;
-
-      const systemsHtml = `
-        <div style="border-top:1px solid ${isSpecial ? '#FDE68A' : '#E5E7EB'};padding-top:8px;">
-          <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:6px;">SYSTEMS</label>
-          <div style="display:flex;flex-wrap:wrap;gap:6px 14px;">${renderSystemCheckboxes(activeSystems)}</div>
-        </div>`;
-
-      if (isSpecial) {
-        div.innerHTML = `
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:140px;">
-              <input type="checkbox" ${enabled ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;" title="Include this unit">
-              <div style="flex:1;">
-                <label style="font-size:11px;font-weight:600;color:#92400E;display:block;margin-bottom:3px;">SPECIAL UNIT NAME</label>
-                <input type="text" value="${name}" placeholder="e.g. Clubhouse" style="width:100%;padding:6px;border:1px solid #FCD34D;border-radius:5px;font-size:13px;background:white;">
-              </div>
-            </div>
-            <div style="font-size:12px;color:#92400E;padding:4px 8px;background:#FEF3C7;border-radius:4px;height:fit-content;">Single unit · Ground floor</div>
-            <button onclick="document.getElementById('${id}').remove()" style="padding:6px 10px;background:#FEE2E2;color:#DC2626;border:none;border-radius:5px;cursor:pointer;font-size:13px;height:fit-content;">✕</button>
-          </div>
-          ${systemsHtml}`;
-      } else {
-        const autoPrefix = prefix || String(document.querySelectorAll('#setupBuildingsList > div[data-type="residential"]').length + 1);
-        div.innerHTML = `
-          <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
-            <div style="flex:1;min-width:130px;">
-              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">BUILDING NAME</label>
-              <input type="text" value="${name}" placeholder="e.g. Building 4" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
-            </div>
-            <div style="width:65px;">
-              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">FLOORS</label>
-              <input type="number" value="${floors}" min="1" max="50" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
-            </div>
-            <div style="width:85px;">
-              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">UNITS/FLOOR</label>
-              <input type="number" value="${unitsPerFloor}" min="1" max="99" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
-            </div>
-            <div style="width:55px;">
-              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">PREFIX</label>
-              <input type="text" value="${autoPrefix}" maxlength="3" placeholder="1" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
-            </div>
-            <button onclick="document.getElementById('${id}').remove()" style="padding:6px 10px;background:#FEE2E2;color:#DC2626;border:none;border-radius:5px;cursor:pointer;font-size:13px;">✕</button>
-          </div>
-          ${systemsHtml}`;
-      }
-      document.getElementById('setupBuildingsList').appendChild(div);
-    }
-
-    async function applyProjectSetup() {
-      // Step 0: Apply Supabase connection settings if changed
-      const newUrl = document.getElementById('setupSupabaseUrl').value.trim();
-      const newKey = document.getElementById('setupSupabaseKey').value.trim();
-      const newPid = document.getElementById('setupProjectId').value.trim();
-      if (newUrl) { SUPABASE_URL = newUrl; localStorage.setItem('cfg_supabase_url', newUrl); }
-      if (newKey) { SUPABASE_KEY = newKey; localStorage.setItem('cfg_supabase_key', newKey); }
-      if (newPid) { PROJECT_ID = newPid; localStorage.setItem('cfg_project_id', newPid); }
-
-      const rows = [...document.querySelectorAll('#setupBuildingsList > div')];
-      if (rows.length === 0) { alert('Add at least one building.'); return; }
-
-      const confirmed = confirm('⚠️ WARNING: This will DELETE all existing units and system data in Supabase and recreate them. Continue?');
-      if (!confirmed) return;
-
-      const residentialConfigs = [];
-      const specialConfigs = [];
-
-      rows.forEach(row => {
-        const type = row.dataset.type;
-        const inputs = row.querySelectorAll('input[type="text"], input[type="number"]');
-        const checkboxes = row.querySelectorAll('input[type="checkbox"]');
-        // Systems checkboxes are the last N checkboxes (one per system)
-        const systemCheckboxes = [...checkboxes].filter(cb => SYSTEMS.includes(cb.value));
-        const selectedSystems = systemCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
-
-        if (type === 'special') {
-          const enabledCb = checkboxes[0]; // first checkbox is the enabled toggle
-          const enabled = enabledCb ? enabledCb.checked : true;
-          const nameInput = row.querySelector('input[type="text"]');
-          const name = nameInput ? nameInput.value.trim() : '';
-          if (name && enabled) specialConfigs.push({ name, systems: selectedSystems });
-        } else {
-          const textInputs = row.querySelectorAll('input[type="text"]');
-          const numInputs = row.querySelectorAll('input[type="number"]');
-          const name = textInputs[0] ? textInputs[0].value.trim() : '';
-          const floors = parseInt(numInputs[0]?.value) || 3;
-          const unitsPerFloor = parseInt(numInputs[1]?.value) || 10;
-          const prefix = textInputs[1] ? textInputs[1].value.trim() : String(residentialConfigs.length + 1);
-          if (name) residentialConfigs.push({ name, floors, unitsPerFloor, prefix, systems: selectedSystems });
-        }
-      });
-
-      if (residentialConfigs.length === 0 && specialConfigs.length === 0) {
-        alert('Enter at least one building or special unit.'); return;
-      }
-
-      const btn = document.querySelector('#projectSetupModal button[onclick="applyProjectSetup()"]');
-      try {
-        btn.textContent = '⏳ Working...';
-        btn.disabled = true;
-
-        const hdrs = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
-        const jsonHdrs = { ...hdrs, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
-
-        // Step 1: Get existing buildings from Supabase
-        const bldgRes = await fetch(`${SUPABASE_URL}/rest/v1/buildings?project_id=eq.${PROJECT_ID}`, { headers: hdrs });
-        const existingBuildings = await bldgRes.json();
-        const buildingMap = {}; // name -> id
-        existingBuildings.forEach(b => { buildingMap[b.name] = b.id; });
-
-        // Step 2: Create any missing buildings
-        const allConfigs = [...residentialConfigs, ...specialConfigs];
-        for (let i = 0; i < allConfigs.length; i++) {
-          const cfg = allConfigs[i];
-          if (!buildingMap[cfg.name]) {
-            const ins = await fetch(`${SUPABASE_URL}/rest/v1/buildings`, {
-              method: 'POST', headers: jsonHdrs,
-              body: JSON.stringify([{ name: cfg.name, project_id: PROJECT_ID, building_number: i + 1, floors: cfg.floors || 1, units_per_floor: cfg.unitsPerFloor || 1 }])
-            });
-            const [newB] = await ins.json();
-            buildingMap[cfg.name] = newB.id;
-          }
-        }
-
-        // Step 3: Delete existing units and system statuses
-        await fetch(`${SUPABASE_URL}/rest/v1/unit_systems_status?project_id=eq.${PROJECT_ID}`, { method: 'DELETE', headers: hdrs });
-        await fetch(`${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}`, { method: 'DELETE', headers: hdrs });
-
-        // Step 4: Build new units array
-        const newUnits = [];
-        residentialConfigs.forEach(cfg => {
-          for (let f = 1; f <= cfg.floors; f++) {
-            for (let u = 1; u <= cfg.unitsPerFloor; u++) {
-              newUnits.push({ unit_number: `${cfg.prefix}${f}${String(u).padStart(2, '0')}`, floor: `Floor ${f}`, building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
-            }
-          }
-        });
-        specialConfigs.forEach(cfg => {
-          newUnits.push({ unit_number: cfg.name, floor: 'Ground', building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
-        });
-
-        // Insert units
-        const insRes = await fetch(`${SUPABASE_URL}/rest/v1/units`, {
-          method: 'POST', headers: jsonHdrs,
-          body: JSON.stringify(newUnits)
-        });
-        const inserted = await insRes.json();
-        if (!Array.isArray(inserted)) throw new Error(JSON.stringify(inserted));
-
-        // Step 5: Create unit_systems_status rows for selected systems per building
-        btn.textContent = '⏳ Creating system statuses...';
-        // Build a map: building name -> unit ids
-        const unitsByBuildingName = {};
-        allConfigs.forEach(cfg => { unitsByBuildingName[cfg.name] = []; });
-        inserted.forEach(u => {
-          const buildingEntry = allConfigs.find(cfg => buildingMap[cfg.name] === u.building_id);
-          if (buildingEntry) unitsByBuildingName[buildingEntry.name].push(u.id);
-        });
-
-        // For each building, create system status rows for selected systems
-        const ussRows = [];
-        allConfigs.forEach(cfg => {
-          const systems = cfg.systems && cfg.systems.length > 0 ? cfg.systems : SYSTEMS;
-          (unitsByBuildingName[cfg.name] || []).forEach(unitId => {
-            systems.forEach(sys => {
-              ussRows.push({ unit_id: unitId, system_id: sys, status: 'Not Started', project_id: PROJECT_ID });
-            });
-          });
-        });
-
-        // Insert in batches of 500 to avoid payload limits
-        for (let i = 0; i < ussRows.length; i += 500) {
-          const batch = ussRows.slice(i, i + 500);
-          await fetch(`${SUPABASE_URL}/rest/v1/unit_systems_status`, {
-            method: 'POST', headers: { ...hdrs, 'Content-Type': 'application/json' },
-            body: JSON.stringify(batch)
-          });
-          btn.textContent = `⏳ Systems... ${Math.min(i + 500, ussRows.length)}/${ussRows.length}`;
-        }
-
-        alert(`✅ Done! Created ${inserted.length} units, ${ussRows.length} system status rows across ${residentialConfigs.length} building(s) + ${specialConfigs.length} special unit(s).`);
-        closeProjectSetup();
-        await loadData();
-        renderUnits();
-        updateMetrics();
-        updateCharts();
-        setupFilterUI();
-
-      } catch (err) {
-        alert('❌ Error: ' + err.message);
-      } finally {
-        if (btn) { btn.textContent = '⚠️ Apply & Sync to Supabase'; btn.disabled = false; }
-      }
+      const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      document.getElementById('lastUpdated').textContent = `Last updated: ${now}`;
     }
 
     function setupFilterUI() {
@@ -2952,35 +2469,19 @@
     }
 
     async function deleteUnitFromSupabase(unitId) {
+      if (!sbClient) {
+        console.warn('❌ Supabase client not available for delete');
+        return;
+      }
       try {
         console.log('🗑️ Deleting unit from Supabase:', unitId);
-        // Delete child rows first to avoid FK constraint issues via REST API
-        const headers = {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`
-        };
-
-        await fetch(
-          `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=eq.${unitId}`,
-          { method: 'DELETE', headers }
-        );
-        await fetch(
-          `${SUPABASE_URL}/rest/v1/inspection_events?unit_id=eq.${unitId}`,
-          { method: 'DELETE', headers }
-        );
-        await fetch(
-          `${SUPABASE_URL}/rest/v1/photos?unit_id=eq.${unitId}`,
-          { method: 'DELETE', headers }
-        );
-        const delRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/units?id=eq.${unitId}`,
-          { method: 'DELETE', headers }
-        );
-        if (delRes.ok) {
-          console.log('✅ Unit and related records deleted from Supabase:', unitId);
-        } else {
-          throw new Error('Delete failed');
-        }
+        // Delete child rows first to avoid FK constraint issues
+        await sbClient.from('unit_systems_status').delete().eq('unit_id', unitId);
+        await sbClient.from('inspection_events').delete().eq('unit_id', unitId);
+        await sbClient.from('photos').delete().eq('unit_id', unitId);
+        const { error } = await sbClient.from('units').delete().eq('id', unitId);
+        if (error) throw error;
+        console.log('✅ Unit and related records deleted from Supabase:', unitId);
       } catch (err) {
         console.error('❌ Error deleting from Supabase:', err);
       }
@@ -3251,88 +2752,44 @@
       switchDetailsTab('overview');
       closeAddEventModal();
 
-      // Sync to Supabase via REST API
-      if (unit && unit.id) {
+      // Sync to Supabase
+      if (unit && unit.id && sbClient) {
         (async () => {
           try {
-    
+            const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
 
-            // 1. Delete and insert unit_systems_status via REST API
-            await fetch(
-              `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=eq.${unit.id}&system_id=eq.${system}`,
-              {
-                method: 'DELETE',
-                headers: {
-                  'apikey': SUPABASE_KEY,
-                  'Authorization': `Bearer ${SUPABASE_KEY}`
-                }
-              }
-            );
+            // 1. Sync unit_systems_status
+            await sbClient.from('unit_systems_status').delete().match({ unit_id: unit.id, system_id: system });
+            await sbClient.from('unit_systems_status').insert({
+              unit_id: unit.id,
+              system_id: system,
+              progress: progress,
+              status: status,
+              updated_at: new Date().toISOString()
+            });
 
-            await fetch(
-              `${SUPABASE_URL}/rest/v1/unit_systems_status`,
-              {
-                method: 'POST',
-                headers: {
-                  'apikey': SUPABASE_KEY,
-                  'Authorization': `Bearer ${SUPABASE_KEY}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  unit_id: unit.id,
-                  system_id: system,
-                  progress: progress,
-                  status: status,
-                  updated_at: new Date().toISOString()
-                })
-              }
-            );
-
-            // 2. Insert inspection_event via REST API
-            const sysRes = await fetch(
-              `${SUPABASE_URL}/rest/v1/inspection_systems?project_id=eq.${PROJECT_ID}&select=id,name`,
-              {
-                headers: {
-                  'apikey': SUPABASE_KEY,
-                  'Authorization': `Bearer ${SUPABASE_KEY}`
-                }
-              }
-            );
-            const sysList = sysRes.ok ? await sysRes.json() : [];
-            const sysRow = sysList.find(s => s.name === system);
+            // 2. Insert inspection_event
+            // First resolve system UUID from inspection_systems
+            const { data: sysList } = await sbClient.from('inspection_systems').select('id,name').eq('project_id', PROJECT_ID);
+            const sysRow = sysList ? sysList.find(s => s.name === system) : null;
             const systemUuid = sysRow ? sysRow.id : null;
             if (!systemUuid) console.warn('⚠️ inspection_systems: no UUID found for system name:', system);
 
             let eventId = null;
-            const evRes = await fetch(
-              `${SUPABASE_URL}/rest/v1/inspection_events?select=id`,
-              {
-                method: 'POST',
-                headers: {
-                  'apikey': SUPABASE_KEY,
-                  'Authorization': `Bearer ${SUPABASE_KEY}`,
-                  'Content-Type': 'application/json',
-                  'Prefer': 'return=representation'
-                },
-                body: JSON.stringify({
-                  unit_id: unit.id,
-                  system_id: systemUuid,
-                  event_type: 'inspection',
-                  progress_percent: progress,
-                  status: status,
-                  notes: notes,
-                  inspector_name: 'app_user',
-                  event_date: new Date().toISOString()
-                })
-              }
-            );
-            const evData = evRes.ok ? await evRes.json() : [];
-            if (evData && evData.length > 0) {
-              eventId = evData[0].id;
-              console.log('✅ inspection_event saved', eventId);
-            }
+            const { data: evData, error: evErr } = await sbClient.from('inspection_events').insert({
+              unit_id: unit.id,
+              system_id: systemUuid,
+              event_type: 'inspection',
+              progress_percent: progress,
+              status: status,
+              notes: notes,
+              inspector_name: 'app_user',
+              event_date: new Date().toISOString()
+            }).select('id').single();
+            if (evErr) console.warn('⚠️ inspection_event error:', evErr);
+            else if (evData) { eventId = evData.id; console.log('✅ inspection_event saved', eventId); }
 
-            // 3. Save photos to photos table via REST API
+            // 3. Save photos to photos table
             if (photoBase64.length > 0 && eventId) {
               const photoRows = photoBase64.map((b64, i) => ({
                 project_id: PROJECT_ID,
@@ -3343,20 +2800,9 @@
                 description: `Photo ${i+1} - ${system} inspection`,
                 uploaded_by: 'app_user'
               }));
-              const phRes = await fetch(
-                `${SUPABASE_URL}/rest/v1/photos`,
-                {
-                  method: 'POST',
-                  headers: {
-                    'apikey': SUPABASE_KEY,
-                    'Authorization': `Bearer ${SUPABASE_KEY}`,
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify(photoRows)
-                }
-              );
-              if (phRes.ok) console.log('✅ Photos saved to Supabase:', photoBase64.length);
-              else console.warn('⚠️ Photos save error');
+              const { error: phErr } = await sbClient.from('photos').insert(photoRows);
+              if (phErr) console.warn('⚠️ Photos save error:', phErr);
+              else console.log('✅ Photos saved to Supabase:', photoBase64.length);
             }
 
           } catch(e) {
@@ -4405,7 +3851,7 @@
 
       // Save new photos to Supabase photos table
       if (newPhotos.length > 0 && sbClient && punchItem) {
-
+        const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
         const matchedUnit = data.find(u => u.apt === punchItem.location);
         const photoRows = newPhotos.map((b64, i) => ({
           project_id: PROJECT_ID,
@@ -4416,20 +3862,9 @@
           description: `Punch list photo ${i+1} - ${punchItem.description}`,
           uploaded_by: 'app_user'
         }));
-        const phRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/photos`,
-          {
-            method: 'POST',
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(photoRows)
-          }
-        );
-        if (phRes.ok) console.log('✅ Punch list photos saved to Supabase:', newPhotos.length);
-        else console.warn('⚠️ Punch list photos save error');
+        const { error: phErr } = await sbClient.from('photos').insert(photoRows);
+        if (phErr) console.warn('⚠️ Punch list photos save error:', phErr);
+        else console.log('✅ Punch list photos saved to Supabase:', newPhotos.length);
       }
     }
 
@@ -4658,21 +4093,10 @@
         console.log('Delete confirmed');
 
         // Delete from Supabase if it has an ID
-        if (eventToDelete.id) {
+        if (sbClient && eventToDelete.id) {
           try {
-            const delRes = await fetch(
-              `${SUPABASE_URL}/rest/v1/punch_list?id=eq.${eventToDelete.id}`,
-              {
-                method: 'DELETE',
-                headers: {
-                  'apikey': SUPABASE_KEY,
-                  'Authorization': `Bearer ${SUPABASE_KEY}`
-                }
-              }
-            );
-            if (delRes.ok) {
-              console.log('Deleted from Supabase');
-            }
+            await sbClient.from('punch_list').delete().eq('id', eventToDelete.id);
+            console.log('Deleted from Supabase');
           } catch (err) {
             console.warn('Could not delete from Supabase:', err);
           }
@@ -4997,19 +4421,11 @@
       `;
     }
 
-    // Initialize on page load with delay to ensure Supabase is loaded
-    function delayedInit() {
-      console.log('🚀 Initializing app...');
-      init().catch(err => console.error('Init error:', err));
-    }
-
+    // Initialize on page load
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => {
-        // Give Supabase script time to load
-        setTimeout(delayedInit, 500);
-      });
+      document.addEventListener('DOMContentLoaded', init);
     } else {
-      setTimeout(delayedInit, 500);
+      init();
     }
   </script>
 </body>
