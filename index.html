@@ -973,6 +973,7 @@
           <input type="file" id="restoreInput" accept=".json" style="display:none" onchange="restoreData(this)">
           <button class="btn btn-warning" onclick="fixBuildingAssignments(true)" title="Fix Building assignments manually">🔧 Fix Buildings</button>
           <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear Data</button>
+          <button class="btn btn-secondary" onclick="promptSetupPassword()" title="Configure project buildings and units (admin only)">⚙️ Project Setup</button>
           <button class="btn btn-primary" onclick="openAddUnitModal()">+ Full Add Unit</button>
           <button class="btn btn-primary" onclick="openQuickAddModal()">📱 Quick Add</button>
         </div>
@@ -1398,6 +1399,64 @@
     </div>
   </div>
 
+    <!-- Project Setup Modal -->
+  <div class="modal" id="projectSetupModal">
+    <div class="modal-content" style="max-width:600px;max-height:90vh;overflow-y:auto;">
+      <div class="modal-header">
+        <h2>⚙️ Project Setup</h2>
+        <button class="close-btn" onclick="closeProjectSetup()">✕</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:20px;">
+        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;font-size:13px;color:#1E40AF;">
+          ♻️ <strong>Replicable:</strong> Change the Supabase URL, Key &amp; Project ID below to deploy this app for a different project. Configure buildings, then click Apply.
+        </div>
+
+        <!-- Supabase Connection (scalable to other projects) -->
+        <details id="supabaseConfigDetails" style="border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;">
+          <summary style="padding:12px 14px;font-size:13px;font-weight:600;cursor:pointer;background:#F9FAFB;list-style:none;display:flex;justify-content:space-between;align-items:center;">
+            🔌 Supabase Connection <span id="supabaseConfigStatus" style="font-size:11px;font-weight:400;color:#6B7280;">▼</span>
+          </summary>
+          <div style="padding:14px;display:flex;flex-direction:column;gap:10px;background:white;">
+            <div>
+              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:4px;">SUPABASE URL</label>
+              <input id="setupSupabaseUrl" type="text" style="width:100%;padding:7px;border:1px solid #D1D5DB;border-radius:5px;font-size:12px;font-family:monospace;" placeholder="https://xxxx.supabase.co">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:4px;">ANON KEY</label>
+              <input id="setupSupabaseKey" type="password" style="width:100%;padding:7px;border:1px solid #D1D5DB;border-radius:5px;font-size:12px;font-family:monospace;" placeholder="eyJhbGci...">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:4px;">PROJECT ID (UUID)</label>
+              <input id="setupProjectId" type="text" style="width:100%;padding:7px;border:1px solid #D1D5DB;border-radius:5px;font-size:12px;font-family:monospace;" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+            </div>
+            <div style="font-size:11px;color:#9CA3AF;">These values are saved in your browser's local storage and applied immediately when you click Apply.</div>
+          </div>
+        </details>
+
+        <div>
+          <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Project Name</label>
+          <input id="setupProjectName" type="text" style="width:100%;padding:8px;border:1px solid #D1D5DB;border-radius:6px;font-size:14px;" placeholder="e.g. Identus 50">
+        </div>
+
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <label style="font-size:13px;font-weight:600;">Buildings & Special Units</label>
+            <div style="display:flex;gap:6px;">
+              <button onclick="addSetupBuilding({type:'special'})" style="font-size:12px;padding:4px 10px;background:#D97706;color:white;border:none;border-radius:6px;cursor:pointer;">+ Special Unit</button>
+              <button onclick="addSetupBuilding()" style="font-size:12px;padding:4px 10px;background:#1E40AF;color:white;border:none;border-radius:6px;cursor:pointer;">+ Building</button>
+            </div>
+          </div>
+          <div id="setupBuildingsList" style="display:flex;flex-direction:column;gap:10px;"></div>
+        </div>
+
+        <div style="display:flex;gap:10px;justify-content:flex-end;padding-top:10px;border-top:1px solid #E5E7EB;">
+          <button onclick="closeProjectSetup()" style="padding:8px 16px;border:1px solid #D1D5DB;background:white;border-radius:6px;cursor:pointer;font-size:14px;">Cancel</button>
+          <button onclick="applyProjectSetup()" style="padding:8px 16px;background:#DC2626;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">⚠️ Apply & Sync to Supabase</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
   function toggleSidebar() {
     const container = document.getElementById('container');
@@ -1408,8 +1467,10 @@
 
   
     // ===== SUPABASE CONFIGURATION =====
-    const SUPABASE_URL = 'https://kihsukzcbohmxovbyisi.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHN1a3pjYm9obXhvdmJ5aXNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjEzMjEsImV4cCI6MjEwNTkzNzMyMX0.91APDO6eQ25ZkdOsBXMj_Uhv0EtkfWULn2N5jEfAGZA';
+    let SUPABASE_URL = localStorage.getItem('cfg_supabase_url') || 'https://kihsukzcbohmxovbyisi.supabase.co';
+    let SUPABASE_KEY = localStorage.getItem('cfg_supabase_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHN1a3pjYm9obXhvdmJ5aXNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjEzMjEsImV4cCI6MjEwNTkzNzMyMX0.91APDO6eQ25ZkdOsBXMj_Uhv0EtkfWULn2N5jEfAGZA';
+    let PROJECT_ID = localStorage.getItem('cfg_project_id') || 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
+    const proxyFetch = (u, o) => fetch(u, o);
 
     let sbClient = null;
 
@@ -1816,7 +1877,6 @@
     async function ensureBuildingsExist() {
       if (!sbClient) return;
       try {
-        const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
         const { data: existingBuildings } = await sbClient
           .from('buildings')
           .select('name')
@@ -1846,8 +1906,6 @@
       }
       try {
         if (!confirm('This will fix building assignments for Clubhouse and Parking. Continue?')) return;
-
-        const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
 
         // Ensure buildings exist
         await ensureBuildingsExist();
@@ -1896,8 +1954,6 @@
         console.warn('⚠️ Supabase not ready for realtime');
         return;
       }
-
-      const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
 
       // Subscribe to unit_systems_status changes (INSERT, UPDATE, DELETE)
       console.log('📡 Subscribing to realtime unit_systems_status updates...');
@@ -1983,7 +2039,6 @@
       }
 
       try {
-        const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
 
         // Step 1: Ensure all buildings exist in Supabase
         await ensureBuildingsExist();
@@ -2232,6 +2287,325 @@
       const now = new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
       document.getElementById('lastUpdated').textContent = `Last updated: ${now}`;
     }
+
+    // ===== PROJECT SETUP =====
+    let setupBuildingCount = 0;
+
+    function promptSetupPassword() {
+      const password = prompt('🔐 Enter admin password to access Project Setup:');
+      if (password === null) return; // User cancelled
+      if (password === '3010') {
+        openProjectSetup();
+      } else {
+        alert('❌ Incorrect password. Access denied.');
+      }
+    }
+
+    async function openProjectSetup() {
+      setupBuildingCount = 0;
+      const setupList = document.getElementById('setupBuildingsList');
+      setupList.innerHTML = '<div style="padding:12px;text-align:center;color:#6B7280;font-size:13px;">⏳ Loading from Supabase...</div>';
+      document.getElementById('projectSetupModal').style.display = 'flex';
+
+      // Pre-fill connection fields from current config
+      document.getElementById('setupSupabaseUrl').value = SUPABASE_URL;
+      document.getElementById('setupSupabaseKey').value = SUPABASE_KEY;
+      document.getElementById('setupProjectId').value = PROJECT_ID;
+
+      try {
+        const hdrs = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
+
+        // Load buildings from Supabase
+        const bldgRes = await proxyFetch(`${SUPABASE_URL}/rest/v1/buildings?project_id=eq.${PROJECT_ID}`, { headers: hdrs, mode: 'cors' });
+        const buildings = await bldgRes.json();
+
+        // Load units to count actual floors and units per floor per building
+        const unitsRes = await proxyFetch(`${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}&select=id,unit_number,floor,building_id`, { headers: hdrs, mode: 'cors' });
+        const allUnits = await unitsRes.json();
+
+        // Load unit_systems_status to detect which systems are active per building
+        // Use unit_ids from this project's units to filter (project_id may not exist on this table)
+        const unitIds = allUnits.map(u => u.id);
+        let allUSS = [];
+        if (unitIds.length > 0) {
+          // Filter by unit_id using in() — avoids needing project_id on uss table
+          const ussRes = await proxyFetch(
+            `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=in.(${unitIds.slice(0,50).map(id => `"${id}"`).join(',')})&select=unit_id,system_id`,
+            { headers: hdrs, mode: 'cors' }
+          );
+          if (ussRes.ok) allUSS = await ussRes.json();
+        }
+
+        // Map unit_id -> building_id via allUnits
+        const unitIdToBuildingId = {};
+        allUnits.forEach(u => { unitIdToBuildingId[u.id] = u.building_id; });
+
+        // Collect distinct systems per building_id
+        const systemsByBuilding = {}; // building_id -> Set of system names
+        allUSS.forEach(row => {
+          const bId = unitIdToBuildingId[row.unit_id];
+          if (!bId) return;
+          if (!systemsByBuilding[bId]) systemsByBuilding[bId] = new Set();
+          systemsByBuilding[bId].add(row.system_id);
+        });
+
+        // Group units by building_id
+        const unitsByBuilding = {};
+        allUnits.forEach(u => {
+          if (!unitsByBuilding[u.building_id]) unitsByBuilding[u.building_id] = [];
+          unitsByBuilding[u.building_id].push(u);
+        });
+
+        setupList.innerHTML = '';
+        buildings.forEach(b => {
+          const bUnits = unitsByBuilding[b.id] || [];
+          const isSpecial = bUnits.length === 1 || (bUnits.length > 0 && bUnits.every(u => u.floor === 'Ground'));
+          // Active systems: null = all, array = specific ones
+          const activeSystems = systemsByBuilding[b.id] ? [...systemsByBuilding[b.id]] : null;
+          if (isSpecial) {
+            addSetupBuilding({ name: b.name, type: 'special', enabled: true, activeSystems });
+          } else {
+            // Infer floors and units/floor from actual units
+            const floorGroups = {};
+            bUnits.forEach(u => { if (!floorGroups[u.floor]) floorGroups[u.floor] = 0; floorGroups[u.floor]++; });
+            const floors = Object.keys(floorGroups).length || b.floors || 3;
+            const unitsPerFloor = Object.values(floorGroups)[0] || b.units_per_floor || 10;
+            // Infer prefix from first unit number
+            const firstUnit = [...bUnits].sort((a,b) => a.unit_number.localeCompare(b.unit_number))[0];
+            const prefix = firstUnit ? firstUnit.unit_number.charAt(0) : String(buildings.indexOf(b) + 1);
+            addSetupBuilding({ name: b.name, floors, unitsPerFloor, prefix, type: 'residential', activeSystems });
+          }
+        });
+
+        if (buildings.length === 0) {
+          // Fallback if no buildings in Supabase yet
+          addSetupBuilding({ name: 'Building 1', floors: 3, unitsPerFloor: 10, prefix: '1', type: 'residential' });
+        }
+
+      } catch (err) {
+        console.error('openProjectSetup error:', err);
+        setupList.innerHTML = '<div style="padding:12px;color:#DC2626;font-size:13px;">❌ Error loading from Supabase. Check connection settings.</div>';
+      }
+
+      document.getElementById('setupProjectName').value = document.querySelector('.logo-text h3')?.textContent || 'Project';
+    }
+
+    function closeProjectSetup() {
+      document.getElementById('projectSetupModal').style.display = 'none';
+    }
+
+    function renderSystemCheckboxes(activeSystems) {
+      // activeSystems = array of system names that are checked; null = all checked
+      return SYSTEMS.map(sys => {
+        const checked = activeSystems === null || activeSystems.includes(sys) ? 'checked' : '';
+        return `<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap;">
+          <input type="checkbox" ${checked} value="${sys}" style="cursor:pointer;"> ${sys}
+        </label>`;
+      }).join('');
+    }
+
+    function addSetupBuilding({ name = '', floors = 3, unitsPerFloor = 10, prefix = '', type = 'residential', enabled = true, activeSystems = null } = {}) {
+      setupBuildingCount++;
+      const id = `setupBuilding_${setupBuildingCount}`;
+      const isSpecial = type === 'special';
+      const div = document.createElement('div');
+      div.id = id;
+      div.dataset.type = type;
+      div.style.cssText = `background:${isSpecial ? '#FFFBEB' : '#F9FAFB'};border:1px solid ${isSpecial ? '#FDE68A' : '#E5E7EB'};border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px;`;
+
+      const systemsHtml = `
+        <div style="border-top:1px solid ${isSpecial ? '#FDE68A' : '#E5E7EB'};padding-top:8px;">
+          <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:6px;">SYSTEMS</label>
+          <div style="display:flex;flex-wrap:wrap;gap:6px 14px;">${renderSystemCheckboxes(activeSystems)}</div>
+        </div>`;
+
+      if (isSpecial) {
+        div.innerHTML = `
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:140px;">
+              <input type="checkbox" ${enabled ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer;" title="Include this unit">
+              <div style="flex:1;">
+                <label style="font-size:11px;font-weight:600;color:#92400E;display:block;margin-bottom:3px;">SPECIAL UNIT NAME</label>
+                <input type="text" value="${name}" placeholder="e.g. Clubhouse" style="width:100%;padding:6px;border:1px solid #FCD34D;border-radius:5px;font-size:13px;background:white;">
+              </div>
+            </div>
+            <div style="font-size:12px;color:#92400E;padding:4px 8px;background:#FEF3C7;border-radius:4px;height:fit-content;">Single unit · Ground floor</div>
+            <button onclick="document.getElementById('${id}').remove()" style="padding:6px 10px;background:#FEE2E2;color:#DC2626;border:none;border-radius:5px;cursor:pointer;font-size:13px;height:fit-content;">✕</button>
+          </div>
+          ${systemsHtml}`;
+      } else {
+        const autoPrefix = prefix || String(document.querySelectorAll('#setupBuildingsList > div[data-type="residential"]').length + 1);
+        div.innerHTML = `
+          <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+            <div style="flex:1;min-width:130px;">
+              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">BUILDING NAME</label>
+              <input type="text" value="${name}" placeholder="e.g. Building 4" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
+            </div>
+            <div style="width:65px;">
+              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">FLOORS</label>
+              <input type="number" value="${floors}" min="1" max="50" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
+            </div>
+            <div style="width:85px;">
+              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">UNITS/FLOOR</label>
+              <input type="number" value="${unitsPerFloor}" min="1" max="99" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
+            </div>
+            <div style="width:55px;">
+              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">PREFIX</label>
+              <input type="text" value="${autoPrefix}" maxlength="3" placeholder="1" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
+            </div>
+            <button onclick="document.getElementById('${id}').remove()" style="padding:6px 10px;background:#FEE2E2;color:#DC2626;border:none;border-radius:5px;cursor:pointer;font-size:13px;">✕</button>
+          </div>
+          ${systemsHtml}`;
+      }
+      document.getElementById('setupBuildingsList').appendChild(div);
+    }
+
+    async function applyProjectSetup() {
+      // Step 0: Apply Supabase connection settings if changed
+      const newUrl = document.getElementById('setupSupabaseUrl').value.trim();
+      const newKey = document.getElementById('setupSupabaseKey').value.trim();
+      const newPid = document.getElementById('setupProjectId').value.trim();
+      if (newUrl) { SUPABASE_URL = newUrl; localStorage.setItem('cfg_supabase_url', newUrl); }
+      if (newKey) { SUPABASE_KEY = newKey; localStorage.setItem('cfg_supabase_key', newKey); }
+      if (newPid) { PROJECT_ID = newPid; localStorage.setItem('cfg_project_id', newPid); }
+
+      const rows = [...document.querySelectorAll('#setupBuildingsList > div')];
+      if (rows.length === 0) { alert('Add at least one building.'); return; }
+
+      const confirmed = confirm('⚠️ WARNING: This will DELETE all existing units and system data in Supabase and recreate them. Continue?');
+      if (!confirmed) return;
+
+      const residentialConfigs = [];
+      const specialConfigs = [];
+
+      rows.forEach(row => {
+        const type = row.dataset.type;
+        const inputs = row.querySelectorAll('input[type="text"], input[type="number"]');
+        const checkboxes = row.querySelectorAll('input[type="checkbox"]');
+        // Systems checkboxes are the last N checkboxes (one per system)
+        const systemCheckboxes = [...checkboxes].filter(cb => SYSTEMS.includes(cb.value));
+        const selectedSystems = systemCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
+
+        if (type === 'special') {
+          const enabledCb = checkboxes[0]; // first checkbox is the enabled toggle
+          const enabled = enabledCb ? enabledCb.checked : true;
+          const nameInput = row.querySelector('input[type="text"]');
+          const name = nameInput ? nameInput.value.trim() : '';
+          if (name && enabled) specialConfigs.push({ name, systems: selectedSystems });
+        } else {
+          const textInputs = row.querySelectorAll('input[type="text"]');
+          const numInputs = row.querySelectorAll('input[type="number"]');
+          const name = textInputs[0] ? textInputs[0].value.trim() : '';
+          const floors = parseInt(numInputs[0]?.value) || 3;
+          const unitsPerFloor = parseInt(numInputs[1]?.value) || 10;
+          const prefix = textInputs[1] ? textInputs[1].value.trim() : String(residentialConfigs.length + 1);
+          if (name) residentialConfigs.push({ name, floors, unitsPerFloor, prefix, systems: selectedSystems });
+        }
+      });
+
+      if (residentialConfigs.length === 0 && specialConfigs.length === 0) {
+        alert('Enter at least one building or special unit.'); return;
+      }
+
+      const btn = document.querySelector('#projectSetupModal button[onclick="applyProjectSetup()"]');
+      try {
+        btn.textContent = '⏳ Working...';
+        btn.disabled = true;
+
+        const hdrs = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
+        const jsonHdrs = { ...hdrs, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+
+        // Step 1: Get existing buildings from Supabase
+        const bldgRes = await fetch(`${SUPABASE_URL}/rest/v1/buildings?project_id=eq.${PROJECT_ID}`, { headers: hdrs });
+        const existingBuildings = await bldgRes.json();
+        const buildingMap = {}; // name -> id
+        existingBuildings.forEach(b => { buildingMap[b.name] = b.id; });
+
+        // Step 2: Create any missing buildings
+        const allConfigs = [...residentialConfigs, ...specialConfigs];
+        for (let i = 0; i < allConfigs.length; i++) {
+          const cfg = allConfigs[i];
+          if (!buildingMap[cfg.name]) {
+            const ins = await fetch(`${SUPABASE_URL}/rest/v1/buildings`, {
+              method: 'POST', headers: jsonHdrs,
+              body: JSON.stringify([{ name: cfg.name, project_id: PROJECT_ID, building_number: i + 1, floors: cfg.floors || 1, units_per_floor: cfg.unitsPerFloor || 1 }])
+            });
+            const [newB] = await ins.json();
+            buildingMap[cfg.name] = newB.id;
+          }
+        }
+
+        // Step 3: Delete existing units and system statuses
+        await fetch(`${SUPABASE_URL}/rest/v1/unit_systems_status?project_id=eq.${PROJECT_ID}`, { method: 'DELETE', headers: hdrs });
+        await fetch(`${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}`, { method: 'DELETE', headers: hdrs });
+
+        // Step 4: Build new units array
+        const newUnits = [];
+        residentialConfigs.forEach(cfg => {
+          for (let f = 1; f <= cfg.floors; f++) {
+            for (let u = 1; u <= cfg.unitsPerFloor; u++) {
+              newUnits.push({ unit_number: `${cfg.prefix}${f}${String(u).padStart(2, '0')}`, floor: `Floor ${f}`, building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
+            }
+          }
+        });
+        specialConfigs.forEach(cfg => {
+          newUnits.push({ unit_number: cfg.name, floor: 'Ground', building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
+        });
+
+        // Insert units
+        const insRes = await fetch(`${SUPABASE_URL}/rest/v1/units`, {
+          method: 'POST', headers: jsonHdrs,
+          body: JSON.stringify(newUnits)
+        });
+        const inserted = await insRes.json();
+        if (!Array.isArray(inserted)) throw new Error(JSON.stringify(inserted));
+
+        // Step 5: Create unit_systems_status rows for selected systems per building
+        btn.textContent = '⏳ Creating system statuses...';
+        // Build a map: building name -> unit ids
+        const unitsByBuildingName = {};
+        allConfigs.forEach(cfg => { unitsByBuildingName[cfg.name] = []; });
+        inserted.forEach(u => {
+          const buildingEntry = allConfigs.find(cfg => buildingMap[cfg.name] === u.building_id);
+          if (buildingEntry) unitsByBuildingName[buildingEntry.name].push(u.id);
+        });
+
+        // For each building, create system status rows for selected systems
+        const ussRows = [];
+        allConfigs.forEach(cfg => {
+          const systems = cfg.systems && cfg.systems.length > 0 ? cfg.systems : SYSTEMS;
+          (unitsByBuildingName[cfg.name] || []).forEach(unitId => {
+            systems.forEach(sys => {
+              ussRows.push({ unit_id: unitId, system_id: sys, status: 'Not Started', project_id: PROJECT_ID });
+            });
+          });
+        });
+
+        // Insert in batches of 500 to avoid payload limits
+        for (let i = 0; i < ussRows.length; i += 500) {
+          const batch = ussRows.slice(i, i + 500);
+          await fetch(`${SUPABASE_URL}/rest/v1/unit_systems_status`, {
+            method: 'POST', headers: { ...hdrs, 'Content-Type': 'application/json' },
+            body: JSON.stringify(batch)
+          });
+          btn.textContent = `⏳ Systems... ${Math.min(i + 500, ussRows.length)}/${ussRows.length}`;
+        }
+
+        alert(`✅ Done! Created ${inserted.length} units, ${ussRows.length} system status rows across ${residentialConfigs.length} building(s) + ${specialConfigs.length} special unit(s).`);
+        closeProjectSetup();
+        await loadData();
+        renderUnits();
+        updateMetrics();
+        updateCharts();
+        setupFilterUI();
+
+      } catch (err) {
+        alert('❌ Error: ' + err.message);
+      } finally {
+        if (btn) { btn.textContent = '⚠️ Apply & Sync to Supabase'; btn.disabled = false; }
+      }
+    }
+
 
     function setupFilterUI() {
       document.getElementById('buildingFilters').innerHTML = BUILDINGS.map(b => `
@@ -2889,7 +3263,6 @@
       if (unit && unit.id && sbClient) {
         (async () => {
           try {
-            const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
 
             // 1. Sync unit_systems_status
             await sbClient.from('unit_systems_status').delete().match({ unit_id: unit.id, system_id: system });
