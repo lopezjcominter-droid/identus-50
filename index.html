@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>Identus 50</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700&display=swap">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
@@ -887,6 +889,35 @@
         max-height: 90vh !important;
         overflow-y: auto !important;
       }
+    }
+
+    /* ===== Responsive: iPhone / iPad / Web ===== */
+    html { -webkit-text-size-adjust: 100%; }
+    body { overflow-x: hidden; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+    .chart-container { min-width: 0; }
+    .chart-container canvas { max-width: 100%; }
+    @media (max-width: 1200px) {
+      .charts-section, .charts-row { grid-template-columns: 1fr 1fr; gap: 16px; }
+      .charts-section .chart-container:last-child:nth-child(odd),
+      .charts-row .chart-container:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    }
+    @media (max-width: 700px) {
+      .charts-section, .charts-row { grid-template-columns: 1fr; gap: 14px; margin-bottom: 14px; }
+      .chart-container, .charts-section .chart-container, .charts-row .chart-container { height: 270px; padding: 14px; }
+      .chart-title { font-size: 14px; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 900px) {
+      input, select, textarea { font-size: 16px !important; }
+      .btn, .btn-small, .btn-xs { min-height: 36px; }
+      .modal-content { max-width: 100% !important; }
+      .photo-grid { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
+      .header-actions { width: 100%; }
+      #unitsCounter { white-space: normal; }
+      .content { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+    }
+    @media (max-width: 480px) {
+      .modal-content { padding-bottom: calc(20px + env(safe-area-inset-bottom)) !important; }
     }
   </style>
 </head>
@@ -3262,6 +3293,20 @@
       if (closedEl) closedEl.textContent = closedCount;
     }
 
+
+    (function () {
+      let lastBp = window.innerWidth < 700 ? 'sm' : window.innerWidth < 1200 ? 'md' : 'lg', t;
+      const onResize = () => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+          const bp = window.innerWidth < 700 ? 'sm' : window.innerWidth < 1200 ? 'md' : 'lg';
+          if (bp !== lastBp) { lastBp = bp; try { updateCharts(); } catch (e) {} }
+        }, 250);
+      };
+      window.addEventListener('resize', onResize);
+      window.addEventListener('orientationchange', onResize);
+    })();
+
     function updateCharts() {
       const filtered = data.filter(shouldShowUnit);
       console.log('updateCharts: filtered units =', filtered.length, 'total units =', data.length);
@@ -3314,7 +3359,7 @@
             legend: {
               position: 'right',
               labels: {
-                font: { size: 12, weight: '600' },
+                font: { size: window.innerWidth < 700 ? 10 : 12, weight: '600' },
                 color: '#475569',
                 padding: 16,
                 usePointStyle: true,
@@ -3439,7 +3484,7 @@
             },
             datalabels: {
               color: '#FFFFFF',
-              font: { weight: 'bold', size: 16 },
+              font: { weight: 'bold', size: window.innerWidth < 700 ? 12 : 16 },
               formatter: function(value) { return value + '%'; }
             }
           }
@@ -3586,7 +3631,7 @@
             x: { stacked: true, grid: { color: 'rgba(226, 232, 240, 0.5)' } },
             y: { stacked: true }
           },
-          plugins: { legend: { position: 'top', labels: { font: { size: 12, weight: '600' }, padding: 12 } } }
+          plugins: { legend: { position: 'top', labels: { font: { size: window.innerWidth < 700 ? 10 : 12, weight: '600' }, padding: 12 } } }
         }
       });
 
@@ -3623,7 +3668,7 @@
             x: { stacked: true, grid: { color: 'rgba(226, 232, 240, 0.5)' } },
             y: { stacked: true }
           },
-          plugins: { legend: { position: 'top', labels: { font: { size: 12, weight: '600' }, padding: 12 } } }
+          plugins: { legend: { position: 'top', labels: { font: { size: window.innerWidth < 700 ? 10 : 12, weight: '600' }, padding: 12 } } }
         }
       });
 
@@ -3759,7 +3804,7 @@
                 legend: {
                   position: 'bottom',
                   labels: {
-                    font: { size: 12, weight: '600' },
+                    font: { size: window.innerWidth < 700 ? 10 : 12, weight: '600' },
                     color: '#475569',
                     padding: 16,
                     usePointStyle: true,
