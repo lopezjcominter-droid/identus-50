@@ -4057,7 +4057,15 @@
     })();
 
     function updateCharts() {
-      const filtered = data.filter(shouldShowUnit);
+      // If no units pass the filter but data exists, rebuild filters from actual data
+      let filtered = data.filter(shouldShowUnit);
+      if (filtered.length === 0 && data.length > 0) {
+        const realBuildings = [...new Set(data.map(u => u.building).filter(Boolean))];
+        const realFloors = [...new Set(data.map(u => u.floor).filter(Boolean))];
+        realBuildings.forEach(n => filters.buildings.add(n));
+        realFloors.forEach(n => filters.floors.add(n));
+        filtered = data.filter(shouldShowUnit);
+      }
       console.log('updateCharts: filtered units =', filtered.length, 'total units =', data.length);
 
       const statusCounts = { Completed: 0, 'In Progress': 0, 'At Risk': 0, Behind: 0 };
