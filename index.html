@@ -919,6 +919,10 @@
     @media (max-width: 480px) {
       .modal-content { padding-bottom: calc(20px + env(safe-area-inset-bottom)) !important; }
     }
+      /* Header: keep "Last updated" on one line (AM/PM never wraps) and give the sync icon room */
+    .header { gap: 24px; }
+    .header-left { flex-shrink: 0; margin-right: 12px; }
+    .header-actions { flex-wrap: wrap; flex: 1; justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -970,7 +974,7 @@
           <button class="hamburger-btn" onclick="toggleSidebar()" title="Menu">☰</button>
           <div class="header-left">
             <h1>QA/QC Inspection System</h1>
-            <p style="display:flex;align-items:center;gap:8px;margin:0;"><span id="lastUpdated">Last updated: just now</span><button id="syncBtn" onclick="manualSync()" title="Sync / Actualizar" aria-label="Sync" style="background:none;border:1px solid #D1D5DB;border-radius:6px;cursor:pointer;padding:3px 6px;line-height:0;color:#0B5394;"><svg id="syncIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-15.5-6.2L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15.5 6.2L21 16"/><path d="M16 16h5v5"/></svg></button></p>
+            <p style="display:flex;align-items:center;gap:12px;margin:0;"><span id="lastUpdated" style="white-space:nowrap;">Last updated: just now</span><button id="syncBtn" onclick="manualSync()" title="Sync / Actualizar" aria-label="Sync" style="background:none;border:1px solid #D1D5DB;border-radius:6px;cursor:pointer;padding:3px 6px;line-height:0;color:#0B5394;"><svg id="syncIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-15.5-6.2L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15.5 6.2L21 16"/><path d="M16 16h5v5"/></svg></button></p>
           </div>
         </div>
         <div class="header-actions">
