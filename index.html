@@ -935,6 +935,7 @@
       <div style="margin: 0 0 20px; padding: 10px 12px; background: #F3F4F6; border-radius: 8px;">
         <div id="projectNameLabel" style="font-size: 14px; font-weight: 700; color: #111827;"></div>
         <div id="projectAddressLabel" style="font-size: 11px; color: #6B7280; margin-top: 2px;"></div>
+        <div id="userLabel" style="font-size: 11px; color: #6B7280; margin-top: 6px;"></div>
       </div>
 
       <div class="filter-group" style="margin-bottom: 20px;">
@@ -974,6 +975,8 @@
         </div>
         <div class="header-actions">
           <button class="btn btn-secondary" onclick="backupData()">💾 Backup</button>
+          <button class="btn btn-secondary" onclick="exportExcel()">📊 Export Excel</button>
+          <button class="btn btn-secondary" onclick="generateClientReport()">📄 Client Report</button>
           <button class="btn btn-secondary" onclick="document.getElementById('restoreInput').click()">📂 Restore</button>
           <input type="file" id="restoreInput" accept=".json" style="display:none" onchange="restoreData(this)">
           <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear Data</button>
@@ -3278,10 +3281,18 @@
       o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;';
       o.innerHTML = `<img src="${src}" style="max-width:95vw;max-height:80vh;border-radius:8px;">
         <div style="display:flex;gap:10px;">
-          <a href="${src}" download="photo_${Date.now()}.jpg" style="background:#0B5394;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:600;font-size:14px;">⬇ Download</a>
+          <button type="button" id="pfDl" style="background:#0B5394;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;font-size:14px;cursor:pointer;">⬇ Download</button>
           <button type="button" id="pfClose" style="background:#F3F4F6;color:#111827;border:none;padding:10px 20px;border-radius:6px;font-weight:600;font-size:14px;cursor:pointer;">Close</button>
         </div>`;
       o.querySelector('#pfClose').onclick = () => o.remove();
+      o.querySelector('#pfDl').onclick = async () => {
+        try {
+          const b = await (await fetch(src)).blob();
+          const u = URL.createObjectURL(b);
+          const a = document.createElement('a'); a.href = u; a.download = `photo_${Date.now()}.jpg`; a.click();
+          setTimeout(() => URL.revokeObjectURL(u), 2000);
+        } catch (e) { window.open(src, '_blank'); }
+      };
       o.addEventListener('click', e => { if (e.target === o) o.remove(); });
       document.body.appendChild(o);
     }
@@ -3314,7 +3325,7 @@
         });
         html += `
           <div class="event-item">
-            <div class="event-time">${date}</div>
+            <div class="event-time">${date}${event.by ? ' · 👤 ' + event.by : ''}</div>
             <div class="event-notes">${event.notes}</div>
             ${event.photos > 0 ? `<div class="event-photos">📸 ${event.photos} photo(s)</div>` : ''}
             ${(event.images || []).map((b, ii) => `<span style="position:relative;display:inline-block;margin:4px 4px 0 0;"><img src="${b}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;cursor:pointer;display:block;" onclick="openPhotoFull(this.src)">${photoXBtn(`deleteUnitPhoto(${JSON.stringify(system).replace(/"/g, '&quot;')},${evI},${ii})`)}</span>`).join('')}
@@ -3408,9 +3419,61 @@
     }
 
     // Read and compress photos as base64
-    async function readAndCompressPhotos(files, quality = 0.6) {
-      return Promise.all(files.map(f => compressImage(f, quality)));
+    // ===== Photo storage (Supabase Storage bucket; falls back to embedded image if unavailable) =====
+    const STORAGE_BUCKET = 'identus-files';
+    let storageOk = true;
+    async function uploadToStorage(dataUrl, path, contentType) {
+      if (!storageOk || !sbClient) return dataUrl;
+      try {
+        const blob = await (await fetch(dataUrl)).blob();
+        const { error } = await sbClient.storage.from(STORAGE_BUCKET).upload(path, blob, { contentType: contentType || blob.type || 'image/jpeg', upsert: true });
+        if (error) { console.warn('Storage upload failed, keeping embedded photo:', error.message); storageOk = false; return dataUrl; }
+        return sbClient.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+      } catch (e) { console.warn('Storage error', e); storageOk = false; return dataUrl; }
     }
+    async function readAndCompressPhotos(files, quality = 0.6) {
+      const base64s = await Promise.all(files.map(f => compressImage(f, quality)));
+      const stamp = Date.now();
+      return Promise.all(base64s.map((b, i) => uploadToStorage(b, `photos/${PROJECT_ID}/${stamp}_${i}_${Math.random().toString(36).slice(2, 7)}.jpg`, 'image/jpeg')));
+    }
+
+    // ===== Who made the change =====
+    function getUserName() { return localStorage.getItem('cfg_user_name') || ''; }
+    function askText(title, placeholder) {
+      return new Promise(resolve => {
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:100000;padding:16px;';
+        ov.innerHTML = `<form style="background:#fff;border-radius:12px;padding:20px;width:100%;max-width:340px;box-shadow:0 10px 30px rgba(0,0,0,.3);">
+          <div style="font-size:15px;font-weight:700;margin-bottom:12px;color:#111827;">${title}</div>
+          <input type="text" placeholder="${placeholder}" style="width:100%;padding:10px;border:1px solid #D1D5DB;border-radius:6px;font-size:15px;margin-bottom:14px;box-sizing:border-box;">
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button type="button" data-c style="padding:8px 14px;border:1px solid #D1D5DB;background:#fff;border-radius:6px;cursor:pointer;">Cancel</button>
+            <button type="submit" style="padding:8px 14px;border:none;background:#1E40AF;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">Save</button>
+          </div></form>`;
+        document.body.appendChild(ov);
+        const inp = ov.querySelector('input'); inp.value = getUserName(); inp.focus();
+        const done = v => { ov.remove(); resolve(v); };
+        ov.querySelector('form').addEventListener('submit', e => { e.preventDefault(); done(inp.value.trim()); });
+        ov.querySelector('[data-c]').addEventListener('click', () => done(null));
+      });
+    }
+    async function ensureUserName() {
+      let n = getUserName();
+      if (!n) {
+        n = await askText('👤 Your name (saved with every update you make)', 'e.g. John Smith');
+        if (n) localStorage.setItem('cfg_user_name', n);
+      }
+      return n || 'Unknown';
+    }
+    async function changeUserName() {
+      const n = await askText('👤 Your name (saved with every update you make)', 'e.g. John Smith');
+      if (n) { localStorage.setItem('cfg_user_name', n); updateUserLabel(); }
+    }
+    function updateUserLabel() {
+      const el = document.getElementById('userLabel');
+      if (el) el.innerHTML = `👤 ${getUserName() || 'No name set'} · <a href="#" onclick="changeUserName();return false;" style="color:#1E40AF;">change</a>`;
+    }
+    window.addEventListener('DOMContentLoaded', updateUserLabel);
 
     async function saveEvent(event) {
       event.preventDefault();
@@ -3421,6 +3484,7 @@
       const status = document.getElementById('eventStatus').value;
       const notes = document.getElementById('eventNotes').value || `Inspection - ${progress}% complete`;
       const photoFiles = Array.from(document.getElementById('eventPhotos').files);
+      const userBy = await ensureUserName();
 
       // Read and compress photos to medium quality (0.6) before storage
       const photoBase64 = photoFiles.length > 0 ? await readAndCompressPhotos(photoFiles, 0.6) : [];
@@ -3438,7 +3502,8 @@
           photos: photoFiles.length,
           images: photoBase64,
           progress: progress,
-          status: status
+          status: status,
+          by: userBy
         });
       }
 
@@ -3797,8 +3862,9 @@
       const _qu = data.find(u => u.apt === apt);
       if (_qu && !_qu.systems[system]) { alert(system + ' is not applicable to this unit.'); return; }
       const qFiles = Array.from(document.getElementById('quickPhoto').files);
+      const qBy = await ensureUserName();
       const qImages = qFiles.length > 0 ? await readAndCompressPhotos(qFiles, 0.6) : [];
-      const qEvent = { timestamp: new Date().toISOString(), notes: `Quick add - ${progress}% complete`, photos: qFiles.length, images: qImages, progress: progress, status: progress === 100 ? 'Completed' : progress >= 21 ? 'In Progress' : progress >= 1 ? 'At Risk' : 'Behind' };
+      const qEvent = { timestamp: new Date().toISOString(), notes: `Quick add - ${progress}% complete`, photos: qFiles.length, images: qImages, by: qBy, progress: progress, status: progress === 100 ? 'Completed' : progress >= 21 ? 'In Progress' : progress >= 1 ? 'At Risk' : 'Behind' };
 
       // Check if unit already exists (match by apt only if building is empty, or by both)
       const existingUnit = data.find(u => u.apt === apt && (building ? u.building === building : true));
@@ -4460,6 +4526,75 @@
           });
         }
       }
+    }
+
+    // ===== Daily automatic backup (goes to the Storage bucket; embedded photos are left out to keep it small) =====
+    async function autoBackupDaily() {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        if (localStorage.getItem('cfg_last_auto_backup') === today) return;
+        if (!sbClient || !data || data.length === 0) return;
+        const strip = u => ({ ...u, systems: Object.fromEntries(Object.entries(u.systems).map(([k, s]) => [k, { ...s, events: (s.events || []).map(e => ({ ...e, images: (e.images || []).filter(i => !String(i).startsWith('data:')) })) }])) });
+        const backup = { version: 1, exportedAt: new Date().toISOString(), units: data.map(strip), punchlist: (typeof punchlist !== 'undefined' ? punchlist : []) };
+        const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
+        const { error } = await sbClient.storage.from(STORAGE_BUCKET).upload(`backups/${PROJECT_ID}/${today}.json`, blob, { contentType: 'application/json', upsert: true });
+        if (!error) { localStorage.setItem('cfg_last_auto_backup', today); console.log('✅ Daily backup saved'); }
+        else console.warn('Daily backup skipped:', error.message);
+      } catch (e) { console.warn('autoBackupDaily', e); }
+    }
+    window.addEventListener('load', () => setTimeout(autoBackupDaily, 12000));
+
+    function exportExcel() {
+      const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+      const rows = [['Unit', 'Building', 'Floor', 'System', 'Progress %', 'Status', 'Photos', 'Last update', 'Updated by']];
+      data.forEach(u => Object.entries(u.systems).forEach(([sys, s]) => {
+        const ev = (s.events || []);
+        const last = ev.length ? ev[ev.length - 1] : null;
+        rows.push([u.apt, u.building, u.floor, sys, s.progress, s.status, s.photos || 0, last ? new Date(last.timestamp).toLocaleString('en-US') : '', last && last.by ? last.by : '']);
+      }));
+      const csv = '\ufeff' + rows.map(r => r.map(esc).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${getProjectName().replace(/\s+/g, '-')}-progress-${new Date().toISOString().split('T')[0]}.csv`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    function generateClientReport() {
+      const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      let tp = 0, tn = 0; const counts = { Completed: 0, 'In Progress': 0, 'At Risk': 0, Behind: 0 };
+      const byB = {}, bySys = {}; const photos = [];
+      data.forEach(u => {
+        const b = byB[u.building] = byB[u.building] || { units: 0, tp: 0, tn: 0 };
+        b.units++;
+        Object.entries(u.systems).forEach(([sys, s]) => {
+          tp += s.progress; tn++; b.tp += s.progress; b.tn++;
+          counts[progressToStatus(s.progress)]++;
+          const x = bySys[sys] = bySys[sys] || { tp: 0, tn: 0 }; x.tp += s.progress; x.tn++;
+          (s.events || []).forEach(e => (e.images || []).forEach(img => photos.push({ img, t: e.timestamp, u: u.apt, b: u.building, sys, by: e.by })));
+        });
+      });
+      const pct = (a, n) => n ? Math.round(a / n) : 0;
+      photos.sort((a, b) => new Date(b.t) - new Date(a.t));
+      const recent = photos.slice(0, 12);
+      const bar = v => `<div style="background:#E5E7EB;border-radius:4px;height:10px;width:140px;display:inline-block;vertical-align:middle;"><div style="background:#1E40AF;height:10px;border-radius:4px;width:${v}%;"></div></div> ${v}%`;
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(getProjectName())} – Progress Report</title>
+      <style>body{font-family:Arial,sans-serif;color:#111827;max-width:900px;margin:24px auto;padding:0 16px}h1{margin:0}h2{margin-top:28px;border-bottom:2px solid #1E40AF;padding-bottom:4px;font-size:18px}
+      table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:7px 8px;border-bottom:1px solid #E5E7EB;text-align:left}th{background:#F3F4F6}
+      .kpi{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}.kpi div{flex:1;min-width:120px;background:#F3F4F6;border-radius:8px;padding:12px;text-align:center}.kpi b{font-size:22px;display:block}
+      .ph{display:flex;flex-wrap:wrap;gap:10px}.ph figure{margin:0;width:200px;font-size:11px;color:#4B5563}.ph img{width:200px;height:140px;object-fit:cover;border-radius:6px}
+      button{padding:8px 16px;background:#1E40AF;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600}@media print{button{display:none}}</style></head><body>
+      <button onclick="window.print()">Print / Save as PDF</button>
+      <h1>${esc(getProjectName())}</h1><div style="color:#4B5563">${esc(getProjectAddress())}</div>
+      <div style="color:#6B7280;font-size:12px">QA/QC Inspection Progress Report · ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+      <div class="kpi"><div><b>${pct(tp, tn)}%</b>Overall progress</div><div><b>${data.length}</b>Units</div><div><b>${counts.Completed}</b>Completed</div><div><b>${counts['In Progress']}</b>In Progress</div><div><b>${counts['At Risk']}</b>At Risk</div><div><b>${counts.Behind}</b>Behind</div></div>
+      <h2>Progress by building</h2><table><tr><th>Building</th><th>Units</th><th>Progress</th></tr>${Object.entries(byB).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v.units}</td><td>${bar(pct(v.tp, v.tn))}</td></tr>`).join('')}</table>
+      <h2>Progress by system</h2><table><tr><th>System</th><th>Progress</th></tr>${SYSTEMS.filter(s => bySys[s]).map(s => `<tr><td>${esc(s)}</td><td>${bar(pct(bySys[s].tp, bySys[s].tn))}</td></tr>`).join('')}</table>
+      <h2>Recent photos</h2>${recent.length ? `<div class="ph">${recent.map(p => `<figure><img src="${p.img}"><div>${esc(p.b)} · Unit ${esc(p.u)} · ${esc(p.sys)}<br>${new Date(p.t).toLocaleDateString('en-US')}${p.by ? ' · ' + esc(p.by) : ''}</div></figure>`).join('')}</div>` : '<p style="color:#9CA3AF">No photos yet.</p>'}
+      </body></html>`;
+      const w = window.open('', '_blank');
+      if (!w) { alert('Please allow pop-ups for this site to open the report.'); return; }
+      w.document.open(); w.document.write(html); w.document.close();
     }
 
     function backupData() {
