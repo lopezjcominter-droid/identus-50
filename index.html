@@ -1565,6 +1565,7 @@
       btn.style.borderBottomColor = '#0B5394';
     }
 
+    function activeSystemsOf(u) { const k = SYSTEMS.filter(s => u.systems && u.systems[s]); return k.length ? k : SYSTEMS; }
     const SYSTEMS = ['Rough-In', 'Trim-Out', 'Fire-Stop', 'Wiring', 'Electric Panel', 'Testing', 'Data', 'Fire Alarm', 'Lighting'];
     const BUILDINGS = ['Building 1', 'Building 2', 'Building 3', 'Clubhouse', 'Parking'];
     // Note: Clubhouse and Parking are standalone buildings (not sub-units of Building 2)
@@ -1867,6 +1868,7 @@
 
           SYSTEMS.forEach(sys => {
             const sysStatus = statuses.find(s => s.system_id === sys);
+            if (statuses.length > 0 && !sysStatus) return; // system not applicable to this unit
             systems[sys] = {
               progress: sysStatus?.progress || 0,
               status: sysStatus?.status || 'Behind',
@@ -2135,7 +2137,7 @@
             // Insert systems for newly inserted units
             for (const u of unitsWithoutIds) {
               if (!u.id) continue;
-              const systemsToInsert = SYSTEMS.map(sys => ({
+              const systemsToInsert = activeSystemsOf(u).map(sys => ({
                 unit_id: u.id,
                 system_id: sys,
                 progress: u.systems[sys]?.progress || 0,
@@ -2167,7 +2169,7 @@
 
           // Update systems: delete existing rows then re-insert
           await sbClient.from('unit_systems_status').delete().eq('unit_id', u.id);
-          const systemsToInsert = SYSTEMS.map(sys => ({
+          const systemsToInsert = activeSystemsOf(u).map(sys => ({
             unit_id: u.id,
             system_id: sys,
             progress: u.systems[sys]?.progress || 0,
@@ -2376,12 +2378,14 @@
         const unitIds = allUnits.map(u => u.id);
         let allUSS = [];
         if (unitIds.length > 0) {
-          // Filter by unit_id using in() — avoids needing project_id on uss table
-          const ussRes = await proxyFetch(
-            `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=in.(${unitIds.slice(0,50).map(id => `"${id}"`).join(',')})&select=unit_id,system_id`,
-            { headers: hdrs, mode: 'cors' }
-          );
-          if (ussRes.ok) allUSS = await ussRes.json();
+          // Load in chunks so every unit is covered
+          for (let i = 0; i < unitIds.length; i += 50) {
+            const ussRes = await proxyFetch(
+              `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=in.(${unitIds.slice(i, i + 50).map(id => `"${id}"`).join(',')})&select=unit_id,system_id`,
+              { headers: hdrs, mode: 'cors' }
+            );
+            if (ussRes.ok) allUSS.push(...await ussRes.json());
+          }
         }
 
         // Map unit_id -> building_id via allUnits
@@ -2944,7 +2948,7 @@
             <div class="unit-info">${unit.building} • ${unit.floor}</div>
           </div>
           <div class="unit-right">
-            <div class="progress-small">${completedSystems}/${SYSTEMS.length}</div>
+            <div class="progress-small">${completedSystems}/${Object.keys(unit.systems).length}</div>
             <button class="btn-small btn-view" data-apt="${unit.apt}" data-building="${unit.building}" data-floor="${unit.floor}">View</button>
             <button class="btn-small btn-edit" style="background: #3B82F6;" data-apt="${unit.apt}" data-building="${unit.building}" data-floor="${unit.floor}">Edit</button>
             <button class="btn-small btn-delete" style="background: #EF4444;" data-apt="${unit.apt}" data-building="${unit.building}" data-floor="${unit.floor}">Delete</button>
@@ -2981,6 +2985,11 @@
         if (unit.systems[sys]) {
           document.querySelector(`input[data-system="${sys}"][data-field="progress"]`).value = unit.systems[sys].progress;
           document.querySelector(`select[data-system="${sys}"][data-field="status"]`).value = unit.systems[sys].status;
+        } else {
+          // System not applicable to this unit: shown transparent and not editable
+          const g = document.querySelector(`input[data-system="${sys}"][data-field="progress"]`).closest('.form-group');
+          g.style.opacity = '0.35';
+          g.querySelectorAll('input,select').forEach(el => { el.disabled = true; });
         }
       });
 
@@ -3082,7 +3091,12 @@
       let html = '';
 
       if (tab === 'overview') {
-        Object.entries(unit.systems).forEach(([sysName, sysData]) => {
+        SYSTEMS.forEach(sysName => {
+          const sysData = unit.systems[sysName];
+          if (!sysData) {
+            html += `<div class="system-details" style="opacity:0.35;"><div class="system-details-header"><span>${sysName}</span><span style="font-weight:600;">Not applicable</span></div></div>`;
+            return;
+          }
           const statusColor = sysData.status === 'Completed' ? '#22C55E' : sysData.status === 'Behind' ? '#EF4444' : sysData.status === 'At Risk' ? '#F59E0B' : '#3B82F6';
           html += `
             <div class="system-details">
@@ -3107,19 +3121,23 @@
         });
       } else if (tab === 'photos') {
         html = '<div class="system-tabs">';
-        SYSTEMS.forEach((sys, idx) => {
-          html += `<button class="system-tab ${idx === 0 ? 'active' : ''}" onclick="switchPhotoSystem('${sys}')">${sys}</button>`;
+        const firstSys = SYSTEMS.find(s => unit.systems[s]) || SYSTEMS[0];
+        SYSTEMS.forEach(sys => {
+          const na = !unit.systems[sys];
+          html += `<button class="system-tab ${sys === firstSys ? 'active' : ''}" ${na ? 'disabled style="opacity:0.35;cursor:not-allowed;"' : `onclick="switchPhotoSystem('${sys}')"`}>${sys}</button>`;
         });
         html += '</div><div id="photoContent">';
-        html += generatePhotosForSystem(unit, SYSTEMS[0]);
+        html += generatePhotosForSystem(unit, firstSys);
         html += '</div>';
       } else if (tab === 'events') {
         html = '<div class="system-tabs">';
-        SYSTEMS.forEach((sys, idx) => {
-          html += `<button class="system-tab ${idx === 0 ? 'active' : ''}" onclick="switchEventSystem('${sys}')">${sys}</button>`;
+        const firstSys = SYSTEMS.find(s => unit.systems[s]) || SYSTEMS[0];
+        SYSTEMS.forEach(sys => {
+          const na = !unit.systems[sys];
+          html += `<button class="system-tab ${sys === firstSys ? 'active' : ''}" ${na ? 'disabled style="opacity:0.35;cursor:not-allowed;"' : `onclick="switchEventSystem('${sys}')"`}>${sys}</button>`;
         });
         html += '</div><div id="eventContent">';
-        html += generateEventsForSystem(unit, SYSTEMS[0]);
+        html += generateEventsForSystem(unit, firstSys);
         html += '</div>';
       }
 
@@ -3291,6 +3309,12 @@
       if (!currentDetailsUnit) return;
       currentEventUnit = currentDetailsUnit;
       document.getElementById('eventSystem').value = '';
+      [...document.getElementById('eventSystem').options].forEach(o => {
+        if (!o.value) return;
+        const na = !currentEventUnit.systems[o.value];
+        o.disabled = na; o.style.opacity = na ? '0.35' : '';
+        o.textContent = na ? o.value + ' (not applicable)' : o.value;
+      });
       document.getElementById('eventProgress').value = 0;
       document.getElementById('eventStatus').value = 'In Progress';
       document.getElementById('eventNotes').value = '';
@@ -3577,6 +3601,7 @@
 
       const systems = {};
       SYSTEMS.forEach(sys => {
+        if (currentEditingUnit && !currentEditingUnit.systems[sys]) return; // not applicable
         const progress = parseInt(document.querySelector(`input[data-system="${sys}"][data-field="progress"]`).value) || 0;
         const status = document.querySelector(`select[data-system="${sys}"][data-field="status"]`).value;
 
@@ -3674,9 +3699,24 @@
       autoFillQuickUnit(apt);
     }
 
+    function updateQuickSystemOptions(unit) {
+      const sel = document.getElementById('quickSystem');
+      if (!sel) return;
+      [...sel.options].forEach(o => {
+        if (!o.value) return;
+        const na = !!unit && !unit.systems[o.value];
+        o.disabled = na;
+        o.style.opacity = na ? '0.35' : '';
+        o.textContent = na ? o.value + ' (not applicable)' : o.value;
+      });
+      if (sel.value && sel.selectedOptions[0] && sel.selectedOptions[0].disabled) sel.value = '';
+    }
+
     function autoFillQuickUnit(apt) {
+      const unit0 = apt ? data.find(u => u.apt === apt) : null;
+      updateQuickSystemOptions(unit0);
       if (!apt) return;
-      const unit = data.find(u => u.apt === apt);
+      const unit = unit0;
       if (!unit) return;
 
       // Auto-set building and floor (hidden fields)
@@ -3731,6 +3771,8 @@
       let building = document.getElementById('quickBuilding').value;
       if (!building) { const m = data.find(u => u.apt === apt); if (m) building = m.building; }
       if (!apt || !building) { alert('Please select or enter a valid unit and building.'); return; }
+      const _qu = data.find(u => u.apt === apt);
+      if (_qu && !_qu.systems[system]) { alert(system + ' is not applicable to this unit.'); return; }
       const qFiles = Array.from(document.getElementById('quickPhoto').files);
       const qImages = qFiles.length > 0 ? await readAndCompressPhotos(qFiles, 0.6) : [];
       const qEvent = { timestamp: new Date().toISOString(), notes: `Quick add - ${progress}% complete`, photos: qFiles.length, images: qImages, progress: progress, status: progress === 100 ? 'Completed' : progress >= 21 ? 'In Progress' : progress >= 1 ? 'At Risk' : 'Behind' };
@@ -4955,10 +4997,11 @@
       const systemStats = {};
 
       SYSTEMS.forEach(sys => {
-        const allProgress = data.map(u => u.systems[sys].progress);
+        const allProgress = data.filter(u => u.systems[sys]).map(u => u.systems[sys].progress);
+        if (allProgress.length === 0) { systemStats[sys] = { avg: 0, behind: 0 }; return; }
         systemStats[sys] = {
           avg: Math.round(allProgress.reduce((a, b) => a + b) / allProgress.length),
-          behind: data.filter(u => u.systems[sys].status === 'Behind').length
+          behind: data.filter(u => u.systems[sys] && u.systems[sys].status === 'Behind').length
         };
       });
 
@@ -4985,7 +5028,7 @@
 
     function generateTimeline() {
       const output = document.getElementById('reportOutput');
-      const avgProgress = data.reduce((sum, u) => sum + Object.values(u.systems).reduce((s, sys) => s + sys.progress, 0) / SYSTEMS.length, 0) / data.length;
+      const avgProgress = data.reduce((sum, u) => sum + Object.values(u.systems).reduce((s, sys) => s + sys.progress, 0) / Math.max(1, Object.keys(u.systems).length), 0) / data.length;
       const daysRemaining = Math.ceil((100 - avgProgress) / (avgProgress / 30));
 
       output.innerHTML = `
