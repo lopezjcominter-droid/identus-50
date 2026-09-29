@@ -1269,9 +1269,10 @@
             <button type="button" onclick="document.getElementById('quickPhotoFile').click()" class="btn btn-secondary" style="flex:1; font-size:13px;">📁 Choose File</button>
             <button type="button" onclick="document.getElementById('quickPhotoCamera').click()" class="btn btn-secondary" style="flex:1; font-size:13px;">📷 Take Photo</button>
           </div>
-          <input type="file" id="quickPhotoFile" accept="image/*" style="display:none" onchange="quickPhotoSelected(this)">
+          <input type="file" id="quickPhotoFile" multiple accept="image/*" style="display:none" onchange="quickPhotoSelected(this)">
           <input type="file" id="quickPhotoCamera" accept="image/*" capture="environment" style="display:none" onchange="quickPhotoSelected(this)">
           <input type="file" id="quickPhoto" accept="image/*" style="display:none">
+          <div id="quickPhotoThumbs" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;"></div>
           <p id="quickPhotoStatus" style="font-size: 12px; color: #6B7280; margin-top: 6px;">No photo</p>
         </div>
 
@@ -3764,7 +3765,7 @@
       document.getElementById('quickPhoto').value = '';
       document.getElementById('quickPhotoFile').value = '';
       document.getElementById('quickPhotoCamera').value = '';
-      document.getElementById('quickPhotoStatus').textContent = 'No photo';
+      pendingQuickPhotos = []; renderQuickPhotos();
       document.getElementById('quickAddModal').classList.add('show');
       setupQuickUnitAutocomplete();
     }
@@ -3857,19 +3858,33 @@
       document.getElementById('quickAddModal').classList.remove('show');
     }
 
+    let pendingQuickPhotos = [];
     function quickPhotoSelected(input) {
-      if (input.files.length > 0) {
-        // Transfer file to the main quickPhoto input via DataTransfer
-        const dt = new DataTransfer();
-        dt.items.add(input.files[0]);
-        document.getElementById('quickPhoto').files = dt.files;
-        document.getElementById('quickPhotoStatus').textContent = '✓ Photo selected: ' + input.files[0].name;
-      }
+      Array.from(input.files || []).forEach(f => pendingQuickPhotos.push(f));
+      input.value = '';
+      renderQuickPhotos();
     }
-
-    document.getElementById('quickPhoto')?.addEventListener('change', function() {
-      document.getElementById('quickPhotoStatus').textContent = this.files.length > 0 ? '✓ Photo selected' : 'No photo';
-    });
+    function renderQuickPhotos() {
+      const box = document.getElementById('quickPhotoThumbs');
+      if (box) {
+        box.innerHTML = '';
+        pendingQuickPhotos.forEach((f, i) => {
+          const w = document.createElement('div');
+          w.style.cssText = 'position:relative;width:64px;height:64px;';
+          const im = document.createElement('img');
+          im.src = URL.createObjectURL(f);
+          im.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #D1D5DB;';
+          im.onload = () => URL.revokeObjectURL(im.src);
+          const x = document.createElement('button');
+          x.type = 'button'; x.textContent = '×';
+          x.style.cssText = 'position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:none;background:#DC2626;color:#fff;cursor:pointer;line-height:18px;padding:0;font-size:14px;';
+          x.onclick = () => { pendingQuickPhotos.splice(i, 1); renderQuickPhotos(); };
+          w.appendChild(im); w.appendChild(x); box.appendChild(w);
+        });
+      }
+      const n = pendingQuickPhotos.length;
+      document.getElementById('quickPhotoStatus').textContent = n > 0 ? `✓ ${n} photo(s) ready — keep adding, then Save` : 'No photo';
+    }
 
     async function saveQuickUnit(event) {
       event.preventDefault();
@@ -3877,14 +3892,14 @@
       const floor = document.getElementById('quickFloor').value;
       const system = document.getElementById('quickSystem').value;
       const progress = parseInt(document.getElementById('quickProgress').value);
-      const hasPhoto = document.getElementById('quickPhoto').files.length > 0;
+      const hasPhoto = pendingQuickPhotos.length > 0;
 
       let building = document.getElementById('quickBuilding').value;
       if (!building) { const m = data.find(u => u.apt === apt); if (m) building = m.building; }
       if (!apt || !building) { alert('Please select or enter a valid unit and building.'); return; }
       const _qu = data.find(u => u.apt === apt);
       if (_qu && !_qu.systems[system]) { alert(system + ' is not applicable to this unit.'); return; }
-      const qFiles = Array.from(document.getElementById('quickPhoto').files);
+      const qFiles = pendingQuickPhotos.slice();
       const qBy = await ensureUserName();
       const qImages = qFiles.length > 0 ? await readAndCompressPhotos(qFiles, 0.6) : [];
       const qEvent = { timestamp: new Date().toISOString(), notes: `Quick add - ${progress}% complete`, photos: qFiles.length, images: qImages, by: qBy, progress: progress, status: progress === 100 ? 'Completed' : progress >= 21 ? 'In Progress' : progress >= 1 ? 'At Risk' : 'Behind' };
