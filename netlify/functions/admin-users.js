@@ -6,7 +6,7 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const ROLES = ['admin', 'inspector', 'viewer'];
 
 const json = (statusCode, obj) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) });
-const svc = (extra) => ({ apikey: SERVICE_KEY, Authorization: 'Bearer ' + SERVICE_KEY, 'Content-Type': 'application/json', ...(extra || {}) });
+const svc = (extra) => ({ apikey: SERVICE_KEY, Authorizhation: 'Bearer ' + SERVICE_KEY, 'Content-Type': 'application/json', ...(extra || {}) });
 
 async function rest(path, opts) {
   const res = await fetch(SUPABASE_URL + path, opts);
@@ -98,7 +98,7 @@ exports.handler = async (event) => {
       return r.ok ? json(200, { ok: true }) : json(500, { error: 'Could not reset password' });
     }
 
-    return json(400, { error: 'Unknown action' });
+    if (action === 'delete') { if (req.id === myId) return json(400, { error: 'You cannot delete yourself' }); const r = await rest('/auth/v1/admin/users/' + req.id, { method: 'DELETE', headers: svc() }); return r.ok ? json(200, { ok: true }) : json(500, { error: 'Could not delete user' }); }     return json(400, { error: 'Unknown action' });
   } catch (e) {
     return json(500, { error: e.message });
   }
