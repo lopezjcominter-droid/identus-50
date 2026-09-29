@@ -1461,7 +1461,8 @@
 
           const punchPayload = {
             title: event.description,
-            description: event.description,
+            description: event.description + (event.photos && event.photos.length ? '\u0001PHOTOS:' + JSON.stringify(event.photos) : ''),
+            building_id: (data.find(u => u.apt === event.location) || {}).building_id || null,
             priority: event.priority,
             status: event.status,
             assigned_to: event.assignee || null,
@@ -1525,26 +1526,19 @@
             const matchedUnit = data.find(u => u.id === item.unit_id);
             return {
               id: item.id,
-              building: item.building_id || 'Unknown',
+              building: matchedUnit ? matchedUnit.building : ((data.find(u => u.building_id === item.building_id) || {}).building || 'Unknown'),
               location: matchedUnit ? matchedUnit.apt : (item.unit_id || 'N/A'),
-              description: item.title || item.description,
+              description: (item.title || item.description || '').split('\u0001PHOTOS:')[0],
               priority: item.priority || 'Medium',
               status: item.status || 'Open',
               assignee: item.assigned_to || '',
-              photoCount: 0,
-              photos: [],
+              photoCount: (() => { try { return JSON.parse(((item.description || '').split('\u0001PHOTOS:')[1]) || '[]').length; } catch (e) { return 0; } })(),
+              photos: (() => { try { return JSON.parse(((item.description || '').split('\u0001PHOTOS:')[1]) || '[]'); } catch (e) { return []; } })(),
               createdAt: item.created_at,
               reviewedAt: item.reviewed_at || null,
               closedAt: item.closed_at || null
             };
           });
-          try {
-            const { data: phRows } = await sbClient.from('photos').select('photo_url,photo_path').like('photo_path', 'punchlist/%');
-            (phRows || []).forEach(r => {
-              const it = punchlist.find(x => x.id === r.photo_path.split('/')[1]);
-              if (it) { it.photos.push(r.photo_url); it.photoCount = it.photos.length; }
-            });
-          } catch (e) { console.warn('punch photos load failed', e); }
           console.log('✅ Loaded', punchlist.length, 'items from Supabase');
           return;
         }
@@ -3823,6 +3817,12 @@
       document.getElementById('evidencePhotoCount').textContent = 'No photos selected';
     }
 
+    document.getElementById('eventLocation')?.addEventListener('input', function() {
+      const v = this.value.trim().replace(/^unit\s*/i, '');
+      const u = data.find(x => String(x.apt) === v);
+      if (u) document.getElementById('eventBuilding').value = u.building;
+    });
+
     document.getElementById('eventEvidencePhotos')?.addEventListener('change', function() {
       document.getElementById('evidencePhotoCount').textContent = this.files.length > 0 ? `${this.files.length} photo(s) selected` : 'No photos selected';
     });
@@ -3840,6 +3840,7 @@
       const newPhotos = files.length > 0 ? await readAndCompressPhotos(files, 0.6) : [];
 
       let punchItem = null;
+      { const _v = document.getElementById('eventLocation').value.trim().replace(/^unit\s*/i, ''); const _u = data.find(x => String(x.apt) === _v); if (_u) { document.getElementById('eventLocation').value = _u.apt; document.getElementById('eventBuilding').value = _u.building; } }
 
       if (isEditing) {
         const idx = editIdx;
@@ -3880,23 +3881,6 @@
       updateMetrics();
       updateCharts();
 
-      // Save new photos to Supabase photos table
-      if (newPhotos.length > 0 && sbClient && punchItem) {
-        const PROJECT_ID = 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
-        const matchedUnit = data.find(u => u.apt === punchItem.location);
-        const photoRows = newPhotos.map((b64, i) => ({
-          project_id: PROJECT_ID,
-          unit_id: matchedUnit ? matchedUnit.id : null,
-          event_id: null,
-          photo_url: b64,
-          photo_path: `punchlist/${punchItem.id}/photo_${Date.now()}_${i}.jpg`,
-          description: `Punch list photo ${i+1} - ${punchItem.description}`,
-          uploaded_by: 'app_user'
-        }));
-        const { error: phErr } = await sbClient.from('photos').insert(photoRows);
-        if (phErr) console.warn('⚠️ Punch list photos save error:', phErr);
-        else console.log('✅ Punch list photos saved to Supabase:', newPhotos.length);
-      }
     }
 
     function renderPunchlist() {
@@ -4064,7 +4048,7 @@
                 <div style="font-size: 13px; color: #6B7280; margin-bottom: 8px;">📸 ${item.photoCount} photo(s)</div>
                 ${(item.photos && item.photos.length > 0) ? item.photos.map((p, i) => `
                   <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-                    <img src="${p}" style="width:60px; height:60px; object-fit:cover; border-radius:6px; border:1px solid #E5E7EB;" onerror="this.style.display='none'">
+                    <img src="${p}" style="width:120px; height:120px; object-fit:cover; border-radius:6px; border:1px solid #E5E7EB; cursor:pointer;" onclick="openPhotoFull(this.src)" onerror="this.style.display='none'">
                     <a href="${p}" download="photo_${idx}_${i}.jpg" style="font-size:13px; color:#0B5394; text-decoration:none; font-weight:500;">⬇ Download photo ${i+1}</a>
                   </div>
                 `).join('') : '<div style="font-size:13px; color:#9CA3AF;">Photos were uploaded but are not stored locally.</div>'}
