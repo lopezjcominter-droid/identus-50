@@ -929,6 +929,8 @@
         <div class="logo-text">
           <h3>Identus 50</h3>
           <p>QA/QC Inspection</p>
+          <p id="projectNameLabel" style="margin-top:2px;font-weight:600;"></p>
+          <p id="projectAddressLabel" style="margin-top:1px;font-size:11px;"></p>
         </div>
       </div>
 
@@ -1435,7 +1437,12 @@
 
         <div>
           <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Project Name</label>
-          <input id="setupProjectName" type="text" style="width:100%;padding:8px;border:1px solid #D1D5DB;border-radius:6px;font-size:14px;" placeholder="e.g. Identus 50">
+          <input id="setupProjectName" type="text" style="width:100%;padding:8px;border:1px solid #D1D5DB;border-radius:6px;font-size:14px;" placeholder="e.g. Ability Housing">
+        </div>
+
+        <div>
+          <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Project Address</label>
+          <input id="setupProjectAddress" type="text" style="width:100%;padding:8px;border:1px solid #D1D5DB;border-radius:6px;font-size:14px;" placeholder="e.g. 123 Main St, Miami, FL 33130">
         </div>
 
         <div>
@@ -1469,6 +1476,16 @@
     // ===== SUPABASE CONFIGURATION =====
     let SUPABASE_URL = localStorage.getItem('cfg_supabase_url') || 'https://kihsukzcbohmxovbyisi.supabase.co';
     let SUPABASE_KEY = localStorage.getItem('cfg_supabase_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHN1a3pjYm9obXhvdmJ5aXNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjEzMjEsImV4cCI6MjEwNTkzNzMyMX0.91APDO6eQ25ZkdOsBXMj_Uhv0EtkfWULn2N5jEfAGZA';
+    function getProjectName() { return localStorage.getItem('cfg_project_name') || 'Ability Housing'; }
+    function applyProjectName() {
+      const n = getProjectName();
+      const el = document.getElementById('projectNameLabel');
+      if (el) el.textContent = 'Project: ' + n;
+      const ad = document.getElementById('projectAddressLabel');
+      if (ad) { const a = localStorage.getItem('cfg_project_address') || ''; ad.textContent = a ? '📍 ' + a : ''; }
+      document.title = 'Identus 50 – ' + n;
+    }
+    window.addEventListener('DOMContentLoaded', applyProjectName);
     let PROJECT_ID = localStorage.getItem('cfg_project_id') || 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
     const proxyFetch = (u, o) => fetch(u, o);
 
@@ -2387,7 +2404,8 @@
         setupList.innerHTML = '<div style="padding:12px;color:#DC2626;font-size:13px;">❌ Error loading from Supabase. Check connection settings.</div>';
       }
 
-      document.getElementById('setupProjectName').value = document.querySelector('.logo-text h3')?.textContent || 'Project';
+      document.getElementById('setupProjectName').value = getProjectName();
+      document.getElementById('setupProjectAddress').value = localStorage.getItem('cfg_project_address') || '';
     }
 
     function closeProjectSetup() {
@@ -2469,6 +2487,10 @@
       if (newKey) { SUPABASE_KEY = newKey; localStorage.setItem('cfg_supabase_key', newKey); }
       if (newPid) { PROJECT_ID = newPid; localStorage.setItem('cfg_project_id', newPid); }
 
+      const pn = (document.getElementById('setupProjectName').value || '').trim();
+      if (pn) localStorage.setItem('cfg_project_name', pn);
+      localStorage.setItem('cfg_project_address', (document.getElementById('setupProjectAddress').value || '').trim());
+      applyProjectName();
       const rows = [...document.querySelectorAll('#setupBuildingsList > div')];
       if (rows.length === 0) { alert('Add at least one building.'); return; }
 
