@@ -1790,7 +1790,7 @@
           const systems = {};
 
           SYSTEMS.forEach(sys => {
-            const sysStatus = statuses.find(s => s.system_name === sys);
+            const sysStatus = statuses.find(s => s.system_id === sys);
             systems[sys] = {
               progress: sysStatus?.progress || 0,
               status: sysStatus?.status || 'Behind',
@@ -2383,7 +2383,7 @@
         if (unitIds.length > 0) {
           // Filter by unit_id using in() — avoids needing project_id on uss table
           const ussRes = await proxyFetch(
-            `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=in.(${unitIds.slice(0,50).map(id => `"${id}"`).join(',')})&select=unit_id,system_name`,
+            `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=in.(${unitIds.slice(0,50).map(id => `"${id}"`).join(',')})&select=unit_id,system_id`,
             { headers: hdrs, mode: 'cors' }
           );
           if (ussRes.ok) allUSS = await ussRes.json();
@@ -2399,7 +2399,7 @@
           const bId = unitIdToBuildingId[row.unit_id];
           if (!bId) return;
           if (!systemsByBuilding[bId]) systemsByBuilding[bId] = new Set();
-          systemsByBuilding[bId].add(row.system_name);
+          systemsByBuilding[bId].add(row.system_id);
         });
 
         // Group units by building_id
@@ -2629,7 +2629,7 @@
           const systems = cfg.systems && cfg.systems.length > 0 ? cfg.systems : SYSTEMS;
           (unitsByBuildingName[cfg.name] || []).forEach(unitId => {
             systems.forEach(sys => {
-              ussRows.push({ unit_id: unitId, system_name: sys, status: 'Not Started', project_id: PROJECT_ID });
+              ussRows.push({ unit_id: unitId, system_id: sys, status: 'Not Started', project_id: PROJECT_ID });
             });
           });
         });
@@ -3259,7 +3259,7 @@
 
             // 1. Delete and insert unit_systems_status via REST API
             await fetch(
-              `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=eq.${unit.id}&system_name=eq.${system}`,
+              `${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=eq.${unit.id}&system_id=eq.${system}`,
               {
                 method: 'DELETE',
                 headers: {
@@ -3280,7 +3280,7 @@
                 },
                 body: JSON.stringify({
                   unit_id: unit.id,
-                  system_name: system,
+                  system_id: system,
                   progress: progress,
                   status: status,
                   updated_at: new Date().toISOString()
