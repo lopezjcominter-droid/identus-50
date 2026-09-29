@@ -1336,6 +1336,7 @@
           <input type="file" id="eventPhotosFile" multiple accept="image/*" style="display:none" onchange="eventPhotoSelected(this)">
           <input type="file" id="eventPhotosCamera" accept="image/*" capture="environment" style="display:none" onchange="eventPhotoSelected(this)">
           <input type="file" id="eventPhotos" multiple accept="image/*" style="display:none">
+          <div id="photoThumbs" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;"></div>
           <p id="photoCount" style="font-size: 12px; color: #6B7280; margin-top: 6px;">No photos selected</p>
         </div>
 
@@ -3360,7 +3361,8 @@
       const photosCamera = document.getElementById('eventPhotosCamera');
       if (photosFile) photosFile.value = '';
       if (photosCamera) photosCamera.value = '';
-      document.getElementById('photoCount').textContent = 'No photos selected';
+      pendingEventPhotos = []; renderPendingPhotos();
+      const sb = document.querySelector('#addEventModal button[type=submit]'); if (sb) { sb.disabled = false; sb.textContent = 'Save Event'; }
       document.getElementById('addEventModal').classList.add('show');
     }
 
@@ -3376,14 +3378,33 @@
       }
     }
 
+    let pendingEventPhotos = [];
     function eventPhotoSelected(input) {
-      if (input.files.length > 0) {
-        const dt = new DataTransfer();
-        for (let f of input.files) dt.items.add(f);
-        document.getElementById('eventPhotos').files = dt.files;
-        const count = dt.files.length;
-        document.getElementById('photoCount').textContent = `✓ ${count} photo(s) selected: ${input.files[0].name}${count > 1 ? ' ...' : ''}`;
+      Array.from(input.files || []).forEach(f => pendingEventPhotos.push(f));
+      input.value = '';
+      renderPendingPhotos();
+    }
+    function removePendingPhoto(i) { pendingEventPhotos.splice(i, 1); renderPendingPhotos(); }
+    function renderPendingPhotos() {
+      const box = document.getElementById('photoThumbs');
+      if (box) {
+        box.innerHTML = '';
+        pendingEventPhotos.forEach((f, i) => {
+          const w = document.createElement('div');
+          w.style.cssText = 'position:relative;width:64px;height:64px;';
+          const im = document.createElement('img');
+          im.src = URL.createObjectURL(f);
+          im.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #D1D5DB;';
+          im.onload = () => URL.revokeObjectURL(im.src);
+          const x = document.createElement('button');
+          x.type = 'button'; x.textContent = '×';
+          x.style.cssText = 'position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:none;background:#DC2626;color:#fff;cursor:pointer;line-height:18px;padding:0;font-size:14px;';
+          x.onclick = () => removePendingPhoto(i);
+          w.appendChild(im); w.appendChild(x); box.appendChild(w);
+        });
       }
+      const n = pendingEventPhotos.length;
+      document.getElementById('photoCount').textContent = n > 0 ? `✓ ${n} photo(s) ready — keep adding, then Save Event` : 'No photos selected';
     }
 
     function closeAddEventModal() {
@@ -3391,10 +3412,6 @@
       currentEventUnit = null;
     }
 
-    document.getElementById('eventPhotos')?.addEventListener('change', function() {
-      const count = this.files.length;
-      document.getElementById('photoCount').textContent = count > 0 ? `${count} photo(s) selected` : 'No photos selected';
-    });
 
     // ===== PHOTO COMPRESSION UTILITY =====
     // Compresses images to medium quality before storage to reduce database bloat
@@ -3487,8 +3504,10 @@
       const progress = parseInt(document.getElementById('eventProgress').value);
       const status = document.getElementById('eventStatus').value;
       const notes = document.getElementById('eventNotes').value || `Inspection - ${progress}% complete`;
-      const photoFiles = Array.from(document.getElementById('eventPhotos').files);
+      const photoFiles = pendingEventPhotos.slice();
       const userBy = await ensureUserName();
+      const saveBtn = event.submitter || document.querySelector('#addEventModal button[type=submit]');
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
 
       // Read and compress photos to medium quality (0.6) before storage
       const photoBase64 = photoFiles.length > 0 ? await readAndCompressPhotos(photoFiles, 0.6) : [];
