@@ -2031,7 +2031,7 @@
           },
           async (payload) => {
             console.log('🔔 Realtime update received:', payload.eventType, payload.new || payload.old);
-            // Reload all data from Supabase to stay in sync
+            if (isSyncing) return;
             await loadData();
             renderUnits();
             updateMetrics();
@@ -2065,7 +2065,7 @@
           },
           async (payload) => {
             console.log('🔔 Unit change detected:', payload.eventType, payload.new || payload.old);
-            // Reload data when units change (add/update/delete)
+            if (isSyncing) return;
             await loadData();
             renderUnits();
             updateMetrics();
@@ -2360,7 +2360,10 @@
       }
     }
 
+    let isSyncing = false;
     async function manualSync() {
+      if (isSyncing) return;
+      isSyncing = true;
       const icon = document.getElementById('syncIcon');
       if (icon) icon.style.animation = 'syncspin 0.8s linear infinite';
       try {
@@ -2375,6 +2378,7 @@
         alert('Could not sync. Please check your connection.');
       } finally {
         if (icon) icon.style.animation = '';
+        setTimeout(() => { isSyncing = false; }, 3000);
       }
     }
 
