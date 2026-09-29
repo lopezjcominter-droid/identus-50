@@ -2211,8 +2211,8 @@
       }
     }
 
-    function clearAllData() {
-      const pw = prompt('🔐 Enter admin password to clear all data:');
+    async function clearAllData() {
+      const pw = await askPassword('Enter admin password to clear all data');
       if (pw === null) return;
       if (pw !== '3010') { alert('❌ Incorrect password.'); return; }
       if (confirm('Are you sure you want to delete all data? This action cannot be undone.')) {
@@ -2343,8 +2343,29 @@
     // ===== PROJECT SETUP =====
     let setupBuildingCount = 0;
 
-    function promptSetupPassword() {
-      const password = prompt('🔐 Enter admin password to access Project Setup:');
+    // Masked admin-password dialog (input shows dots, not text)
+    function askPassword(title) {
+      return new Promise(resolve => {
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:100000;padding:16px;';
+        ov.innerHTML = `<form style="background:#fff;border-radius:12px;padding:20px;width:100%;max-width:340px;box-shadow:0 10px 30px rgba(0,0,0,.3);">
+          <div style="font-size:15px;font-weight:700;margin-bottom:12px;color:#111827;">🔐 ${title}</div>
+          <input type="password" autocomplete="off" placeholder="Password" style="width:100%;padding:10px;border:1px solid #D1D5DB;border-radius:6px;font-size:15px;margin-bottom:14px;box-sizing:border-box;">
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button type="button" data-c style="padding:8px 14px;border:1px solid #D1D5DB;background:#fff;border-radius:6px;cursor:pointer;">Cancel</button>
+            <button type="submit" style="padding:8px 14px;border:none;background:#1E40AF;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">OK</button>
+          </div></form>`;
+        document.body.appendChild(ov);
+        const inp = ov.querySelector('input');
+        inp.focus();
+        const done = v => { ov.remove(); resolve(v); };
+        ov.querySelector('form').addEventListener('submit', e => { e.preventDefault(); done(inp.value); });
+        ov.querySelector('[data-c]').addEventListener('click', () => done(null));
+      });
+    }
+
+    async function promptSetupPassword() {
+      const password = await askPassword('Enter admin password to access Project Setup');
       if (password === null) return; // User cancelled
       if (password === '3010') {
         openProjectSetup();
