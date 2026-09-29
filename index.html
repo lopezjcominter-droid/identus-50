@@ -3335,7 +3335,7 @@
       charts.status = new Chart(statusCtx, {
         type: 'doughnut',
         data: {
-          labels: ['Completed', 'In Progress', 'At Risk', 'Behind'],
+          labels: ['Completed (100%)', 'In Progress (21–99%)', 'At Risk (1–20%)', 'Behind (0%)'],
           datasets: [{
             data: statusValues,
             backgroundColor: ['#2E7D32', '#1565C0', '#F57C00', '#C62828'],
@@ -3614,10 +3614,10 @@
 
       const buildingLabels = Object.keys(buildingStatus).sort();
       const buildingDatasets = [
-        { label: 'Completed', data: buildingLabels.map(b => buildingStatus[b].Completed), backgroundColor: '#2E7D32' },
-        { label: 'In Progress', data: buildingLabels.map(b => buildingStatus[b]['In Progress']), backgroundColor: '#1565C0' },
-        { label: 'At Risk', data: buildingLabels.map(b => buildingStatus[b]['At Risk']), backgroundColor: '#F57C00' },
-        { label: 'Behind', data: buildingLabels.map(b => buildingStatus[b].Behind), backgroundColor: '#C62828' }
+        { label: 'Completed (100%)', data: buildingLabels.map(b => buildingStatus[b].Completed), backgroundColor: '#2E7D32' },
+        { label: 'In Progress (21–99%)', data: buildingLabels.map(b => buildingStatus[b]['In Progress']), backgroundColor: '#1565C0' },
+        { label: 'At Risk (1–20%)', data: buildingLabels.map(b => buildingStatus[b]['At Risk']), backgroundColor: '#F57C00' },
+        { label: 'Behind (0%)', data: buildingLabels.map(b => buildingStatus[b].Behind), backgroundColor: '#C62828' }
       ];
 
       charts.building = new Chart(buildingCtx, {
@@ -3651,10 +3651,10 @@
 
       const floorLabels = Object.keys(floorStatus).sort();
       const floorDatasets = [
-        { label: 'Completed', data: floorLabels.map(f => floorStatus[f].Completed), backgroundColor: '#2E7D32' },
-        { label: 'In Progress', data: floorLabels.map(f => floorStatus[f]['In Progress']), backgroundColor: '#1565C0' },
-        { label: 'At Risk', data: floorLabels.map(f => floorStatus[f]['At Risk']), backgroundColor: '#F57C00' },
-        { label: 'Behind', data: floorLabels.map(f => floorStatus[f].Behind), backgroundColor: '#C62828' }
+        { label: 'Completed (100%)', data: floorLabels.map(f => floorStatus[f].Completed), backgroundColor: '#2E7D32' },
+        { label: 'In Progress (21–99%)', data: floorLabels.map(f => floorStatus[f]['In Progress']), backgroundColor: '#1565C0' },
+        { label: 'At Risk (1–20%)', data: floorLabels.map(f => floorStatus[f]['At Risk']), backgroundColor: '#F57C00' },
+        { label: 'Behind (0%)', data: floorLabels.map(f => floorStatus[f].Behind), backgroundColor: '#C62828' }
       ];
 
       charts.floor = new Chart(floorCtx, {
