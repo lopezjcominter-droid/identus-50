@@ -1,23 +1,30 @@
-import logo from './logo.svg';
+import React from 'react';
 import './App.css';
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
+    <div className="container">
+      <h1>Identus 50 - QA/QC Dashboard</h1>
+      <div className="card">
+        <h2>Identus 50</h2>
+        <p><strong>Dirección:</strong> 123 Biscayne Ave, Miami, FL</p>
+        <p><strong>Contratista:</strong> Nottos Electrical</p>
+        <p><strong>PM:</strong> Carlos Lopez</p>
+      </div>
+      
+      <h3>Edificios</h3>
+      <div className="grid">
+        <div className="card">
+          <h4>Clubhouse</h4>
+          <p>Pisos: 1</p>
+          <p>Unidades por piso: 1</p>
+        </div>
+        <div className="card">
+          <h4>Parking</h4>
+          <p>Pisos: 1</p>
+          <p>Unidades por piso: 1</p>
+        </div>
+      </div>
     </div>
   );
 }
