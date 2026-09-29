@@ -2591,14 +2591,38 @@
           (Array.isArray(sr) ? sr : []).forEach(r => { if ((r.progress || 0) > 0 || (r.photos || 0) > 0) set.add(r.unit_id); });
           withData += set.size;
         }
+        // Systems per building: compare checked systems vs existing status rows of the units that stay
+        const sysByBuilding = {};
+        [...residentialConfigs, ...specialConfigs].forEach(cfg => {
+          sysByBuilding[cfg.name] = new Set(cfg.systems && cfg.systems.length > 0 ? cfg.systems : SYSTEMS);
+        });
+        const removeIdSet = new Set(removeIds);
+        const keepUnits = exList.filter(u => !removeIdSet.has(u.id));
+        const keepIds = keepUnits.map(u => u.id);
+        const statusRows = [];
+        for (let i = 0; i < keepIds.length; i += 50) {
+          const sr = await (await fetch(`${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=in.(${keepIds.slice(i, i + 50).join(',')})&select=unit_id,system_id,progress,photos`, { headers: hdrs })).json();
+          if (Array.isArray(sr)) statusRows.push(...sr);
+        }
+        const unitBuilding = {};
+        keepUnits.forEach(u => { unitBuilding[u.id] = bIdToName[u.building_id]; });
+        const sysToRemove = statusRows.filter(r => { const s = sysByBuilding[unitBuilding[r.unit_id]]; return s && !s.has(r.system_id); });
+        const sysToRemoveWithData = sysToRemove.filter(r => (r.progress || 0) > 0 || (r.photos || 0) > 0).length;
+        const haveKey = new Set(statusRows.map(r => r.unit_id + '|' + r.system_id));
+        const sysToAdd = [];
+        keepUnits.forEach(u => {
+          const s = sysByBuilding[unitBuilding[u.id]]; if (!s) return;
+          s.forEach(sys => { if (!haveKey.has(u.id + '|' + sys)) sysToAdd.push({ unit_id: u.id, system_id: sys, progress: 0, status: 'Behind' }); });
+        });
         const addCount = [...desired].filter(n => !existingNums.has(n)).length;
-        if (addCount === 0 && removeUnits.length === 0 && removeBuildings.length === 0) {
+        if (addCount === 0 && removeUnits.length === 0 && removeBuildings.length === 0 && sysToRemove.length === 0 && sysToAdd.length === 0) {
           alert('Nothing to change: the setup already matches Supabase. No data was changed.');
           closeProjectSetup();
           return;
         }
         let msg = `Add ${addCount} new unit(s).\nRemove ${removeUnits.length} unit(s)` + (removeBuildings.length ? ` and ${removeBuildings.length} building(s)` : '') + '.';
         if (removeUnits.length) msg += `\n\n⚠️ ${withData} of the units being removed have progress/photos/history. ONLY those removed units lose their data; everything else stays untouched.`;
+        if (sysToRemove.length || sysToAdd.length) msg += `\n\nSystems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` (⚠️ ${sysToRemoveWithData} with progress/photos/history will lose that data)` : '') + `, add ${sysToAdd.length} system row(s).`;
         msg += '\n\nContinue?';
         if (!confirm(msg)) return;
 
@@ -2624,6 +2648,16 @@
         }
         for (const b of removeBuildings) {
           await fetch(`${SUPABASE_URL}/rest/v1/buildings?id=eq.${b.id}`, { method: 'DELETE', headers: hdrs });
+        }
+
+        // Step 3b: Apply system changes on units that stay
+        for (let i = 0; i < sysToRemove.length; i++) {
+          const r = sysToRemove[i];
+          await fetch(`${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=eq.${r.unit_id}&system_id=eq.${encodeURIComponent(r.system_id)}`, { method: 'DELETE', headers: hdrs });
+        }
+        for (let i = 0; i < sysToAdd.length; i += 500) {
+          const ar = await fetch(`${SUPABASE_URL}/rest/v1/unit_systems_status`, { method: 'POST', headers: { ...hdrs, 'Content-Type': 'application/json' }, body: JSON.stringify(sysToAdd.slice(i, i + 500)) });
+          if (!ar.ok) throw new Error('System status insert failed: ' + await ar.text());
         }
 
         // Step 4: Build new units array
@@ -2683,7 +2717,7 @@
           btn.textContent = `⏳ Systems... ${Math.min(i + 500, ussRows.length)}/${ussRows.length}`;
         }
 
-        alert(`✅ Done! Added ${inserted.length} unit(s), removed ${removeUnits.length} unit(s).`);
+        alert(`✅ Done! Added ${inserted.length} unit(s), removed ${removeUnits.length} unit(s), systems: -${sysToRemove.length} / +${sysToAdd.length}.`);
         closeProjectSetup();
         await loadData();
         renderUnits();
