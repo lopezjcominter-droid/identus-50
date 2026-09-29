@@ -1408,7 +1408,7 @@
       </div>
       <div style="padding:20px;display:flex;flex-direction:column;gap:20px;">
         <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;font-size:13px;color:#1E40AF;">
-          ♻️ <strong>Replicable:</strong> Change the Supabase URL, Key &amp; Project ID below to deploy this app for a different project. Existing data is never deleted: only missing buildings and units are added.
+          ♻️ <strong>Replicable:</strong> Change the Supabase URL, Key &amp; Project ID below to deploy this app for a different project. Adds missing buildings/units and removes the ones you delete here. Only removed units lose their data.
         </div>
 
         <!-- Supabase Connection (scalable to other projects) -->
@@ -1451,7 +1451,7 @@
 
         <div style="display:flex;gap:10px;justify-content:flex-end;padding-top:10px;border-top:1px solid #E5E7EB;">
           <button onclick="closeProjectSetup()" style="padding:8px 16px;border:1px solid #D1D5DB;background:white;border-radius:6px;cursor:pointer;font-size:14px;">Cancel</button>
-          <button onclick="applyProjectSetup()" style="padding:8px 16px;background:#DC2626;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">⚠️ Add Missing Buildings/Units</button>
+          <button onclick="applyProjectSetup()" style="padding:8px 16px;background:#DC2626;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">⚠️ Apply Changes</button>
         </div>
       </div>
     </div>
@@ -2472,9 +2472,6 @@
       const rows = [...document.querySelectorAll('#setupBuildingsList > div')];
       if (rows.length === 0) { alert('Add at least one building.'); return; }
 
-      const confirmed = confirm('This will ADD any missing buildings and units to Supabase. Existing units, progress, photos and history will NOT be changed or deleted. Continue?');
-      if (!confirmed) return;
-
       const residentialConfigs = [];
       const specialConfigs = [];
 
@@ -2521,6 +2518,39 @@
         const buildingMap = {}; // name -> id
         existingBuildings.forEach(b => { buildingMap[b.name] = b.id; });
 
+        // Plan: compare desired setup vs what exists (nothing is changed until you confirm)
+        const cfgNames = new Set([...residentialConfigs, ...specialConfigs].map(c => c.name));
+        const bIdToName = {};
+        existingBuildings.forEach(b => { bIdToName[b.id] = b.name; });
+        const desired = new Set();
+        residentialConfigs.forEach(cfg => {
+          for (let f = 1; f <= cfg.floors; f++) for (let u = 1; u <= cfg.unitsPerFloor; u++) desired.add(`${cfg.prefix}${f}${String(u).padStart(2, '0')}`);
+        });
+        specialConfigs.forEach(cfg => desired.add(cfg.name));
+        const exUnits = await (await fetch(`${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}&select=id,unit_number,building_id`, { headers: hdrs })).json();
+        const exList = Array.isArray(exUnits) ? exUnits : [];
+        const existingNums = new Set(exList.map(u => String(u.unit_number)));
+        const removeUnits = exList.filter(u => !cfgNames.has(bIdToName[u.building_id]) || !desired.has(String(u.unit_number)));
+        const removeBuildings = existingBuildings.filter(b => !cfgNames.has(b.name));
+        const removeIds = removeUnits.map(u => u.id);
+        let withData = 0;
+        for (let i = 0; i < removeIds.length; i += 50) {
+          const sr = await (await fetch(`${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=in.(${removeIds.slice(i, i + 50).join(',')})&select=unit_id,progress,photos`, { headers: hdrs })).json();
+          const set = new Set();
+          (Array.isArray(sr) ? sr : []).forEach(r => { if ((r.progress || 0) > 0 || (r.photos || 0) > 0) set.add(r.unit_id); });
+          withData += set.size;
+        }
+        const addCount = [...desired].filter(n => !existingNums.has(n)).length;
+        if (addCount === 0 && removeUnits.length === 0 && removeBuildings.length === 0) {
+          alert('Nothing to change: the setup already matches Supabase. No data was changed.');
+          closeProjectSetup();
+          return;
+        }
+        let msg = `Add ${addCount} new unit(s).\nRemove ${removeUnits.length} unit(s)` + (removeBuildings.length ? ` and ${removeBuildings.length} building(s)` : '') + '.';
+        if (removeUnits.length) msg += `\n\n⚠️ ${withData} of the units being removed have progress/photos/history. ONLY those removed units lose their data; everything else stays untouched.`;
+        msg += '\n\nContinue?';
+        if (!confirm(msg)) return;
+
         // Step 2: Create any missing buildings
         const allConfigs = [...residentialConfigs, ...specialConfigs];
         for (let i = 0; i < allConfigs.length; i++) {
@@ -2535,9 +2565,15 @@
           }
         }
 
-        // Step 3: Load existing units (nothing is deleted)
-        const exUnitsRaw = await (await fetch(`${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}&select=unit_number`, { headers: hdrs })).json();
-        const existingNums = new Set(Array.isArray(exUnitsRaw) ? exUnitsRaw.map(u => String(u.unit_number)) : []);
+        // Step 3: Remove only the units/buildings you took out of the setup
+        for (let i = 0; i < removeIds.length; i += 50) {
+          const chunk = removeIds.slice(i, i + 50).join(',');
+          await fetch(`${SUPABASE_URL}/rest/v1/unit_systems_status?unit_id=in.(${chunk})`, { method: 'DELETE', headers: hdrs });
+          await fetch(`${SUPABASE_URL}/rest/v1/units?id=in.(${chunk})`, { method: 'DELETE', headers: hdrs });
+        }
+        for (const b of removeBuildings) {
+          await fetch(`${SUPABASE_URL}/rest/v1/buildings?id=eq.${b.id}`, { method: 'DELETE', headers: hdrs });
+        }
 
         // Step 4: Build new units array
         const newUnits = [];
@@ -2554,18 +2590,14 @@
 
         // Only add units that do not exist yet
         const toAdd = newUnits.filter(u => !existingNums.has(String(u.unit_number)));
-        if (toAdd.length === 0) {
-          alert('Nothing to add: all these buildings and units already exist. No data was changed.');
-          closeProjectSetup();
-          return;
+        let inserted = [];
+        if (toAdd.length > 0) {
+          const insRes = await fetch(`${SUPABASE_URL}/rest/v1/units`, {
+            method: 'POST', headers: jsonHdrs,
+            body: JSON.stringify(toAdd)
+          });
+          inserted = await insRes.json();
         }
-
-        // Insert units
-        const insRes = await fetch(`${SUPABASE_URL}/rest/v1/units`, {
-          method: 'POST', headers: jsonHdrs,
-          body: JSON.stringify(toAdd)
-        });
-        const inserted = await insRes.json();
         if (!Array.isArray(inserted)) throw new Error(JSON.stringify(inserted));
 
         // Step 5: Create unit_systems_status rows for selected systems per building
@@ -2600,7 +2632,7 @@
           btn.textContent = `⏳ Systems... ${Math.min(i + 500, ussRows.length)}/${ussRows.length}`;
         }
 
-        alert(`✅ Done! Added ${inserted.length} new units, ${ussRows.length} system status rows across ${residentialConfigs.length} building(s) + ${specialConfigs.length} special unit(s).`);
+        alert(`✅ Done! Added ${inserted.length} unit(s), removed ${removeUnits.length} unit(s).`);
         closeProjectSetup();
         await loadData();
         renderUnits();
@@ -2611,7 +2643,7 @@
       } catch (err) {
         alert('❌ Error: ' + err.message);
       } finally {
-        if (btn) { btn.textContent = '⚠️ Add Missing Buildings/Units'; btn.disabled = false; }
+        if (btn) { btn.textContent = '⚠️ Apply Changes'; btn.disabled = false; }
       }
     }
 
