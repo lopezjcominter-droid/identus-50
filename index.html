@@ -919,15 +919,6 @@
     @media (max-width: 480px) {
       .modal-content { padding-bottom: calc(20px + env(safe-area-inset-bottom)) !important; }
     }
-      /* Desktop header: buttons on one line each, date/time never wraps, actions wrap as whole buttons */
-    @media (min-width: 901px) {
-      .header { gap: 20px; }
-      .header-left { flex-shrink: 0; }
-      .header-left h1, .header-left p { white-space: nowrap; }
-      .header-left p { gap: 14px !important; }
-      .header-actions { flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
-      .header-actions .btn { white-space: nowrap; }
-    }
   </style>
 </head>
 <body>
