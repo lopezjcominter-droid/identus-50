@@ -2191,7 +2191,7 @@
         updateCharts();
       } catch (e) {
         console.error('Sync error', e);
-        alert('No se pudo sincronizar. Revisa la conexión.');
+        alert('Could not sync. Please check your connection.');
       } finally {
         if (icon) icon.style.animation = '';
       }
@@ -2237,7 +2237,7 @@
     function setupBuildingButtons() {
       const container = document.getElementById('buildingButtonsContainer');
       container.innerHTML = BUILDINGS.map(building => {
-        // Contar solo unidades que coinciden con TODOS los filtros activos
+        // Count only units que coinciden con TODOS los filtros activos
         const count = data.filter(u => {
           // El edificio debe coincidir
           if (u.building !== building) return false;
@@ -2465,7 +2465,7 @@
 
       pendingDeleteUnit = { apt, building, floor };
 
-      const confirmed = confirm(`¿Estás seguro de que deseas eliminar la unidad ${apt}?`);
+      const confirmed = confirm(`Are you sure you want to delete unit ${apt}?`);
 
       if (confirmed) {
         deleteUnit(apt, building, floor);
@@ -2488,9 +2488,9 @@
         renderUnits();
         updateMetrics();
         updateCharts();
-        alert(`Unidad ${apt} eliminada correctamente`);
+        alert(`Unit ${apt} deleted successfully`);
       } else {
-        alert('Error: No se pudo encontrar la unidad');
+        alert('Error: Unit not found');
       }
     }
 
@@ -2608,18 +2608,18 @@
     }
 
     function photoXBtn(js) {
-      return `<button type="button" title="Eliminar foto" onclick="event.stopPropagation();${js}" style="position:absolute;top:4px;right:4px;background:#EF4444;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;line-height:1;z-index:2;box-shadow:0 1px 3px rgba(0,0,0,.4);">✕</button>`;
+      return `<button type="button" title="Delete photo" onclick="event.stopPropagation();${js}" style="position:absolute;top:4px;right:4px;background:#EF4444;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;line-height:1;z-index:2;box-shadow:0 1px 3px rgba(0,0,0,.4);">✕</button>`;
     }
 
     function askConfirm(msg, onYes) {
       const m = document.createElement('div');
       m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:center;justify-content:center;';
       m.innerHTML = `<div style="background:#fff;border-radius:10px;padding:24px;max-width:360px;width:90%;box-shadow:0 10px 30px rgba(0,0,0,.3);">
-        <div style="font-size:16px;font-weight:600;margin-bottom:8px;color:#111827;">Confirmar eliminación</div>
+        <div style="font-size:16px;font-weight:600;margin-bottom:8px;color:#111827;">Confirm deletion</div>
         <div style="font-size:14px;color:#4B5563;margin-bottom:18px;">${msg}</div>
         <div style="display:flex;gap:10px;justify-content:flex-end;">
-          <button type="button" id="acNo" style="padding:9px 18px;border:1px solid #D1D5DB;background:#F3F4F6;border-radius:6px;cursor:pointer;font-weight:600;">Cancelar</button>
-          <button type="button" id="acYes" style="padding:9px 18px;border:none;background:#EF4444;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">Eliminar</button>
+          <button type="button" id="acNo" style="padding:9px 18px;border:1px solid #D1D5DB;background:#F3F4F6;border-radius:6px;cursor:pointer;font-weight:600;">Cancel</button>
+          <button type="button" id="acYes" style="padding:9px 18px;border:none;background:#EF4444;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">Delete</button>
         </div></div>`;
       document.body.appendChild(m);
       m.querySelector('#acNo').onclick = () => m.remove();
@@ -2640,7 +2640,7 @@
     }
 
     function deleteUnitPhoto(system, evIdx, imgIdx) {
-      askConfirm('¿Seguro que deseas eliminar esta foto? Esta acción no se puede deshacer.', async () => {
+      askConfirm('Are you sure you want to delete this photo? This action cannot be undone.', async () => {
         const u = currentDetailsUnit;
         if (!u || !u.systems[system]) return;
         const sd = u.systems[system];
@@ -2655,7 +2655,7 @@
     }
 
     function deletePunchPhoto(idx, pIdx) {
-      askConfirm('¿Seguro que deseas eliminar esta foto? Esta acción no se puede deshacer.', async () => {
+      askConfirm('Are you sure you want to delete this photo? This action cannot be undone.', async () => {
         const it = punchlist[idx]; if (!it) return;
         it.photos.splice(pIdx, 1); it.photoCount = it.photos.length;
         document.querySelectorAll('.modal.show').forEach(m => { if (m.querySelector('.modal-title')?.textContent === 'View Issue') m.remove(); });
@@ -2678,7 +2678,7 @@
         html += `<div class="photo-item" style="padding:0;overflow:hidden;position:relative;"><img src="${o.b}" style="width:100%;height:100%;object-fit:cover;cursor:pointer;" onclick="openPhotoFull(this.src)">${photoXBtn(`deleteUnitPhoto(${sq},${o.ei},${o.ii})`)}</div>`;
       });
       const missing = Math.max(0, (sysData.photos || 0) - imgs.length);
-      for (let i = 0; i < missing; i++) html += `<div class="photo-item" title="Foto sin imagen guardada" style="position:relative;">📷${photoXBtn(`deleteUnitPhoto(${sq},-1,0)`)}</div>`;
+      for (let i = 0; i < missing; i++) html += `<div class="photo-item" title="Photo image not stored" style="position:relative;">📷${photoXBtn(`deleteUnitPhoto(${sq},-1,0)`)}</div>`;
       html += '</div>';
       html += `<p style="font-size: 12px; color: #6B7280; text-align: center;">${Math.max(sysData.photos || 0, imgs.length)} photo(s) recorded</p>`;
       return html;
@@ -2686,14 +2686,19 @@
 
     function openPhotoFull(src) {
       const o = document.createElement('div');
-      o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
-      o.innerHTML = `<img src="${src}" style="max-width:95vw;max-height:95vh;border-radius:8px;">`;
-      o.onclick = () => o.remove();
+      o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;';
+      o.innerHTML = `<img src="${src}" style="max-width:95vw;max-height:80vh;border-radius:8px;">
+        <div style="display:flex;gap:10px;">
+          <a href="${src}" download="photo_${Date.now()}.jpg" style="background:#0B5394;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:600;font-size:14px;">⬇ Download</a>
+          <button type="button" id="pfClose" style="background:#F3F4F6;color:#111827;border:none;padding:10px 20px;border-radius:6px;font-weight:600;font-size:14px;cursor:pointer;">Close</button>
+        </div>`;
+      o.querySelector('#pfClose').onclick = () => o.remove();
+      o.addEventListener('click', e => { if (e.target === o) o.remove(); });
       document.body.appendChild(o);
     }
 
     function deletePhoto(apt, building, floor, system, photoIndex) {
-      if (confirm(`¿Eliminar esta foto?`)) {
+      if (confirm(`Delete this photo?`)) {
         const unit = data.find(u => u.apt === apt && u.building === building && u.floor === floor);
         if (unit && unit.systems[system]) {
           unit.systems[system].photos = Math.max(0, unit.systems[system].photos - 1);
@@ -2711,7 +2716,7 @@
 
       let html = '';
       sysData.events.forEach((event, evI) => {
-        const date = new Date(event.timestamp).toLocaleString('es-ES', {
+        const date = new Date(event.timestamp).toLocaleString('en-US', {
           year: 'numeric',
           month: '2-digit',
           day: '2-digit',
@@ -3178,7 +3183,7 @@
 
       let building = document.getElementById('quickBuilding').value;
       if (!building) { const m = data.find(u => u.apt === apt); if (m) building = m.building; }
-      if (!apt || !building) { alert('Por favor selecciona o ingresa una unidad y edificio válidos.'); return; }
+      if (!apt || !building) { alert('Please select or enter a valid unit and building.'); return; }
       const qFiles = Array.from(document.getElementById('quickPhoto').files);
       const qImages = qFiles.length > 0 ? await readAndCompressPhotos(qFiles, 0.6) : [];
       const qEvent = { timestamp: new Date().toISOString(), notes: `Quick add - ${progress}% complete`, photos: qFiles.length, images: qImages, progress: progress, status: progress === 100 ? 'Completed' : progress >= 21 ? 'In Progress' : progress >= 1 ? 'At Risk' : 'Behind' };
@@ -3932,7 +3937,7 @@
           punchlist[idx].photoCount = punchlist[idx].photos.length;
         }
         punchItem = punchlist[idx];
-        alert('Evento actualizado correctamente');
+        alert('Event updated successfully');
       } else {
         const newEvent = {
           id: Date.now(),
@@ -3950,7 +3955,7 @@
         };
         punchlist.push(newEvent);
         punchItem = newEvent;
-        alert('Evento creado correctamente');
+        alert('Event created successfully');
       }
 
       await savePunchlist();
@@ -3971,9 +3976,9 @@
       punchlist.forEach((item, idx) => {
         const priorityColor = item.priority === 'High' ? '#EF4444' : item.priority === 'Medium' ? '#F59E0B' : '#3B82F6';
         const statusColor = item.status === 'Closed' ? '#22C55E' : item.status === 'Pending Review' ? '#F59E0B' : '#EF4444';
-        const createdDate = new Date(item.createdAt).toLocaleString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-        const reviewedDate = item.reviewedAt ? new Date(item.reviewedAt).toLocaleString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-';
-        const closedDate = item.closedAt ? new Date(item.closedAt).toLocaleString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-';
+        const createdDate = new Date(item.createdAt).toLocaleString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        const reviewedDate = item.reviewedAt ? new Date(item.reviewedAt).toLocaleString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-';
+        const closedDate = item.closedAt ? new Date(item.closedAt).toLocaleString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-';
 
         html += `
           <div class="issue-card">
@@ -3987,7 +3992,7 @@
             <div class="issue-meta">
               <span class="issue-badge" style="background: ${statusColor}; color: white;">Status: ${item.status}</span>
               <span class="issue-badge">Assigned: ${item.assignee}</span>
-              <span class="issue-badge">📸 ${item.photoCount} photo(s)</span>${(item.photos || []).map((b, pi) => `<span style="position:relative;display:inline-block;margin-left:6px;vertical-align:middle;"><img src="${b}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;display:block;" onclick="openPhotoFull(this.src)"><button type="button" title="Eliminar foto" onclick="event.stopPropagation();deletePunchPhoto(${idx},${pi})" style="position:absolute;top:-6px;right:-6px;background:#EF4444;color:#fff;border:none;border-radius:50%;width:18px;height:18px;cursor:pointer;font-size:10px;line-height:1;">✕</button></span>`).join('')}
+              <span class="issue-badge">📸 ${item.photoCount} photo(s)</span>${(item.photos || []).map((b, pi) => `<span style="position:relative;display:inline-block;margin-left:6px;vertical-align:middle;"><img src="${b}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;display:block;" onclick="openPhotoFull(this.src)"><button type="button" title="Delete photo" onclick="event.stopPropagation();deletePunchPhoto(${idx},${pi})" style="position:absolute;top:-6px;right:-6px;background:#EF4444;color:#fff;border:none;border-radius:50%;width:18px;height:18px;cursor:pointer;font-size:10px;line-height:1;">✕</button></span>`).join('')}
             </div>
             <div style="font-size: 11px; color: #6B7280; padding: 8px 0; border-top: 1px solid #E5E7EB; margin-top: 8px;">
               <div>Created: ${createdDate}</div>
@@ -4081,7 +4086,7 @@
       const item = punchlist[idx];
       const priorityColor = item.priority === 'High' ? '#EF4444' : item.priority === 'Medium' ? '#F59E0B' : '#3B82F6';
       const statusColor = item.status === 'Closed' ? '#22C55E' : item.status === 'Pending Review' ? '#F59E0B' : '#EF4444';
-      const createdDate = new Date(item.createdAt).toLocaleString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const createdDate = new Date(item.createdAt).toLocaleString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
       const modal = document.createElement('div');
       modal.className = 'modal show';
@@ -4265,7 +4270,7 @@
         </head>
         <body>
           <h1>📋 Punch List Report</h1>
-          <p style="color: #6B7280; font-size: 13px;">Generated on ${new Date().toLocaleString('es-ES')}</p>
+          <p style="color: #6B7280; font-size: 13px;">Generated on ${new Date().toLocaleString('en-US')}</p>
 
           <h2>Summary Statistics</h2>
           <div class="summary">
@@ -4327,14 +4332,14 @@
                       </div>
                     ` : '<em style="color: #9CA3AF;">No photos</em>'}
                   </td>
-                  <td>${new Date(item.createdAt).toLocaleDateString('es-ES')}</td>
+                  <td>${new Date(item.createdAt).toLocaleDateString('en-US')}</td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
 
           <div class="footer">
-            <p style="margin: 0;"><strong>Report Generated:</strong> ${new Date().toLocaleString('es-ES')}</p>
+            <p style="margin: 0;"><strong>Report Generated:</strong> ${new Date().toLocaleString('en-US')}</p>
             <p style="margin: 5px 0 0 0;">This report contains punch list items and reference photos for tracking project completion.</p>
             <button class="no-print" onclick="window.print()" style="margin-top: 15px; padding: 8px 16px; background: #1E40AF; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
               🖨️ Print Report
