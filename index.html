@@ -1854,6 +1854,11 @@
 
         // Store buildings globally and populate select
         sbBuildings = buildings;
+        // Keep filters in sync with actual building names from Supabase
+        if (buildings && buildings.length > 0) {
+          const realNames = buildings.map(b => b.name);
+          realNames.forEach(n => filters.buildings.add(n));
+        }
         const buildingSelect = document.getElementById('unitBuilding');
         if (buildingSelect) {
           buildingSelect.innerHTML = '<option value="">Select Building</option>' +
