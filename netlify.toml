@@ -1,0 +1,13 @@
+[build]
+  command = "echo 'Static site - no build needed'"
+    publish = "."
+
+    [[redirects]]
+      from = "/*"
+        to = "/index.html"
+          status = 200
+
+          [[redirects]]
+            from = "/.netlify/functions/*"
+              to = "/.netlify/functions/*"
+                status = 200
