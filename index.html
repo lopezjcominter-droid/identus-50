@@ -2837,34 +2837,17 @@
 
 
     function setupFilterUI() {
-      document.getElementById('buildingFilters').innerHTML = BUILDINGS.map(b => `
-        <label class="filter-option active" data-filter-type="buildings" data-filter-value="${b}">
-          <input type="checkbox" checked onchange="toggleFilter(this)">
-          <span>${b}</span>
-        </label>
-      `).join('');
-
-      document.getElementById('floorFilters').innerHTML = FLOORS.map(f => `
-        <label class="filter-option active" data-filter-type="floors" data-filter-value="${f}">
-          <input type="checkbox" checked onchange="toggleFilter(this)">
-          <span>${f}</span>
-        </label>
-      `).join('');
-
-      document.getElementById('statusFilters').innerHTML = STATUSES.map(s => `
-        <label class="filter-option active" data-filter-type="statuses" data-filter-value="${s}">
-          <input type="checkbox" checked onchange="toggleFilter(this)">
-          <span>${s}</span>
-        </label>
-      `).join('');
-
-      document.getElementById('systemFilters').innerHTML = SYSTEMS.map(sys => `
-        <label class="filter-option active" data-filter-type="systems" data-filter-value="${sys}">
-          <input type="checkbox" checked onchange="toggleFilter(this)">
-          <span>${sys}</span>
-        </label>
-      `).join('');
-
+      const makeOption = (type, value, set) => {
+        const on = set.has(value);
+        return `<label class="filter-option ${on ? 'active' : ''}" data-filter-type="${type}" data-filter-value="${value}">
+          <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleFilter(this)">
+          <span>${value}</span>
+        </label>`;
+      };
+      document.getElementById('buildingFilters').innerHTML = BUILDINGS.map(b => makeOption('buildings', b, filters.buildings)).join('');
+      document.getElementById('floorFilters').innerHTML = FLOORS.map(f => makeOption('floors', f, filters.floors)).join('');
+      document.getElementById('statusFilters').innerHTML = STATUSES.map(s => makeOption('statuses', s, filters.statuses)).join('');
+      document.getElementById('systemFilters').innerHTML = SYSTEMS.map(sys => makeOption('systems', sys, filters.systems)).join('');
       setupBuildingButtons();
     }
 
@@ -4076,15 +4059,7 @@
     })();
 
     function updateCharts() {
-      // If no units pass the filter but data exists, rebuild filters from actual data
       let filtered = data.filter(shouldShowUnit);
-      if (filtered.length === 0 && data.length > 0) {
-        const realBuildings = [...new Set(data.map(u => u.building).filter(Boolean))];
-        const realFloors = [...new Set(data.map(u => u.floor).filter(Boolean))];
-        realBuildings.forEach(n => filters.buildings.add(n));
-        realFloors.forEach(n => filters.floors.add(n));
-        filtered = data.filter(shouldShowUnit);
-      }
       console.log('updateCharts: filtered units =', filtered.length, 'total units =', data.length);
 
       const statusCounts = { Completed: 0, 'In Progress': 0, 'At Risk': 0, Behind: 0 };
