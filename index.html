@@ -2034,7 +2034,18 @@
           async (payload) => {
             console.log('🔔 Realtime update received:', payload.eventType, payload.new || payload.old);
             if (isSyncing) return;
-            await loadData();
+            const changed = payload.new || payload.old;
+            if (changed && changed.unit_id && data) {
+              const unit = data.find(u => u.id === changed.unit_id);
+              if (unit && changed.system_id) {
+                unit.systems[changed.system_id] = {
+                  progress: changed.progress || 0,
+                  status: changed.status || 'Behind',
+                  photos: changed.photos || 0,
+                  events: typeof changed.events === 'string' ? JSON.parse(changed.events || '[]') : (changed.events || [])
+                };
+              }
+            }
             renderUnits();
             updateMetrics();
             updateCharts();
@@ -2068,7 +2079,15 @@
           async (payload) => {
             console.log('🔔 Unit change detected:', payload.eventType, payload.new || payload.old);
             if (isSyncing) return;
+            const savedBuildings = new Set(filters.buildings);
+            const savedFloors = new Set(filters.floors);
+            const savedStatuses = new Set(filters.statuses);
+            const savedSystems = new Set(filters.systems);
             await loadData();
+            filters.buildings = savedBuildings;
+            filters.floors = savedFloors;
+            filters.statuses = savedStatuses;
+            filters.systems = savedSystems;
             renderUnits();
             updateMetrics();
             updateCharts();
