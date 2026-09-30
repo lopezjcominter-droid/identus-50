@@ -1781,6 +1781,11 @@
         await loadData();
 
         await loadPunchlist();
+        // Limpiar search inputs - browser puede rellenarlos con datos guardados
+        const si = document.getElementById('searchInput');
+        const usi = document.getElementById('unitsSearchInput');
+        if (si) { si.value = ''; searchTerm = ''; }
+        if (usi) { usi.value = ''; unitsSearchTerm = ''; }
         setupFilterUI();
         renderUnits();
         renderPunchlist();
