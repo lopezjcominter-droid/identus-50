@@ -1138,7 +1138,6 @@
     .insp-toast-hide { transform:translateY(100px); opacity:0; }
     @media (max-width:600px) {
       .insp-type-grid { grid-template-columns:1fr 1fr; }
-      .insp-table th:nth-child(2),.insp-table td:nth-child(2) { display:none; }
       .insp-btn-status { padding:6px 6px; font-size:11px; }
       .insp-item-num { display:none; }
       .insp-stat-num { font-size:20px; }
@@ -1255,7 +1254,7 @@
           <button class="btn btn-secondary" onclick="promptSetupPassword()" title="Configure project buildings and units (admin only)">⚙️ Project Setup</button>
           <button class="btn btn-primary" onclick="openAddUnitModal()">+ Full Add Unit</button>
           <button class="btn btn-primary" onclick="openQuickAddModal()">📱 Quick Add</button>
-          <button class="btn btn-primary" onclick="inspQuickStart()" style="background:#1a73e8">⚡ Quick Inspection</button>
+<button class="btn btn-primary" onclick="openQuickInspectionModal()" style="background:#1a73e8">⚡ Quick Inspection</button>
         </div>
       </div>
 
@@ -1329,7 +1328,7 @@
           <div class="table-container">
             <div style="display: flex; justify-content: flex-start; align-items: center; gap: 24px; margin-bottom: 16px; padding: 0 16px; padding-top: 16px;">
               <div class="table-title">Units List</div>
-              <input type="text" id="unitsSearchInput" placeholder="Search units..." autocomplete="off" onkeyup="handleUnitsSearch()" style="max-width: 200px; padding: 8px 12px; border: 1px solid #E5E7EB; border-radius: 6px; font-size: 12px; color: #6B7280; background: white; margin-left: -8px;">
+<input type="search" id="unitsSearchInput" name="unit-search" placeholder="Search units..." autocomplete="new-password" inputmode="search" onkeyup="handleUnitsSearch()" style="max-width: 200px; padding: 8px 12px; border: 1px solid #E5E7EB; border-radius: 6px; font-size: 12px; color: #6B7280; background: white; margin-left: -8px;">
               <div style="flex: 1;"></div>
               <div id="unitsCounter" style="font-size: 12px; color: #1F2937; font-weight: 700; white-space: nowrap;">Showing 0 of 0</div>
             </div>
@@ -7203,6 +7202,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         return r;
       });
       const si = $('unitsSearchInput');
+      // Never allow browser/email autofill to populate the unit search field.
+      if (si && /@/.test(si.value)) { si.value = ''; unitsSearchTerm = ''; }
       if (si && !si.parentNode.classList.contains('search-wrap')) {
         const w = document.createElement('span');
         w.className = 'search-wrap'; w.style.cssText = 'position:relative;display:inline-flex;align-items:center;margin-left:-8px;';
@@ -8095,6 +8096,69 @@ function inspQuickStart() {
   inspGoStep(1);
 }
 
+function openQuickInspectionModal() {
+  let modal = document.getElementById('quickInspectionModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'quickInspectionModal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width:520px">
+        <form onsubmit="startQuickInspection(event)">
+          <div class="modal-header">
+            <h2>Quick Inspection</h2>
+            <button class="modal-close" type="button" onclick="closeQuickInspectionModal()">✕</button>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Unit</label>
+            <select class="form-select" id="quickInspectionUnit" required></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Inspection Type</label>
+            <select class="form-select" id="quickInspectionType" required></select>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeQuickInspectionModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Open New Inspection</button>
+          </div>
+        </form>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+  const units = (Array.isArray(window.data) && window.data.length ? window.data : INSP_DEMO_UNITS)
+    .filter(u => u && (u.apt || u.unit_number))
+    .map(u => ({ apt:String(u.apt || u.unit_number), building:String(u.building || ''), floor:String(u.floor || '') }))
+    .filter((u, i, list) => list.findIndex(x => x.apt === u.apt) === i)
+    .sort((a, b) => a.apt.localeCompare(b.apt, undefined, { numeric:true }));
+  const unitSelect = document.getElementById('quickInspectionUnit');
+  const typeSelect = document.getElementById('quickInspectionType');
+  if (!unitSelect || !typeSelect) return;
+  unitSelect.innerHTML = '<option value="">Select Unit</option>' + units.map(u => `<option value="${u.apt}">${u.apt} · ${u.building} · ${u.floor}</option>`).join('');
+  typeSelect.innerHTML = '<option value="">Select Inspection Type</option>' + INSP_INSPECTION_TYPES.map(t => `<option value="${t.id}">${t.num}. ${t.name}</option>`).join('');
+  showAppModal('quickInspectionModal');
+}
+
+function closeQuickInspectionModal() { animateModalClose('quickInspectionModal'); }
+
+function startQuickInspection(event) {
+  event.preventDefault();
+  const apt = document.getElementById('quickInspectionUnit')?.value;
+  const typeId = document.getElementById('quickInspectionType')?.value;
+  const liveUnit = Array.isArray(window.data) ? window.data.find(u => String(u.apt || u.unit_number || '') === String(apt)) : null;
+  inspCurrentUnit = liveUnit || INSP_DEMO_UNITS.find(u => String(u.apt) === String(apt));
+  inspCurrentType = INSP_INSPECTION_TYPES.find(t => String(t.id) === String(typeId));
+  if (!inspCurrentUnit || !inspCurrentType) return;
+  window.inspLastSelectedUnit = inspCurrentUnit;
+  window.inspReturnAfterInspection = 'inspection-type-list';
+  inspChecklistItems = inspCurrentType.items.map(() => ({ status:null, comment:'', photos:[] }));
+  animateModalClose('quickInspectionModal', () => {
+    const tab = document.querySelector('.tab-main[onclick*="inspections"]');
+    if (tab) switchMainTab('inspections', tab);
+    inspShowTab('new');
+    inspGoStep(3);
+  });
+}
+
 function inspShowTab(name) {
   if (name !== 'new' && document.querySelector('.insp-summary-popup')) {
     inspCloseSummaryPopup();
@@ -8140,6 +8204,10 @@ function inspShowTab(name) {
   if (activeTab) {
     activeTab.classList.remove('hidden');
     activeTab.style.display = 'block';
+    if (name === 'new') {
+      // New Inspection always starts from a clean, reusable unit search.
+      inspGoStep(1);
+    }
     if (name === 'history' || name === 'punchlist') setTimeout(() => activeTab.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
   }
   if (activeTab && name !== 'new' && name !== 'report') {
@@ -8162,12 +8230,12 @@ function inspShowTab(name) {
 function inspGoStep(n) {
   ['insp-step-search','insp-step-types','insp-step-checklist','insp-step-summary'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.classList.add('hidden');
+    if (el) { el.classList.add('hidden'); el.style.display = 'none'; }
   });
 
   if (n === 1) {
     const el = document.getElementById('insp-step-search');
-    if (el) el.classList.remove('hidden');
+    if (el) { el.classList.remove('hidden'); el.style.display = 'block'; }
   inspSetBreadcrumb([{label:'🔍 Search Unit', step:1}]);
     inspCurrentUnit = null; inspCurrentType = null;
   } else if (n === 2) {
@@ -8199,7 +8267,7 @@ function inspGoStep(n) {
     ]);
   } else if (n === 4) {
     const el = document.getElementById('insp-step-summary');
-    if (el) el.classList.remove('hidden');
+    if (el) { el.classList.remove('hidden'); el.style.display = 'block'; }
     inspSetBreadcrumb([
   {label:'🔍 Search Unit', step:1},
       {label:`📍 ${inspCurrentUnit.apt}`, step:2},
@@ -8223,6 +8291,9 @@ function inspSearchUnits(q) {
   const hint = document.getElementById('insp-search-hint');
   const results = document.getElementById('insp-search-results');
   if (!hint || !results) return;
+  const searchInput = document.getElementById('insp-unit-search');
+  if (searchInput) searchInput.disabled = false;
+  results.style.pointerEvents = 'auto';
 
   if (!q || q.length < 1) {
     results.style.display = 'none';
@@ -8258,7 +8329,7 @@ function inspSearchUnits(q) {
   results.classList.remove('hidden');
   results.innerHTML = `<div class="insp-results-list">${
     filtered.map(u => `
-      <div class="insp-result-item" onclick="inspSelectUnit('${u.apt}')">
+      <div class="insp-result-item" data-insp-apt="${String(u.apt).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}" role="button" tabindex="0">
         <div>
           <div class="insp-result-unit">${u.apt}</div>
           <div class="insp-result-info">${u.building} · ${u.floor}</div>
@@ -8267,6 +8338,19 @@ function inspSearchUnits(q) {
       </div>
     `).join('')
   }</div>`;
+  if (!results._inspSearchClickBound) {
+    results._inspSearchClickBound = true;
+    const selectResult = event => {
+      const item = event.target.closest('.insp-result-item');
+      if (!item || !results.contains(item)) return;
+      const apt = item.dataset.inspApt;
+      if (apt) inspSelectUnit(apt);
+    };
+    results.addEventListener('click', selectResult);
+    results.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectResult(event); }
+    });
+  }
 }
 
 function inspSelectUnit(apt) {
@@ -8868,7 +8952,19 @@ function inspReturnToTypeList() {
       inspCurrentUnit = units.find(unit => String(unit.apt || unit.unit_number || '') === searchValue) || null;
     }
   }
+  // Fully release the previous inspection before rebuilding the type list.
+  // This prevents the first close from leaving a stale overlay or click
+  // handler that blocks the next inspection.
   inspResetInspectionViewState();
+  const retakeModal = document.getElementById('insp-retake-modal');
+  if (retakeModal) {
+    retakeModal.classList.remove('show', 'insp-closing');
+    retakeModal.style.display = 'none';
+    retakeModal.removeAttribute('aria-hidden');
+  }
+  inspChecklistItems = [];
+  inspCurrentType = null;
+  window.inspReturnAfterInspection = 'inspection-type-list';
   const newTab = document.getElementById('insp-tab-new');
   if (newTab) {
     newTab.classList.remove('hidden');
@@ -8877,6 +8973,12 @@ function inspReturnToTypeList() {
   if (inspCurrentUnit) {
     inspGoStep(2);
     inspRenderTypeGrid();
+    const grid = document.getElementById('insp-type-grid');
+    if (grid) {
+      grid.style.pointerEvents = 'auto';
+      grid.style.position = 'relative';
+      grid.style.zIndex = '1';
+    }
   } else {
     inspGoStep(1);
   }
@@ -9454,8 +9556,11 @@ function inspNewInspection() {
   const resultsEl = document.getElementById('insp-search-results');
   const hintEl = document.getElementById('insp-search-hint');
   if (searchEl) searchEl.value = '';
-  if (resultsEl) resultsEl.classList.add('hidden');
+  if (searchEl) { searchEl.disabled = false; searchEl.style.pointerEvents = 'auto'; }
+  if (resultsEl) { resultsEl.classList.add('hidden'); resultsEl.style.display = 'none'; resultsEl.style.pointerEvents = 'auto'; resultsEl.innerHTML = ''; }
   if (hintEl) hintEl.classList.remove('hidden');
+  const newTab = document.getElementById('insp-tab-new');
+  if (newTab) { newTab.classList.remove('hidden'); newTab.style.display = 'block'; }
   inspGoStep(1);
 }
 
