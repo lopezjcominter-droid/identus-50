@@ -961,6 +961,17 @@
       .modal-content { padding-bottom: calc(20px + env(safe-area-inset-bottom)) !important; }
     }
 
+    /* Keep Dashboard labels inside the viewport on narrow iPhones. */
+    #dashboardTab, #dashboardTab .charts-section, #dashboardTab .charts-row,
+    #dashboardTab .chart-container, #buildingButtonsContainer { min-width: 0; max-width: 100%; }
+    #dashboardTab .chart-container { overflow: hidden; }
+    #dashboardTab .chart-title { overflow-wrap: anywhere; word-break: break-word; line-height: 1.25; }
+    #buildingButtonsContainer .building-btn { max-width: 100%; white-space: normal !important; overflow-wrap: anywhere; }
+    @media (max-width: 480px) {
+      #dashboardTab .chart-container { height: auto; min-height: 220px; }
+      #dashboardTab .chart-container canvas { width: 100% !important; max-width: 100%; }
+    }
+
     /* =====================================================================
        INSPECCIONES MODULE — all classes prefixed insp- to avoid conflicts
        ===================================================================== */
@@ -1079,7 +1090,7 @@
     .insp-btn-outline:hover { border-color:#1e3a8a; color:#1e3a8a; }
     .insp-btn-sm { padding:5px 10px; font-size:12px; }
     .insp-btn:disabled { opacity:.5; cursor:not-allowed; }
-    .insp-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:5000; display:flex; align-items:center; justify-content:center; padding:16px; }
+    .insp-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:2147483000 !important; display:flex; align-items:center; justify-content:center; padding:16px; isolation:isolate; }
     .insp-modal { background:white; border-radius:12px; width:100%; max-width:520px; box-shadow:0 20px 60px rgba(0,0,0,.3); max-height:90vh; overflow-y:auto; }
     .insp-modal-header { padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; align-items:flex-start; gap:12px; }
     .insp-fail-icon { width:36px; height:36px; background:#fee2e2; color:#dc2626; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:18px; flex-shrink:0; }
@@ -1164,6 +1175,29 @@
   .insp-btn-status { min-height:42px; font-size:13px; }
   .insp-checklist-actions { flex-wrap:wrap; justify-content:flex-end; }
   .insp-checklist-actions .insp-btn { flex:1 1 120px; }
+}
+
+/* Mobile checklist: keep the item text and status choices side by side. */
+@media (max-width: 720px) {
+  .insp-table { display:table; table-layout:fixed; width:100%; min-width:560px; }
+  .insp-table thead { display:table-header-group; }
+  .insp-table tbody { display:table-row-group; width:auto; }
+  .insp-table tr { display:table-row; padding:0; }
+  .insp-table th, .insp-table td { display:table-cell; width:auto; vertical-align:middle; padding:8px 4px; border-bottom:1px solid #e2e8f0; }
+  .insp-table th:first-child, .insp-table td:first-child { width:52%; padding-left:8px; }
+  .insp-table th:not(:first-child), .insp-table td:not(:first-child) { width:16%; text-align:center; }
+  .insp-table td[data-label]::before { display:none; }
+  .insp-btn-group, .insp-btn-status { width:100%; }
+  .insp-btn-status { min-height:36px; padding:6px 3px; font-size:11px; white-space:normal; }
+}
+
+/* iPhone-sized screens: use compact status icons to preserve checklist width. */
+@media (max-width: 480px) {
+  .insp-table .insp-btn-status { font-size:0; min-width:34px; }
+  .insp-table .insp-btn-status::after { font-size:18px; line-height:1; }
+  .insp-table .insp-btn-pass::after { content:'✓'; }
+  .insp-table .insp-btn-fail::after { content:'✕'; }
+  .insp-table .insp-btn-na::after { content:'N/A'; font-size:11px; }
 }
 
 @media (max-width: 1024px) {
@@ -8109,9 +8143,13 @@ function openQuickInspectionModal() {
             <h2>Quick Inspection</h2>
             <button class="modal-close" type="button" onclick="closeQuickInspectionModal()">✕</button>
           </div>
-          <div class="form-group">
-            <label class="form-label">Unit</label>
-            <select class="form-select" id="quickInspectionUnit" required></select>
+          <div class="form-group" style="position:relative;">
+            <label class="form-label">Unit Number</label>
+            <input type="search" class="form-input" id="quickInspectionUnitSearch"
+              placeholder="Search unit number..." autocomplete="off" inputmode="numeric"
+              oninput="filterQuickInspectionUnits()" onfocus="filterQuickInspectionUnits()" required>
+            <div id="quickInspectionUnitSuggestions" class="suggestions-list"></div>
+            <input type="hidden" id="quickInspectionUnit">
           </div>
           <div class="form-group">
             <label class="form-label">Inspection Type</label>
@@ -8130,31 +8168,90 @@ function openQuickInspectionModal() {
     .map(u => ({ apt:String(u.apt || u.unit_number), building:String(u.building || ''), floor:String(u.floor || '') }))
     .filter((u, i, list) => list.findIndex(x => x.apt === u.apt) === i)
     .sort((a, b) => a.apt.localeCompare(b.apt, undefined, { numeric:true }));
+  const unitSearch = document.getElementById('quickInspectionUnitSearch');
   const unitSelect = document.getElementById('quickInspectionUnit');
   const typeSelect = document.getElementById('quickInspectionType');
-  if (!unitSelect || !typeSelect) return;
-  unitSelect.innerHTML = '<option value="">Select Unit</option>' + units.map(u => `<option value="${u.apt}">${u.apt} · ${u.building} · ${u.floor}</option>`).join('');
+  if (!unitSearch || !unitSelect || !typeSelect) return;
+  window.quickInspectionUnits = units;
+  unitSearch.value = '';
+  unitSelect.value = '';
+  document.getElementById('quickInspectionUnitSuggestions').innerHTML = '';
   typeSelect.innerHTML = '<option value="">Select Inspection Type</option>' + INSP_INSPECTION_TYPES.map(t => `<option value="${t.id}">${t.num}. ${t.name}</option>`).join('');
+  updateQuickInspectionTypeOptions(null);
   showAppModal('quickInspectionModal');
+}
+
+function updateQuickInspectionTypeOptions(unit) {
+  const select = document.getElementById('quickInspectionType');
+  if (!select) return;
+  [...select.options].forEach(option => {
+    if (!option.value) return;
+    const type = INSP_INSPECTION_TYPES.find(t => String(t.id) === String(option.value));
+    const applicable = !unit || !type || inspIsInspectionTypeApplicableForBuilding(type, unit.building);
+    option.disabled = !applicable;
+    option.textContent = type ? `${type.num}. ${type.name}${applicable ? '' : ' (not applicable)'}` : option.textContent;
+  });
+  if (select.selectedOptions[0]?.disabled) select.value = '';
+}
+
+function filterQuickInspectionUnits() {
+  const input = document.getElementById('quickInspectionUnitSearch');
+  const hidden = document.getElementById('quickInspectionUnit');
+  const list = document.getElementById('quickInspectionUnitSuggestions');
+  if (!input || !hidden || !list) return;
+  const term = String(input.value || '').trim().toLowerCase();
+  hidden.value = '';
+  const matches = (window.quickInspectionUnits || [])
+    .filter(u => !term || String(u.apt).toLowerCase().startsWith(term)).slice(0, 15);
+  list.innerHTML = matches.length
+    ? matches.map(u => `<div class="suggestion-item" role="option" onclick="selectQuickInspectionUnit('${String(u.apt).replace(/'/g, "\\'")}')"><strong>${u.apt}</strong><span>${u.building} · ${u.floor}</span></div>`).join('')
+    : '<div class="suggestion-item" style="color:#999;cursor:default;">No matches found</div>';
+  list.style.display = 'block';
+  const selected = (window.quickInspectionUnits || []).find(u => String(u.apt).toLowerCase() === term);
+  updateQuickInspectionTypeOptions(selected || null);
+}
+
+function selectQuickInspectionUnit(apt) {
+  const input = document.getElementById('quickInspectionUnitSearch');
+  const hidden = document.getElementById('quickInspectionUnit');
+  const list = document.getElementById('quickInspectionUnitSuggestions');
+  if (!input || !hidden) return;
+  input.value = apt;
+  hidden.value = apt;
+  if (list) list.innerHTML = '';
+  const selected = (window.quickInspectionUnits || []).find(u => String(u.apt) === String(apt));
+  updateQuickInspectionTypeOptions(selected || null);
 }
 
 function closeQuickInspectionModal() { animateModalClose('quickInspectionModal'); }
 
 function startQuickInspection(event) {
   event.preventDefault();
-  const apt = document.getElementById('quickInspectionUnit')?.value;
+  const apt = document.getElementById('quickInspectionUnit')?.value || document.getElementById('quickInspectionUnitSearch')?.value.trim();
   const typeId = document.getElementById('quickInspectionType')?.value;
   const liveUnit = Array.isArray(window.data) ? window.data.find(u => String(u.apt || u.unit_number || '') === String(apt)) : null;
   inspCurrentUnit = liveUnit || INSP_DEMO_UNITS.find(u => String(u.apt) === String(apt));
   inspCurrentType = INSP_INSPECTION_TYPES.find(t => String(t.id) === String(typeId));
   if (!inspCurrentUnit || !inspCurrentType) return;
+  if (!inspIsInspectionTypeApplicableForBuilding(inspCurrentType, inspCurrentUnit.building)) {
+    alert('This inspection type is not applicable to the selected unit.');
+    return;
+  }
   window.inspLastSelectedUnit = inspCurrentUnit;
   window.inspReturnAfterInspection = 'inspection-type-list';
   inspChecklistItems = inspCurrentType.items.map(() => ({ status:null, comment:'', photos:[] }));
   animateModalClose('quickInspectionModal', () => {
+    const selectedUnit = inspCurrentUnit;
+    const selectedType = inspCurrentType;
+    const selectedItems = inspChecklistItems;
     const tab = document.querySelector('.tab-main[onclick*="inspections"]');
     if (tab) switchMainTab('inspections', tab);
     inspShowTab('new');
+    // inspShowTab('new') resets the search step; restore the Quick Inspection selection.
+    inspCurrentUnit = selectedUnit;
+    inspCurrentType = selectedType;
+    inspChecklistItems = selectedItems;
+    window.inspLastSelectedUnit = selectedUnit;
     inspGoStep(3);
   });
 }
@@ -9076,6 +9173,9 @@ function inspOpenFailModal(idx) {
   const punchText = document.getElementById('insp-punch-preview-text');
   const modal = document.getElementById('insp-fail-modal');
 
+  // Keep the failure dialog above the checklist on iPhone/iPad stacking contexts.
+  if (modal && modal.parentElement !== document.body) document.body.appendChild(modal);
+
   if (itemEl) itemEl.textContent = inspCurrentType.items[idx];
   if (commentEl) commentEl.value = inspTempComment;
   if (previewsEl) previewsEl.innerHTML = '';
@@ -9084,8 +9184,14 @@ function inspOpenFailModal(idx) {
 
   if (punchPrev) punchPrev.style.display = inspTempComment ? 'block' : 'none';
   if (punchText) punchText.textContent = inspTempComment;
-  if (modal) modal.classList.remove('hidden');
-  if (modal) modal.style.display = 'flex';
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.style.setProperty('position', 'fixed', 'important');
+    modal.style.setProperty('inset', '0', 'important');
+    modal.style.setProperty('display', 'flex', 'important');
+    modal.style.setProperty('z-index', '2147483000', 'important');
+    modal.style.setProperty('pointer-events', 'auto', 'important');
+  }
   if (modal && !modal.querySelector('.insp-modal-close')) {
     const close = document.createElement('button');
     close.className = 'insp-modal-close';
@@ -9875,6 +9981,25 @@ function inspOpenInspectionRecord(recordId) {
 }
 
 // PUNCH LIST
+function inspFindPunchInspection(item) {
+  const records = inspGetInspections();
+  const historyId = Array.isArray(item.history) ? [...item.history].reverse().find(h => h.inspectionId)?.inspectionId : null;
+  if (historyId) {
+    const byId = records.find(r => String(r.id) === String(historyId));
+    if (byId) return byId;
+  }
+  const apt = String(item.location || item.apt || '');
+  const typeNum = String(item.typeNum || '');
+  const description = String(item.description || item.title || '').replace(/^\s*\d+\.\s*/, '').trim().toLowerCase();
+  const candidates = records.filter(r => String(r.apt) === apt && (!typeNum || String(r.typeNum) === typeNum));
+  return candidates.slice().reverse().find(r => (r.items || []).some(i => String(i.description || '').trim().toLowerCase() === description && i.status === 'FAIL')) || candidates[candidates.length - 1] || null;
+}
+
+function inspOpenPunchInspection(recordId) {
+  if (!recordId) return;
+  inspOpenInspectionRecord(recordId);
+}
+
 function inspLoadPunchList() {
   const unitFilter = window.inspHistoryUnitFilter ? String(window.inspHistoryUnitFilter) : '';
   const query = (document.getElementById('insp-punch-unit-search')?.value || '').trim().toLowerCase();
@@ -9896,7 +10021,9 @@ function inspLoadPunchList() {
     comment: item.comment || '',
     priority: item.priority || 'High',
     photoCount: item.photoCount || (item.photos || []).length,
-    photos: item.photos || []
+    photos: item.photos || [],
+    history: Array.isArray(item.history) ? item.history : [],
+    inspectionId: inspFindPunchInspection(item)?.id || null
   })) : [];
 
   const container = document.getElementById('insp-punchlist-body');
@@ -9929,9 +10056,13 @@ function inspLoadPunchList() {
           <div style="font-size:13px;margin-top:2px">${f.description}</div>
           <div style="font-size:12px;color:#64748b;margin-top:2px">💬 ${f.comment}</div>
           ${f.photoCount > 0 ? `<div style="font-size:12px;color:#64748b">📷 ${f.photoCount} foto(s)</div>` : ''}
+          <div style="font-size:12px;color:#64748b;margin-top:3px">History: ${f.history.length ? `${f.history.length} change(s) recorded` : 'No history recorded'}</div>
         </div>
          <div style="font-size:12px;color:#64748b;white-space:nowrap">Created: ${new Date(f.date).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}${f.closedAt ? `<br>Closed: ${new Date(f.closedAt).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}` : ''}</div>
-        ${f.photos?.length ? `<button class="insp-btn insp-btn-sm insp-btn-outline" onclick="inspOpenPunchPhotos('${f.apt}', '${f.typeNum}')">View Photos</button>` : ''}
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+          ${f.inspectionId ? `<button class="insp-btn insp-btn-sm insp-btn-outline" onclick='inspOpenPunchInspection(${JSON.stringify(f.inspectionId)})'>View</button>` : ''}
+          ${f.photos?.length ? `<button class="insp-btn insp-btn-sm insp-btn-outline" onclick="inspOpenPunchPhotos('${f.apt}', '${f.typeNum}')">View Photos</button>` : ''}
+        </div>
       </div>
     `).join('')}
   `;
