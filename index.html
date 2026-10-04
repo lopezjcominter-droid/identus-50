@@ -1198,6 +1198,18 @@
   .insp-table .insp-btn-pass::after { content:'✓'; }
   .insp-table .insp-btn-fail::after { content:'✕'; }
   .insp-table .insp-btn-na::after { content:'N/A'; font-size:11px; }
+  .tab-main { max-width:25%; padding:10px 5px !important; font-size:11px !important; line-height:1.15; white-space:normal !important; overflow-wrap:anywhere; word-break:break-word; }
+  #dashboardTab .chart-title, #dashboardTab .metric-label, #dashboardTab .metric-detail { max-width:100%; overflow-wrap:anywhere; word-break:break-word; }
+  .insp-table { min-width:0; width:100%; }
+  .insp-table th, .insp-table td { padding:6px 2px; }
+  .insp-table th:first-child, .insp-table td:first-child { width:55%; padding-left:4px; }
+  .insp-table th:not(:first-child), .insp-table td:not(:first-child) { width:15%; }
+}
+
+@media (max-width: 900px) and (orientation: landscape) {
+  .insp-table { min-width:0; width:100%; }
+  .insp-table th:first-child, .insp-table td:first-child { width:58%; }
+  .insp-table th:not(:first-child), .insp-table td:not(:first-child) { width:14%; }
 }
 
 @media (max-width: 1024px) {
@@ -8146,7 +8158,7 @@ function openQuickInspectionModal() {
           <div class="form-group" style="position:relative;">
             <label class="form-label">Unit Number</label>
             <input type="search" class="form-input" id="quickInspectionUnitSearch"
-              placeholder="Search unit number..." autocomplete="off" inputmode="numeric"
+              placeholder="Search unit number or name..." autocomplete="off" inputmode="text" enterkeyhint="search"
               oninput="filterQuickInspectionUnits()" onfocus="filterQuickInspectionUnits()" required>
             <div id="quickInspectionUnitSuggestions" class="suggestions-list"></div>
             <input type="hidden" id="quickInspectionUnit">
