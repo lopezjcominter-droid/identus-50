@@ -898,9 +898,7 @@
       .progress-small {
         display: none;
       }
-      .table-container {
-        overflow-x: hidden;
-      }
+      .table-container { overflow-x: auto; }
     }
 
     @media (max-width: 480px) {
@@ -1155,6 +1153,37 @@
   .insp-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .insp-btn, .btn, button { min-height: 40px; }
   .form-input, input, select, textarea { font-size: 16px !important; }
+  /* Keep the inspection checklist usable on phones and narrow tablets. */
+  .insp-table { display:block; width:100%; }
+  .insp-table thead { display:none; }
+  .insp-table tbody, .insp-table tr { display:block; width:100%; }
+  .insp-table tr { padding:10px 0; border-bottom:1px solid #e2e8f0; }
+  .insp-table td { display:block; width:100%; padding:6px 12px; border:0; }
+  .insp-table td[data-label]::before { content:attr(data-label); display:block; margin-bottom:4px; color:#64748b; font-size:11px; font-weight:700; letter-spacing:.04em; }
+  .insp-table td:first-child::before { display:none; }
+  .insp-btn-group, .insp-btn-status { width:100%; }
+  .insp-btn-status { min-height:42px; font-size:13px; }
+  .insp-checklist-actions { flex-wrap:wrap; justify-content:flex-end; }
+  .insp-checklist-actions .insp-btn { flex:1 1 120px; }
+}
+
+@media (max-width: 1024px) {
+  /* iPad and smaller: keep the sidebar off-canvas so the workspace fits the viewport. */
+  .hamburger-btn { display:flex; align-items:center; justify-content:center; }
+  .sidebar { position:fixed; left:-260px; top:0; bottom:0; width:260px; height:100dvh; z-index:200; transition:left .25s ease; }
+  .container.sidebar-open .sidebar { left:0; }
+  .main { min-width:0; width:100%; overflow:hidden; }
+  .header { padding:14px 16px; flex-wrap:wrap; gap:10px; }
+  .header-actions { flex-wrap:wrap; gap:8px; }
+  .content { padding:16px; min-width:0; }
+  .content, #dashboardTab, #punchTab, #reportTab, #inspectionsTab { width:100%; max-width:100%; overflow-x:hidden; }
+  .header-left { min-width:0; flex:1 1 220px; }
+  .header-actions { width:100%; min-width:0; }
+  .header-actions .btn { min-width:0; max-width:100%; flex:1 1 145px; }
+  .tab-main-container, .tabs, .insp-tabs { max-width:100%; overflow-x:auto; }
+  .insp-checklist-header { flex-wrap:wrap; gap:10px; }
+  .insp-checklist-header > div { min-width:0; }
+  .charts-section, .charts-row { min-width:0; }
 }
 </style>
 </head>
@@ -3398,8 +3427,7 @@ async function openProjectSetup() {
       setupBuildingCount = 0;
       const setupList = document.getElementById('setupBuildingsList');
       setupList.innerHTML = '<div style="padding:12px;text-align:center;color:#6B7280;font-size:13px;">⏳ Loading from Supabase...</div>';
-document.getElementById('projectSetupModal').style.display = 'flex';
-document.getElementById('projectSetupModal').classList.add('show');
+showAppModal('projectSetupModal');
       // Render inspection types per building config
       setTimeout(() => renderInspBuildingConfig(), 100);
 
@@ -4324,7 +4352,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         }
       });
 
-      document.getElementById('unitModal').classList.add('show');
+      showAppModal('unitModal');
     }
 
     function handleViewClick(btn, evt) {
@@ -4414,10 +4442,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
       switchDetailsTab('overview');
       const detailsModal = document.getElementById('detailsModal');
-      detailsModal.style.display = 'flex';
-      detailsModal.classList.remove('insp-closing');
-      detailsModal.removeAttribute('aria-hidden');
-      detailsModal.classList.add('show');
+      showAppModal('detailsModal');
     }
 
     function switchDetailsTab(tab) {
@@ -4685,6 +4710,16 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       return html;
     }
 
+    function showAppModal(id) {
+      const modal = document.getElementById(id);
+      if (!modal) return null;
+      modal.style.display = 'flex';
+      modal.classList.remove('insp-closing');
+      modal.removeAttribute('aria-hidden');
+      requestAnimationFrame(() => modal.classList.add('show'));
+      return modal;
+    }
+
     function animateModalClose(id, after) {
       const modal = document.getElementById(id);
       if (!modal) return;
@@ -4720,7 +4755,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       if (photosCamera) photosCamera.value = '';
       pendingEventPhotos = []; renderPendingPhotos();
       const sb = document.querySelector('#addEventModal button[type=submit]'); if (sb) { sb.disabled = false; sb.textContent = 'Save Event'; }
-      document.getElementById('addEventModal').classList.add('show');
+      showAppModal('addEventModal');
     }
 
     function autoFillEventSystem(system) {
@@ -4959,7 +4994,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       document.getElementById('unitBuilding').value = '';
       document.getElementById('unitFloor').value = '';
       setupSystemsForm();
-      document.getElementById('unitModal').classList.add('show');
+      showAppModal('unitModal');
       setupUnitNumberAutocomplete();
     }
 
@@ -5129,7 +5164,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       document.getElementById('quickPhotoFile').value = '';
       document.getElementById('quickPhotoCamera').value = '';
       pendingQuickPhotos = []; renderQuickPhotos();
-      document.getElementById('quickAddModal').classList.add('show');
+      showAppModal('quickAddModal');
       setupQuickFloorOptions();
       const quickBuilding = document.getElementById('quickBuilding');
       if (quickBuilding && !quickBuilding.dataset.floorBound) {
@@ -6072,7 +6107,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       document.getElementById('eventPriority').value = 'Medium';
       document.getElementById('eventAssignee').value = '';
       pendingEvidencePhotos = []; renderEvidencePhotos();
-      document.getElementById('createEventModal').classList.add('show');
+      showAppModal('createEventModal');
     }
 
     function closeCreateEventModal() {
@@ -6441,7 +6476,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       window.isEditingEvent = true;
 
       document.querySelector('#createEventModal .modal-header h2').textContent = 'Edit Event';
-      document.getElementById('createEventModal').classList.add('show');
+      showAppModal('createEventModal');
     }
 
     async function deletePunchEvent(idx) {
@@ -8487,17 +8522,17 @@ function inspRenderChecklist() {
           ${inspChecklistItems[i]?.photos?.length ? `<button type="button" class="insp-photo-icon" title="View photos" onclick="inspOpenChecklistItemPhotos(${i})">📷 ${inspChecklistItems[i].photos.length}</button>` : ''}
         </div>
       </td>
-      <td>
+      <td data-label="PASS">
         <div class="insp-btn-group">
           <button class="insp-btn-status insp-btn-pass" id="insp-btn-pass-${i}" onclick="inspSetStatus(${i},'PASS')">✓ PASS</button>
         </div>
       </td>
-      <td>
+      <td data-label="FAIL">
         <div class="insp-btn-group">
           <button class="insp-btn-status insp-btn-fail" id="insp-btn-fail-${i}" onclick="inspSetStatus(${i},'FAIL')">✗ FAIL</button>
         </div>
       </td>
-      <td>
+      <td data-label="N/A">
         <div class="insp-btn-group">
           <button class="insp-btn-status insp-btn-na" id="insp-btn-na-${i}" onclick="inspSetStatus(${i},'NA')">— N/A</button>
         </div>
