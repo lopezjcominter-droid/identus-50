@@ -1374,7 +1374,7 @@
           <div class="table-container">
             <div style="display: flex; justify-content: flex-start; align-items: center; gap: 24px; margin-bottom: 16px; padding: 0 16px; padding-top: 16px;">
               <div class="table-title">Units List</div>
-<input type="text" id="unitsSearchInput" name="units-filter-query" placeholder="Search units..." autocomplete="new-password" autocapitalize="none" spellcheck="false" inputmode="search" enterkeyhint="search" aria-autocomplete="none" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" oninput="handleUnitsSearch()" style="max-width: 200px; padding: 8px 12px; border: 1px solid #E5E7EB; border-radius: 6px; font-size: 12px; color: #6B7280; background: white; margin-left: -8px;">
+<input type="text" id="unitsSearchInput" name="units-filter-query" placeholder="Search units..." autocomplete="new-password" autocapitalize="none" spellcheck="false" inputmode="search" enterkeyhint="search" aria-autocomplete="none" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly'); if(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(this.value)){this.value='';}" oninput="handleUnitsSearch()" style="max-width: 200px; padding: 8px 12px; border: 1px solid #E5E7EB; border-radius: 6px; font-size: 12px; color: #6B7280; background: white; margin-left: -8px;">
               <div style="flex: 1;"></div>
               <div id="unitsCounter" style="font-size: 12px; color: #1F2937; font-weight: 700; white-space: nowrap;">Showing 0 of 0</div>
             </div>
@@ -7260,7 +7260,15 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         x.style.cssText = 'display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:none;font-size:18px;line-height:1;color:#6B7280;cursor:pointer;padding:2px 4px;';
         w.appendChild(x);
         const sync = () => { x.style.display = si.value ? 'block' : 'none'; };
+        const clearCredentialAutofill = () => {
+          if (!si || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(si.value.trim())) return;
+          si.value = ''; unitsSearchTerm = ''; sync(); handleUnitsSearch();
+        };
         si.addEventListener('input', sync);
+        si.addEventListener('focus', clearCredentialAutofill);
+        si.addEventListener('input', clearCredentialAutofill);
+        si.addEventListener('change', clearCredentialAutofill);
+        si.addEventListener('blur', clearCredentialAutofill);
         x.addEventListener('mousedown', e => e.preventDefault());
         x.addEventListener('click', () => { si.value = ''; sync(); handleUnitsSearch(); si.focus(); });
       }
