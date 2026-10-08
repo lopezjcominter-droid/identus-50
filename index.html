@@ -518,6 +518,8 @@
       overscroll-behavior: contain;
       opacity: 1;
     }
+    /* Child dialogs opened from Unit History must sit above the details modal. */
+    #unitModal, #quickAddModal, #addEventModal, #createEventModal, #projectSetupModal { z-index: 10040; }
 
     .modal.show {
       display: flex;
@@ -9491,9 +9493,7 @@ function inspRenderTypeGrid() {
       }
     }
     if (!isApplicable) badge = '<div class="insp-badge insp-badge-na" style="margin-top:6px">Not applicable</div>';
-    const resetButton = (LOCAL_PROJECT_MODE || window.location.protocol === 'file:')
-      ? `<button type="button" class="insp-card-reset" data-reset-inspection-card="${t.id}" title="Reset inspection" aria-label="Reset inspection">↻</button>`
-      : '';
+    const resetButton = `<button type="button" class="insp-card-reset" data-reset-inspection-card="${t.id}" title="Reset inspection" aria-label="Reset inspection">↻</button>`;
     return `
       <a href="#inspection-${t.id}" class="insp-type-btn ${cls}" data-insp-type-id="${t.id}" ${isApplicable ? '' : 'aria-disabled="true" tabindex="-1"'} style="position:relative">
         ${resetButton}
