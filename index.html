@@ -10647,9 +10647,33 @@ async function inspResetCurrentInspection(options = {}) {
       if (recordError) throw recordError;
       const remoteRecordIds = (remoteRecords || []).map(row => row.id).filter(Boolean);
       if (remoteRecordIds.length) {
+        // Remove checklist rows explicitly before the parent records.  This
+        // keeps the reset reliable even if a project was created without the
+        // expected cascade constraint.
+        const { error: itemDeleteError } = await sbClient.from('inspection_record_items').delete()
+          .in('inspection_record_id', remoteRecordIds);
+        if (itemDeleteError) throw itemDeleteError;
+      }
+      // Older Punch List rows may not have inspection_id yet. Remove every
+      // inspection-generated row for this unit/type as well, so reset leaves
+      // no stale failure, history, or related trace behind.
+      const { data: remotePunchRows, error: punchLoadError } = await sbClient.from('punch_list')
+        .select('id,inspection_id,source,type,type_num,unit_id,location')
+        .eq('project_id', PROJECT_ID).eq('unit_id', remoteUnit.id);
+      if (punchLoadError) throw punchLoadError;
+      const punchIds = (remotePunchRows || []).filter(row => {
+        const linked = remoteRecordIds.includes(row.inspection_id);
+        const generated = row.source === 'inspection';
+        const sameType = (typeNum && String(row.type_num || '') === typeNum)
+          || (typeName && String(row.type || '').trim().toLowerCase() === typeName);
+        return linked || (generated && sameType);
+      }).map(row => row.id).filter(Boolean);
+      for (let i = 0; i < punchIds.length; i += 100) {
         const { error: punchError } = await sbClient.from('punch_list').delete()
-          .eq('project_id', PROJECT_ID).in('inspection_id', remoteRecordIds);
+          .eq('project_id', PROJECT_ID).in('id', punchIds.slice(i, i + 100));
         if (punchError) throw punchError;
+      }
+      if (remoteRecordIds.length) {
         const { error: deleteRecordError } = await sbClient.from('inspection_records').delete()
           .eq('project_id', PROJECT_ID).in('id', remoteRecordIds);
         if (deleteRecordError) throw deleteRecordError;
