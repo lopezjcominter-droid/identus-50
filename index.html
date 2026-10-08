@@ -505,6 +505,18 @@
       justify-content: center;
       padding: 20px;
       overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+
+    /* Unit Details stays opaque and owns the scroll area on phones/tablets. */
+    #detailsModal { z-index: 10020; opacity: 1; }
+    #detailsModal.show { opacity: 1; visibility: visible; pointer-events: auto; }
+    #detailsModal .modal-content {
+      max-height: calc(100dvh - 40px);
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      opacity: 1;
     }
 
     .modal.show {
@@ -1004,6 +1016,8 @@
     .insp-result-info { font-size:12px; color:#64748b; }
     .insp-type-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px; }
     .insp-type-btn { display:block; padding:14px; border:2px solid #e2e8f0; border-radius:8px; cursor:pointer; background:#fff; text-align:left; text-decoration:none; color:inherit; transition:all .2s; }
+    .insp-card-reset { position:absolute; top:7px; right:8px; width:28px; height:28px; padding:0; border:0; border-radius:50%; background:transparent; color:#64748b; font-size:21px; line-height:28px; cursor:pointer; opacity:.62; transition:opacity .15s, background .15s, color .15s; }
+    .insp-card-reset:hover, .insp-card-reset:focus-visible { opacity:1; background:#e2e8f0; color:#1e40af; outline:none; }
     .insp-type-btn:hover { border-color:#1e3a8a; background:#dbeafe; }
     .insp-type-btn .insp-type-num { font-size:11px; color:#64748b; margin-bottom:4px; }
     .insp-type-btn .insp-type-name { font-weight:700; font-size:14px; color:#1a202c; }
@@ -1371,10 +1385,16 @@
             </div>
           </div>
 
+          <div id="inspectionRequiredPanel" class="chart-container" style="display:none;margin-bottom:24px;border-left:4px solid #F59E0B;">
+            <div class="chart-title">Inspection Required</div>
+            <div style="font-size:12px;color:#64748B;margin:6px 0 12px;">Systems at 100% are ready for their applicable inspection.</div>
+            <div id="inspectionRequiredList"></div>
+          </div>
+
           <div class="table-container">
             <div style="display: flex; justify-content: flex-start; align-items: center; gap: 24px; margin-bottom: 16px; padding: 0 16px; padding-top: 16px;">
               <div class="table-title">Units List</div>
-<input type="text" id="unitsSearchInput" name="units-filter-query" placeholder="Search units..." autocomplete="new-password" autocapitalize="none" spellcheck="false" inputmode="search" enterkeyhint="search" aria-autocomplete="none" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly'); if(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(this.value)){this.value='';}" oninput="handleUnitsSearch()" style="max-width: 200px; padding: 8px 12px; border: 1px solid #E5E7EB; border-radius: 6px; font-size: 12px; color: #6B7280; background: white; margin-left: -8px;">
+<input type="search" id="unitsSearchInput" placeholder="Search units..." autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="search" enterkeyhint="search" role="searchbox" aria-autocomplete="none" data-form-type="other" data-bv-autocomplete="off" data-lpignore="true" data-1p-ignore="true" readonly onpointerdown="this.removeAttribute('readonly')" onkeydown="this.removeAttribute('readonly')" oninput="if(window.isCredentialSearchValue && window.isCredentialSearchValue(this.value)){this.value='';} handleUnitsSearch()" style="max-width: 200px; padding: 8px 12px; border: 1px solid #E5E7EB; border-radius: 6px; font-size: 12px; color: #6B7280; background: white; margin-left: -8px;">
               <div style="flex: 1;"></div>
               <div id="unitsCounter" style="font-size: 12px; color: #1F2937; font-weight: 700; white-space: nowrap;">Showing 0 of 0</div>
             </div>
@@ -1506,7 +1526,7 @@
             <div id="insp-search-results" style="display:none"></div>
             <div class="insp-empty" id="insp-search-hint">
               <div style="font-size:36px">🏗️</div>
-              <h4>98 units available</h4>
+              <h4 id="insp-unit-count-hint">101 units available</h4>
               <p>Type a unit number or building name to begin</p>
             </div>
           </div>
@@ -1577,11 +1597,7 @@
             <div id="insp-fail-items"></div>
           </div>
           <div id="insp-summary-items" style="padding:16px"></div>
-          <div style="padding:16px;display:flex;gap:8px;flex-wrap:wrap">
-            <button class="insp-btn insp-btn-primary" onclick="inspNewInspection()">➕ New Inspection</button>
-            <button class="insp-btn insp-btn-outline" onclick="inspShowTab('history')">📋 View History</button>
-            <button class="insp-btn insp-btn-outline" onclick="inspShowTab('punchlist')">⚠️ View Punch List</button>
-          </div>
+          <!-- Summary is read-only. Editing/reinspection is available through Resume in History. -->
         </div>
       </div>
 
@@ -1770,6 +1786,7 @@
             <option value="Data">Data</option>
             <option value="Fire Alarm">Fire Alarm</option>
             <option value="Lighting">Lighting</option>
+            <option value="Underground">Underground</option>
           </select>
         </div>
 
@@ -1820,6 +1837,7 @@
             <option value="Data">Data</option>
             <option value="Fire Alarm">Fire Alarm</option>
             <option value="Lighting">Lighting</option>
+            <option value="Underground">Underground</option>
           </select>
         </div>
 
@@ -2372,8 +2390,10 @@ Object.assign(APP_TRANSLATIONS.en, {
     // ===== SUPABASE CONFIGURATION =====
     let SUPABASE_URL = localStorage.getItem('cfg_supabase_url') || 'https://kihsukzcbohmxovbyisi.supabase.co';
     let SUPABASE_KEY = localStorage.getItem('cfg_supabase_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHN1a3pjYm9obXhvdmJ5aXNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjEzMjEsImV4cCI6MjEwNTkzNzMyMX0.91APDO6eQ25ZkdOsBXMj_Uhv0EtkfWULn2N5jEfAGZA';
-    // Production uses Supabase by default. Append ?local=1 only for isolated local testing.
-    const LOCAL_PROJECT_MODE = new URLSearchParams(window.location.search).get('local') === '1';
+    // Supabase is the default source for local previews and hosted builds.
+    // Append ?local=1 only for isolated local testing with browser storage.
+    const LOCAL_PROJECT_MODE = new URLSearchParams(window.location.search).get('local') === '1'
+      || ['localhost', '127.0.0.1'].includes(window.location.hostname);
     function addLocalAudit(action, details = {}) {
       try {
         const log = JSON.parse(localStorage.getItem('local_audit_log') || '[]');
@@ -2394,6 +2414,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       document.title = 'Identus 50 – ' + n;
     }
     async function loadSharedProject() {
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') { applyProjectName(); return; }
       for (let i = 0; i < 20 && !sbClient; i++) await new Promise(r => setTimeout(r, 500));
       if (!sbClient) return;
       try {
@@ -2411,6 +2432,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       localStorage.setItem('cfg_project_address', address);
       sharedProject = { name, address };
       applyProjectName();
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') return;
       try {
         const { data, error } = await sbClient.from('projects').update({ name, address }).eq('id', PROJECT_ID).select('id');
         if (error || !data || data.length === 0) {
@@ -2460,6 +2482,12 @@ Object.assign(APP_TRANSLATIONS.en, {
       document.getElementById('reportTab').style.display = tab === 'report' ? 'block' : 'none';
       document.getElementById('inspectionsTab').style.display = tab === 'inspections' ? 'block' : 'none';
 
+      if (tab === 'punch') {
+        renderPunchlist();
+        updateMetrics();
+        updateCharts();
+      }
+
       if (tab === 'inspections') {
         const panel = document.getElementById('inspectionsTab');
         if (panel) {
@@ -2486,7 +2514,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (!hasSystemConfig) return SYSTEMS;
       return SYSTEMS.filter(s => u.systems[s]);
     }
-    const SYSTEMS = ['Rough-In', 'Trim-Out', 'Fire-Stop', 'Wiring', 'Electric Panel', 'Testing', 'Data', 'Fire Alarm', 'Lighting'];
+    const SYSTEMS = ['Rough-In', 'Trim-Out', 'Fire-Stop', 'Wiring', 'Electric Panel', 'Testing', 'Data', 'Fire Alarm', 'Lighting', 'Underground'];
     const BUILDINGS = ['Building 1', 'Building 2', 'Building 3', 'Clubhouse', 'Parking'];
     // Note: Clubhouse and Parking are standalone buildings (not sub-units of Building 2)
     const FLOORS = ['Floor 1', 'Floor 2', 'Floor 3', 'Underground'];
@@ -2507,7 +2535,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     };
 
     async function savePunchlist() {
-      if (LOCAL_PROJECT_MODE) {
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
         try { localStorage.setItem('local_punchlist', JSON.stringify(punchlist || [])); } catch (e) { console.warn('Local punch list save failed', e); }
         return;
       }
@@ -2528,7 +2556,9 @@ Object.assign(APP_TRANSLATIONS.en, {
 
           const punchPayload = {
             title: event.description,
-            description: event.description + (event.photos && event.photos.length ? '\u0001PHOTOS:' + JSON.stringify(event.photos) : ''),
+            // Inspection photos already live with the inspection record. Do
+            // not duplicate large base64 payloads inside Punch List rows.
+            description: event.description + (event.source === 'inspection' ? '' : (event.photos && event.photos.length ? '\u0001PHOTOS:' + JSON.stringify(event.photos) : '')),
             building_id: (data.find(u => u.apt === event.location) || {}).building_id || null,
             priority: event.priority,
             status: event.status,
@@ -2536,6 +2566,14 @@ Object.assign(APP_TRANSLATIONS.en, {
             created_by: 'app_user',
             project_id: PROJECT_ID,
             unit_id: resolvedUnitId,
+            source: event.source || 'manual',
+            inspection_id: event.inspectionId || null,
+            type: event.type || null,
+            type_num: event.typeNum || null,
+            comment: event.comment || null,
+            history: Array.isArray(event.history) ? event.history : [],
+            closed_by: event.closedBy || null,
+            resolution: event.resolution || null,
             reviewed_at: event.reviewedAt || null,
             closed_at: event.closedAt || null
           };
@@ -2558,15 +2596,78 @@ Object.assign(APP_TRANSLATIONS.en, {
         await new Promise(resolve => setTimeout(resolve, 500));
         await loadPunchlist();
         renderPunchlist();
+        updateMetrics();
+        updateCharts();
         console.log('✅ Punchlist resynced after save');
       } catch (err) {
         console.warn('❌ Could not save to Supabase:', err);
       }
     }
 
+    function normalizePunchStatus(value) {
+      const status = String(value || '').trim().toLowerCase();
+      if (status === 'closed' || status === 'completed' || status === 'complete') return 'Closed';
+      if (status === 'pending' || status === 'pending review' || status === 'review') return 'Pending Review';
+      return 'Open';
+    }
+
+    function getLocallyDeletedPunchIds() {
+      try {
+        const stored = JSON.parse(localStorage.getItem('local_deleted_punch_ids') || '[]');
+        return new Set(Array.isArray(stored) ? stored.map(String) : []);
+      } catch (_) { return new Set(); }
+    }
+
+    function isLocallyDeletedPunch(item) {
+      const inspectionDerived = item?.source === 'inspection' || String(item?.id || '').startsWith('inspection-') || Boolean(item?.inspectionId);
+      if (inspectionDerived) return false;
+      return getLocallyDeletedPunchIds().has(String(item?.id || ''));
+    }
+
+    function parsePunchHistory(value) {
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string' && value.trim()) {
+        try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch (e) { return []; }
+      }
+      return [];
+    }
+
+    function getPunchHistory(value) {
+      const item = Array.isArray(value) ? null : (value || {});
+      const entries = parsePunchHistory(Array.isArray(value) ? value : item.history);
+      if (entries.length || !item) return entries;
+      const fallback = [];
+      if (item.createdAt || item.date) fallback.push({ action:'created', date:item.createdAt || item.date, inspector:item.assignee || item.inspector || '' });
+      if (item.reviewedAt) fallback.push({ action:'reviewed', date:item.reviewedAt, inspector:item.assignee || item.inspector || '' });
+      if (item.closedAt) fallback.push({ action:'completed', date:item.closedAt, inspector:item.closedBy || item.assignee || item.inspector || '' });
+      return fallback;
+    }
+
+    function punchHistoryLabel(action) {
+      const labels = { created: 'Created', updated: 'Updated', reviewed: 'Submitted for review', completed: 'Completed', reopened: 'Reopened' };
+      return labels[String(action || '').toLowerCase()] || String(action || 'Changed');
+    }
+
+    function formatPunchHistory(history) {
+      const entries = getPunchHistory(history);
+      if (!entries.length) return '<div style="color:#9CA3AF">Change history: No changes recorded</div>';
+      return `<div>Change history:</div><ul style="margin:4px 0 0 16px;padding:0">${entries.map(entry => {
+        const date = entry.date ? new Date(entry.date).toLocaleString('en-US', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : 'Date not recorded';
+        const actor = entry.inspector || entry.by || entry.user || '';
+        return `<li>${punchHistoryLabel(entry.action)} · ${date}${actor ? ` · ${actor}` : ''}${entry.result ? ` · ${entry.result}` : ''}</li>`;
+      }).join('')}</ul>`;
+    }
+
     async function loadPunchlist() {
-      if (LOCAL_PROJECT_MODE) {
-        try { punchlist = JSON.parse(localStorage.getItem('local_punchlist') || '[]'); } catch (e) { punchlist = []; }
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
+        try {
+          const deletedIds = getLocallyDeletedPunchIds();
+          punchlist = JSON.parse(localStorage.getItem('local_punchlist') || '[]').filter(item => !deletedIds.has(String(item?.id || ''))).map(item => ({
+            ...item,
+            status: normalizePunchStatus(item.status),
+            history: parsePunchHistory(item.history)
+          }));
+        } catch (e) { punchlist = []; }
         return;
       }
       // Wait for Supabase to initialize (up to 3 seconds)
@@ -2597,17 +2698,24 @@ Object.assign(APP_TRANSLATIONS.en, {
             const matchedUnit = data.find(u => u.id === item.unit_id);
             return {
               id: item.id,
+              source: item.source || 'manual',
+              type: item.type || item.inspection_type || 'Punch Item',
+              typeNum: item.type_num || item.typeNum || '',
               building: matchedUnit ? matchedUnit.building : ((data.find(u => u.building_id === item.building_id) || {}).building || 'Unknown'),
               location: matchedUnit ? matchedUnit.apt : (item.unit_id || 'N/A'),
               description: (item.title || item.description || '').split('\u0001PHOTOS:')[0],
+              comment: item.comment || '',
               priority: item.priority || 'Medium',
-              status: item.status || 'Open',
+              status: normalizePunchStatus(item.status),
               assignee: item.assigned_to || '',
               photoCount: (() => { try { return JSON.parse(((item.description || '').split('\u0001PHOTOS:')[1]) || '[]').length; } catch (e) { return 0; } })(),
               photos: (() => { try { return JSON.parse(((item.description || '').split('\u0001PHOTOS:')[1]) || '[]'); } catch (e) { return []; } })(),
               createdAt: item.created_at,
               reviewedAt: item.reviewed_at || null,
-              closedAt: item.closed_at || null
+              closedAt: item.closed_at || null,
+              closedBy: item.closed_by || '',
+              resolution: item.resolution || '',
+              history: parsePunchHistory(item.history)
             };
           });
           console.log('✅ Loaded', punchlist.length, 'items from Supabase');
@@ -2615,7 +2723,9 @@ Object.assign(APP_TRANSLATIONS.en, {
         }
       } catch (err) {
         console.error('❌ Failed to load punch list from Supabase:', err);
-        throw err;
+        // Keep the app usable while inspection-derived items are rebuilt.
+        punchlist = [];
+        return;
       }
 
       punchlist = [];
@@ -2674,11 +2784,107 @@ Object.assign(APP_TRANSLATIONS.en, {
         }
       }
 
-      return units; // 98 units total: B1=36, B2=30, B3=30, Clubhouse=1, Parking=1
+      // One shared Underground area per residential building.
+      ['Building 1', 'Building 2', 'Building 3'].forEach(building => {
+        const systems = {};
+        SYSTEMS.forEach(sys => { systems[sys] = { progress: 0, status: 'Behind', photos: 0, events: [] }; });
+        units.push({ apt: `${building.replace('Building ', '')}U`, building, floor: 'Underground', systems });
+      });
+
+      return units; // 101 units total: B1=37, B2=31, B3=31, Clubhouse=1, Parking=1
+    }
+
+    function loadRemoteDataCache() {
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') return false;
+      try {
+        const cached = JSON.parse(localStorage.getItem('identus_remote_data_cache') || 'null');
+        if (!cached || !Array.isArray(cached.units) || !cached.units.length) return false;
+        data = cached.units.map(unit => ({ ...unit, floor: normalizeFloorName(unit.floor) }));
+        sbBuildings = Array.isArray(cached.buildings) ? cached.buildings : sbBuildings;
+        window.data = data;
+        return true;
+      } catch (error) {
+        console.warn('Remote data cache unavailable:', error);
+        return false;
+      }
+    }
+
+    function saveRemoteDataCache() {
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:' || !Array.isArray(data) || !data.length) return;
+      try {
+        const mediaKeys = new Set(['images', 'imageData', 'photoData', 'photo_urls', 'photoUrls', 'base64']);
+        const compactValue = value => {
+          if (Array.isArray(value)) return value.map(compactValue);
+          if (!value || typeof value !== 'object') return value;
+          const result = {};
+          Object.entries(value).forEach(([key, entry]) => {
+            if (mediaKeys.has(key)) {
+              if (Array.isArray(entry)) result[`${key}Count`] = entry.length;
+              return;
+            }
+            if (typeof entry === 'string' && entry.startsWith('data:image/')) return;
+            result[key] = compactValue(entry);
+          });
+          return result;
+        };
+        const compactCache = JSON.stringify({
+          units: compactValue(data),
+          buildings: sbBuildings || [],
+          savedAt: new Date().toISOString()
+        });
+        // Replace the old cache after removing it so a large previous value
+        // does not temporarily consume quota during setItem().
+        localStorage.removeItem('identus_remote_data_cache');
+        localStorage.setItem('identus_remote_data_cache', compactCache);
+      } catch (error) { console.warn('Remote data cache save failed:', error); }
+    }
+
+    function renderLoadedShell() {
+      setupFilterUI();
+      window.data = data;
+      renderUnits();
+      updateMetrics();
+      updateCharts();
+      setupModal();
+      updateUnitsCounter();
+    }
+
+    function withTimeout(promise, ms, label = 'Request') {
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      });
+      return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
     }
 
     async function init() {
+      const localPreview = LOCAL_PROJECT_MODE || window.location.protocol === 'file:';
+      // Paint the cached shell before authentication and network work so a
+      // refresh never leaves the page blank.
+      try {
+        loadRemoteDataCache();
+        renderLoadedShell();
+      } catch (error) {
+        console.warn('Cached shell could not be rendered yet.', error);
+      }
       console.log('🚀 Initializing app...');
+
+      // Local previews load their project from browser storage and do not wait
+      // for Supabase. This prevents an empty Unit List after Clear Data/refresh.
+      if (localPreview) {
+        try {
+          await withTimeout(loadData(), 5000, 'Local project data');
+          renderLoadedShell();
+          await loadPunchlist();
+          renderPunchlist();
+          updateMetrics();
+          updateCharts();
+          return;
+        } catch (error) {
+          console.error('Local project data failed to load:', error);
+          return;
+        }
+      }
 
       // Wait for Supabase to be ready
       let attempts = 0;
@@ -2693,21 +2899,34 @@ Object.assign(APP_TRANSLATIONS.en, {
         return;
       }
 
-      if (typeof authGate === 'function') await authGate();
+      if (typeof authGate === 'function') {
+        try { await withTimeout(authGate(), 8000, 'Authentication'); }
+        catch (error) { console.warn('Authentication check timed out; continuing with cached data.', error); }
+      }
 
       try {
-        await loadData();
+        // Draw the shell immediately; cached data is replaced by the fresh Supabase response.
+        loadRemoteDataCache();
+        renderLoadedShell();
+        try {
+          await withTimeout(loadData(), 12000, 'Project data');
+        } catch (error) {
+          console.warn('Project data is still loading; continuing with the visible shell.', error);
+        }
 
-        if (!LOCAL_PROJECT_MODE) await inspLoadRemoteModuleData();
-
-        await loadPunchlist();
-        setupFilterUI();
-        renderUnits();
+        renderLoadedShell();
+        // Punch List and Inspection History are not needed to draw Dashboard.
+        // Load them together after the first useful paint.
+        const backgroundLoads = await Promise.allSettled([
+          !LOCAL_PROJECT_MODE ? withTimeout(inspLoadRemoteModuleDataOnce(), 15000, 'Inspection data') : Promise.resolve(),
+          withTimeout(loadPunchlist(), 10000, 'Punch List')
+        ]);
+        backgroundLoads.forEach(result => {
+          if (result.status === 'rejected') console.warn('Background module load failed:', result.reason);
+        });
         renderPunchlist();
         updateMetrics();
         updateCharts();
-        setupModal();
-        updateUnitsCounter();
 
         // 🔄 Enable realtime sync - subscribes to Supabase changes
         subscribeToRealtimeUpdates();
@@ -2744,29 +2963,109 @@ Object.assign(APP_TRANSLATIONS.en, {
           units.push({ id: `local-unit-${units.length + 1}`, apt, building: cfg.name, building_id: building.id, floor, systems: unitSystems });
         };
         if (cfg.type === 'special' || !('floors' in cfg)) addUnit(cfg.name, 'Underground');
-        else for (let f = 1; f <= (cfg.floors || 3); f++) for (let u = 1; u <= (cfg.unitsPerFloor || 10); u++) addUnit(`${cfg.prefix || index + 1}${f}${String(u).padStart(2, '0')}`, `Floor ${f}`);
+        else {
+          for (let f = 1; f <= (cfg.floors || 3); f++) for (let u = 1; u <= (cfg.unitsPerFloor || 10); u++) addUnit(`${cfg.prefix || index + 1}${f}${String(u).padStart(2, '0')}`, `Floor ${f}`);
+          // Every residential building also has one Underground unit.
+          addUnit(`${cfg.prefix || index + 1}U`, 'Underground');
+        }
       });
       sbBuildings = buildings;
       data = units;
       window.data = data;
-      // New Setup entries must immediately participate in every dashboard filter.
-      buildings.forEach(b => filters.buildings.add(b.name));
-      [...new Set(units.map(unit => unit.floor).filter(Boolean))].forEach(floor => filters.floors.add(floor));
+      // Rebuild filters from the applied setup so old building/floor names never hide
+      // the newly generated units.
+      filters.buildings = new Set(buildings.map(b => b.name).filter(Boolean));
+      filters.floors = new Set(units.map(unit => unit.floor).filter(Boolean));
+      filters.statuses = new Set(STATUSES);
+      filters.systems = new Set(SYSTEMS);
       localStorage.setItem('local_project_setup', JSON.stringify({ residentialConfigs, specialConfigs, savedAt: new Date().toISOString() }));
       localStorage.setItem('local_project_data', JSON.stringify({ buildings, units }));
       if (document.getElementById('buildingFilters')) setupFilterUI();
-      if (document.getElementById('unitsGrid')) { renderUnits(); updateMetrics(); updateCharts(); }
+      if (document.getElementById('unitsContainer')) { renderUnits(); updateMetrics(); updateCharts(); }
+    }
+
+    // Repair older local snapshots that were created before the one-Underground-area
+    // rule. This preserves existing progress and only adds missing area units.
+    function ensureLocalUndergroundUnits() {
+      if (!(LOCAL_PROJECT_MODE || window.location.protocol === 'file:') || !Array.isArray(data)) return;
+      const defaultBuildings = ['Building 1', 'Building 2', 'Building 3'];
+      defaultBuildings.forEach(building => {
+        const buildingUnits = data.filter(unit => unit?.building === building);
+        if (!buildingUnits.some(unit => normalizeFloorName(unit.floor) === 'Underground')) {
+          const systems = {};
+          SYSTEMS.forEach(sys => { systems[sys] = { progress: 0, status: 'Behind', photos: 0, events: [] }; });
+          const existing = buildingUnits.find(unit => /^\d/.test(String(unit.apt || '')));
+          data.push({
+            id: `local-unit-${data.length + 1}`,
+            apt: `${String(existing?.apt || building.replace('Building ', '1')).charAt(0)}U`,
+            building,
+            building_id: buildingUnits[0]?.building_id || `local-building-${defaultBuildings.indexOf(building) + 1}`,
+            floor: 'Underground',
+            systems
+          });
+        }
+      });
+      window.data = data;
+      localStorage.setItem('local_project_data', JSON.stringify({ buildings: sbBuildings, units: data }));
     }
 
     async function loadData() {
       try {
-        if (LOCAL_PROJECT_MODE) {
+        if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
           const saved = JSON.parse(localStorage.getItem('local_project_setup') || 'null');
           const savedData = JSON.parse(localStorage.getItem('local_project_data') || 'null');
-          if (savedData?.units) data = savedData.units.map(unit => ({ ...unit, floor: normalizeFloorName(unit.floor) }));
-          if (saved) buildLocalProjectData(saved.residentialConfigs || [], saved.specialConfigs || []);
-          else if (savedData?.units) { window.data = data; }
-          else { data = generateTestData(); window.data = data; }
+          const hasSavedUnits = Array.isArray(savedData?.units) && savedData.units.length > 0;
+          if (hasSavedUnits) data = savedData.units.map(unit => ({ ...unit, floor: normalizeFloorName(unit.floor) }));
+          const hasSavedSetup = saved && ((saved.residentialConfigs || []).length || (saved.specialConfigs || []).length);
+          if (hasSavedSetup) buildLocalProjectData(saved.residentialConfigs || [], saved.specialConfigs || []);
+          else if (hasSavedUnits) { window.data = data; }
+          else {
+            const defaultSystems = [...SYSTEMS];
+            const residentialConfigs = [
+              { name:'Building 1', floors:3, unitsPerFloor:12, prefix:'1', systems:defaultSystems },
+              { name:'Building 2', floors:3, unitsPerFloor:10, prefix:'2', systems:defaultSystems },
+              { name:'Building 3', floors:3, unitsPerFloor:10, prefix:'3', systems:defaultSystems }
+            ];
+            const specialConfigs = [
+              { name:'Clubhouse', type:'special', systems:defaultSystems },
+              { name:'Parking', type:'special', systems:defaultSystems.filter(sys => !['Fire-Stop','Electric Panel','Data','Fire Alarm','Trim-Out'].includes(sys)) }
+            ];
+            buildLocalProjectData(residentialConfigs, specialConfigs);
+          }
+          ensureLocalUndergroundUnits();
+          // Recovery guard: a saved Setup must never leave Unit List empty.
+          if (!Array.isArray(data) || data.length === 0) {
+            const recoveryResidential = hasSavedSetup ? (saved.residentialConfigs || []) : [];
+            const recoverySpecial = hasSavedSetup ? (saved.specialConfigs || []) : [];
+            if (recoveryResidential.length || recoverySpecial.length) {
+              buildLocalProjectData(recoveryResidential, recoverySpecial);
+            }
+            if (!Array.isArray(data) || data.length === 0) {
+              const defaultSystems = [...SYSTEMS];
+              buildLocalProjectData(
+                [
+                  { name:'Building 1', floors:3, unitsPerFloor:12, prefix:'1', systems:defaultSystems },
+                  { name:'Building 2', floors:3, unitsPerFloor:10, prefix:'2', systems:defaultSystems },
+                  { name:'Building 3', floors:3, unitsPerFloor:10, prefix:'3', systems:defaultSystems }
+                ],
+                [
+                  { name:'Clubhouse', type:'special', systems:defaultSystems },
+                  { name:'Parking', type:'special', systems:defaultSystems.filter(sys => !['Fire-Stop','Electric Panel','Data','Fire Alarm','Trim-Out'].includes(sys)) }
+                ]
+              );
+            }
+          }
+          // Dashboard must use the same loaded units as Inspection search.
+          if (Array.isArray(data) && data.length) {
+            data.forEach(unit => Object.values(unit.systems || {}).forEach(system => {
+              if (system.status === 'Not Started') system.status = 'Behind';
+            }));
+            filters.buildings = new Set(data.map(unit => unit.building).filter(Boolean));
+            filters.floors = new Set(data.map(unit => normalizeFloorName(unit.floor)).filter(Boolean));
+            filters.statuses = new Set(STATUSES);
+            filters.systems = new Set(SYSTEMS);
+            if (document.getElementById('buildingFilters')) setupFilterUI();
+          }
           return;
         }
         // Wait for Supabase to initialize (up to 5 seconds)
@@ -2786,13 +3085,21 @@ Object.assign(APP_TRANSLATIONS.en, {
           throw new Error('Supabase connection failed');
         }
 
-        // Load from Supabase
-        const { data: units, error: unitsError } = await sbClient
-          .from('units')
-          .select('id, unit_number, floor, building_id, project_id')
-          .order('unit_number', { ascending: true });
+        // Load only this project and run independent queries together.
+        const [unitsResult, buildingsResult] = await Promise.all([
+          sbClient.from('units')
+            .select('id, unit_number, floor, building_id, project_id')
+            .eq('project_id', PROJECT_ID)
+            .order('unit_number', { ascending: true }),
+          sbClient.from('buildings')
+            .select('id, name, project_id')
+            .eq('project_id', PROJECT_ID)
+        ]);
+        const { data: units, error: unitsError } = unitsResult;
+        const { data: buildings, error: buildingsError } = buildingsResult;
 
         if (unitsError) throw unitsError;
+        if (buildingsError) throw buildingsError;
 
         if (!units || units.length === 0) {
           console.log('📝 No units found, generating test data...');
@@ -2802,19 +3109,15 @@ Object.assign(APP_TRANSLATIONS.en, {
           return;
         }
 
-        // Load system status
-        const { data: systemsStatus, error: statusError } = await sbClient
-          .from('unit_systems_status')
-          .select('unit_id, system_id, progress, status, photos, events');
+        // Only fetch statuses belonging to the units already loaded for this project.
+        const unitIds = units.map(unit => unit.id).filter(Boolean);
+        const { data: systemsStatus, error: statusError } = unitIds.length
+          ? await sbClient.from('unit_systems_status')
+              .select('unit_id, system_id, progress, status, photos, events')
+              .in('unit_id', unitIds)
+          : { data: [], error: null };
 
         if (statusError) throw statusError;
-
-        // Load buildings
-        const { data: buildings, error: buildingsError } = await sbClient
-          .from('buildings')
-          .select('id, name');
-
-        if (buildingsError) throw buildingsError;
 
         // Store buildings globally and populate select
         sbBuildings = buildings;
@@ -2836,21 +3139,21 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (systemsStatus) {
           systemsStatus.forEach(s => {
             if (!statusByUnit.has(s.unit_id)) {
-              statusByUnit.set(s.unit_id, []);
+              statusByUnit.set(s.unit_id, new Map());
             }
-            statusByUnit.get(s.unit_id).push(s);
+            statusByUnit.get(s.unit_id).set(s.system_id, s);
           });
         }
 
         // Build data array in application format
         data = units.map(unit => {
           const building = buildingMap.get(unit.building_id) || 'Unknown';
-          const statuses = statusByUnit.get(unit.id) || [];
+          const statuses = statusByUnit.get(unit.id) || new Map();
           const systems = {};
 
           SYSTEMS.forEach(sys => {
-            const sysStatus = statuses.find(s => s.system_id === sys);
-            if (statuses.length > 0 && !sysStatus) return; // system not applicable to this unit
+            const sysStatus = statuses.get(sys);
+            if (statuses.size > 0 && !sysStatus) return; // system not applicable to this unit
             systems[sys] = {
               progress: sysStatus?.progress || 0,
               status: sysStatus?.status || 'Behind',
@@ -2869,6 +3172,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           };
         });
         window.data = data;
+        saveRemoteDataCache();
 
         console.log('✅ Loaded', data.length, 'units from Supabase');
         updateLastUpdated();
@@ -2885,7 +3189,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
 
     async function saveData() {
-      if (LOCAL_PROJECT_MODE) {
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
         try { localStorage.setItem('local_project_data', JSON.stringify({ buildings: sbBuildings || [], units: data || [] })); } catch (e) { console.warn('Local data save failed', e); }
         return;
       }
@@ -2987,7 +3291,7 @@ Object.assign(APP_TRANSLATIONS.en, {
 
     // 🔄 REALTIME SYNC: Subscribe to Supabase changes
     function subscribeToRealtimeUpdates() {
-      return;
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') return;
       if (!sbClient) {
         console.warn('⚠️ Supabase not ready for realtime');
         return;
@@ -3244,6 +3548,38 @@ Object.assign(APP_TRANSLATIONS.en, {
       }
     }
 
+    function showClearDataConfirm() {
+      return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal';
+        overlay.style.zIndex = '100003';
+        overlay.innerHTML = `
+          <div class="modal-content" style="max-width:480px;padding:0;overflow:hidden;">
+            <div style="padding:18px 20px;border-bottom:1px solid #E5E7EB;">
+              <h2 style="font-size:17px;color:#111827;margin:0;">Clear operational data?</h2>
+              <div style="font-size:12px;color:#6B7280;margin-top:5px;">Project Setup, buildings, floors, systems and inspection rules will be preserved.</div>
+            </div>
+            <div style="padding:20px;color:#4B5563;font-size:14px;line-height:1.55;">
+              This clears inspections, progress, photos, Punch List items and activity history. Choose whether to download a backup first.
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:14px 20px;background:#F9FAFB;border-top:1px solid #E5E7EB;">
+              <button type="button" data-clear-choice="cancel" style="padding:9px 16px;border:1px solid #D1D5DB;background:white;color:#374151;border-radius:7px;cursor:pointer;font-weight:600;">Cancel</button>
+              <button type="button" data-clear-choice="without-backup" style="padding:9px 16px;border:1px solid #DC2626;background:white;color:#B91C1C;border-radius:7px;cursor:pointer;font-weight:600;">Clear without backup</button>
+              <button type="button" data-clear-choice="backup" style="padding:9px 16px;border:none;background:#2563EB;color:white;border-radius:7px;cursor:pointer;font-weight:600;">Download backup &amp; clear</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        const finish = value => {
+          overlay.classList.add('insp-closing');
+          setTimeout(() => { overlay.remove(); resolve(value); }, 480);
+        };
+        overlay.querySelector('[data-clear-choice="cancel"]').onclick = () => finish('cancel');
+        overlay.querySelector('[data-clear-choice="without-backup"]').onclick = () => finish('clear');
+        overlay.querySelector('[data-clear-choice="backup"]').onclick = () => finish('backup');
+        requestAnimationFrame(() => overlay.classList.add('show'));
+      });
+    }
+
     async function clearAllData() {
       if (window.authIsActive && window.authIsActive()) {
         if (window.userRole !== 'admin') { alert('Admins only.'); return; }
@@ -3252,7 +3588,81 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (pw === null) return;
         if (pw !== '3010') { alert('❌ Incorrect password.'); return; }
       }
-      askConfirm('Are you sure you want to delete ALL data? This action cannot be undone.', () => {
+      const clearChoice = await showClearDataConfirm();
+      if (clearChoice === 'cancel') return;
+      if (clearChoice === 'backup') backupData();
+      {
+        const localPreview = LOCAL_PROJECT_MODE || window.location.protocol === 'file:';
+        if (localPreview) {
+          // Keep project setup (buildings, units, floors, systems, special
+          // units, inspection rules and project settings). Clear only field
+          // activity and inspection results.
+          try {
+            ['local_punchlist', 'inspections_data', 'local_audit_log', 'local_deleted_punch_ids', 'inspection_required_tasks', 'identus_remote_data_cache'].forEach(key => localStorage.removeItem(key));
+            Object.keys(localStorage).filter(key => key.startsWith('inspection_draft_')).forEach(key => localStorage.removeItem(key));
+            const storedProject = JSON.parse(localStorage.getItem('local_project_data') || 'null');
+            const savedProject = storedProject && Array.isArray(storedProject.units) && storedProject.units.length
+              ? storedProject
+              : { buildings: Array.isArray(sbBuildings) ? sbBuildings : [], units: Array.isArray(data) ? data : [] };
+            if (Array.isArray(savedProject.units) && savedProject.units.length) {
+              savedProject.units = savedProject.units.map(unit => ({
+                ...unit,
+                systems: Object.fromEntries(Object.entries(unit.systems || {}).map(([name, system]) => [name, {
+                  ...system, progress: 0, status: 'Behind', photos: 0, events: []
+                }]))
+              }));
+              localStorage.setItem('local_project_data', JSON.stringify(savedProject));
+              data = savedProject.units;
+              window.data = data;
+              sbBuildings = Array.isArray(savedProject.buildings) ? savedProject.buildings : sbBuildings;
+            } else {
+              // If an older Clear Data already removed local units, rebuild them
+              // immediately from the preserved Setup instead of leaving Unit List empty.
+              const savedSetup = JSON.parse(localStorage.getItem('local_project_setup') || 'null');
+              const savedResidential = Array.isArray(savedSetup?.residentialConfigs) ? savedSetup.residentialConfigs : [];
+              const savedSpecial = Array.isArray(savedSetup?.specialConfigs) ? savedSetup.specialConfigs : [];
+              if (savedResidential.length || savedSpecial.length) {
+                buildLocalProjectData(savedResidential, savedSpecial);
+              } else {
+                const defaultSystems = [...SYSTEMS];
+                buildLocalProjectData(
+                  [
+                    { name:'Building 1', floors:3, unitsPerFloor:12, prefix:'1', systems:defaultSystems },
+                    { name:'Building 2', floors:3, unitsPerFloor:10, prefix:'2', systems:defaultSystems },
+                    { name:'Building 3', floors:3, unitsPerFloor:10, prefix:'3', systems:defaultSystems }
+                  ],
+                  [
+                    { name:'Clubhouse', type:'special', systems:defaultSystems },
+                    { name:'Parking', type:'special', systems:defaultSystems.filter(sys => !['Fire-Stop','Electric Panel','Data','Fire Alarm','Trim-Out'].includes(sys)) }
+                  ]
+                );
+              }
+            }
+            localStorage.setItem('local_punchlist', '[]');
+            localStorage.setItem('inspections_data', '[]');
+          } catch (storageError) { console.warn('Local data cleanup warning:', storageError); }
+          if (!Array.isArray(data)) data = [];
+          punchlist = [];
+          if (typeof inspRemoteRecords !== 'undefined') inspRemoteRecords = [];
+          searchTerm = '';
+          const searchInput = document.getElementById('searchInput');
+          if (searchInput) searchInput.value = '';
+          filters = {
+            buildings: new Set((data || []).map(unit => unit.building).filter(Boolean)),
+            floors: new Set((data || []).map(unit => unit.floor).filter(Boolean)),
+            statuses: new Set(STATUSES),
+            systems: new Set(SYSTEMS)
+          };
+          setupFilterUI();
+          renderUnits();
+          renderPunchlist();
+          updateMetrics();
+          updateCharts();
+          if (typeof inspLoadHistory === 'function') inspLoadHistory();
+          if (typeof inspLoadPunchList === 'function') inspLoadPunchList();
+          if (typeof toast === 'function') toast('Local test data cleared successfully');
+          return;
+        }
         if (!sbClient) {
           console.error('Cannot clear data: Supabase unavailable');
           return;
@@ -3279,7 +3689,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         updateMetrics();
         updateCharts();
         alert('Data cleared and reset with test examples');
-      });
+      }
     }
 
     async function fixBuildingAssignments(showAlert = false) {
@@ -3482,7 +3892,7 @@ showAppModal('projectSetupModal');
       document.getElementById('setupProjectId').value = PROJECT_ID;
       renderLocalNotificationSettings();
 
-      if (LOCAL_PROJECT_MODE) {
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
         setupList.innerHTML = '';
         const saved = JSON.parse(localStorage.getItem('local_project_setup') || 'null');
         if (saved) {
@@ -3562,8 +3972,9 @@ showAppModal('projectSetupModal');
             // Infer floors and units/floor from actual units
             const floorGroups = {};
             bUnits.forEach(u => { if (!floorGroups[u.floor]) floorGroups[u.floor] = 0; floorGroups[u.floor]++; });
-            const floors = Object.keys(floorGroups).length || b.floors || 3;
-            const unitsPerFloor = Object.values(floorGroups)[0] || b.units_per_floor || 10;
+            const aboveGroundFloors = Object.keys(floorGroups).filter(f => f !== 'Underground');
+            const floors = aboveGroundFloors.length || b.floors || 3;
+            const unitsPerFloor = (aboveGroundFloors[0] ? floorGroups[aboveGroundFloors[0]] : 0) || b.units_per_floor || 10;
             // Infer prefix from first unit number
             const firstUnit = [...bUnits].sort((a,b) => a.unit_number.localeCompare(b.unit_number))[0];
             const prefix = firstUnit ? firstUnit.unit_number.charAt(0) : String(buildings.indexOf(b) + 1);
@@ -3592,11 +4003,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
     // ===== INSPECTION TYPES PER BUILDING CONFIG =====
     function getInspBuildingConfig() {
-      if (!LOCAL_PROJECT_MODE && inspRemoteReady && inspRemoteConfig) return inspRemoteConfig;
+      if (window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE && inspRemoteReady && inspRemoteConfig) return inspRemoteConfig;
       try { return JSON.parse(localStorage.getItem('insp_building_config') || 'null'); } catch(e) { return null; }
     }
     function saveInspBuildingConfig(cfg) {
-      if (!LOCAL_PROJECT_MODE && sbClient) {
+      if (window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE && sbClient) {
         inspPersistRemoteBuildingConfig(cfg).catch(err => inspShowToast(`Could not save inspection configuration: ${err.message}`, 'error'));
         return;
       }
@@ -3604,7 +4015,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     }
 
     async function inspPersistRemoteBuildingConfig(cfg) {
-      if (LOCAL_PROJECT_MODE || !sbClient) return;
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:' || !sbClient) return;
       const buildings = [];
       const seen = new Set();
       (Array.isArray(data) ? data : []).forEach(unit => {
@@ -3709,7 +4120,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         <div style="margin-top:8px;display:flex;gap:8px;">
           <button onclick="inspBuildingConfigSelectAll(true)" style="font-size:11px;padding:4px 10px;border:1px solid #D1D5DB;border-radius:5px;background:#fff;cursor:pointer;">✅ Todos</button>
           <button onclick="inspBuildingConfigSelectAll(false)" style="font-size:11px;padding:4px 10px;border:1px solid #D1D5DB;border-radius:5px;background:#fff;cursor:pointer;">☐ Ninguno</button>
-  <button onclick="saveInspBuildingConfigFromUI()" style="font-size:11px;padding:4px 12px;border:none;border-radius:5px;background:#0B5394;color:#fff;cursor:pointer;font-weight:600;">💾 Save configuration</button>
+  <button onclick="saveInspBuildingConfigFromUI(this)" style="font-size:11px;padding:4px 12px;border:none;border-radius:5px;background:#0B5394;color:#fff;cursor:pointer;font-weight:600;">💾 Save configuration</button>
         </div>`;
       container.innerHTML = html;
     }
@@ -3718,11 +4129,12 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       document.querySelectorAll('#insp-building-config-table input[type="checkbox"]').forEach(cb => cb.checked = checked);
     }
 
-    function saveInspBuildingConfigFromUI() {
+    function saveInspBuildingConfigFromUI(btn) {
       const cfg = collectInspectionTypeConfigFromUI();
       saveInspBuildingConfig(cfg);
       // Flash feedback
-      const btn = event.target;
+      btn = btn || document.querySelector('#insp-building-config-table button[onclick*="saveInspBuildingConfigFromUI"]');
+      if (!btn) return;
       const orig = btn.textContent;
       btn.textContent = '✅ Guardado';
       btn.style.background = '#15803d';
@@ -3881,6 +4293,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     }
 
     async function applyProjectSetup() {
+      const fileLocalMode = window.location.protocol === 'file:';
+      const localPreview = LOCAL_PROJECT_MODE || fileLocalMode;
       // Step 0: Apply Supabase connection settings if changed
       const newUrl = document.getElementById('setupSupabaseUrl').value.trim();
       const newKey = document.getElementById('setupSupabaseKey').value.trim();
@@ -3932,7 +4346,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         return;
       }
 
-      if (LOCAL_PROJECT_MODE) {
+      if (localPreview) {
         const confirmed = await showProjectSetupConfirm(residentialConfigs.length, specialConfigs.length);
         if (!confirmed) return;
         // Apply also persists Inspection Types by Area selections made in this setup window.
@@ -3943,7 +4357,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       if (newKey) { SUPABASE_KEY = newKey; localStorage.setItem('cfg_supabase_key', newKey); }
       if (newPid) { PROJECT_ID = newPid; localStorage.setItem('cfg_project_id', newPid); }
 
-      if (LOCAL_PROJECT_MODE) {
+      if (localPreview) {
         localStorage.setItem('cfg_project_name', pn);
         localStorage.setItem('cfg_project_address', (document.getElementById('setupProjectAddress').value || '').trim());
         sharedProject = { name: pn, address: (document.getElementById('setupProjectAddress').value || '').trim() };
@@ -3985,6 +4399,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const desired = new Set();
         residentialConfigs.forEach(cfg => {
           for (let f = 1; f <= cfg.floors; f++) for (let u = 1; u <= cfg.unitsPerFloor; u++) desired.add(`${cfg.prefix}${f}${String(u).padStart(2, '0')}`);
+          desired.add(`${cfg.prefix}U`);
         });
         specialConfigs.forEach(cfg => desired.add(cfg.name));
         const exUnits = await (await fetch(`${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}&select=id,unit_number,building_id`, { headers: hdrs })).json();
@@ -4080,6 +4495,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
               newUnits.push({ unit_number: `${cfg.prefix}${f}${String(u).padStart(2, '0')}`, floor: `Floor ${f}`, building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
             }
           }
+          newUnits.push({ unit_number: `${cfg.prefix}U`, floor: 'Underground', building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
         });
         specialConfigs.forEach(cfg => {
           newUnits.push({ unit_number: cfg.name, floor: 'Underground', building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
@@ -4442,7 +4858,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         saveData();
 
         // Also delete from Supabase in background if available
-        if (sbClient && unit.id) {
+        if (sbClient && unit.id && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
           deleteUnitFromSupabase(unit.id);
         }
 
@@ -4485,13 +4901,35 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       currentDetailsUnit = unit;
       document.getElementById('detailsTitle').textContent = `Unit ${unit.apt} - ${unit.building} • ${unit.floor}`;
 
-      switchDetailsTab('overview');
       const detailsModal = document.getElementById('detailsModal');
+      detailsModal.dataset.unitView = 'open';
       showAppModal('detailsModal');
+      // Render the first tab only after the modal is mounted.  Previously the
+      // tab renderer added `.show` while the modal was still `display:none`,
+      // so the opening animation could finish behind the hidden element. A
+      // later tab click then re-applied the visible state and made it appear
+      // to “wake up”.
+      switchDetailsTab('overview');
+      document.body.style.overflow = 'hidden';
     }
 
     function switchDetailsTab(tab) {
       if (!currentDetailsUnit) return;
+      // Keep the Unit List view mounted while switching its internal tabs.
+      // A delayed dashboard/inspection render must not leave a transparent
+      // overlay over this modal.
+      const detailsModal = document.getElementById('detailsModal');
+      if (detailsModal) {
+        detailsModal.dataset.unitView = 'open';
+        // Do not re-trigger the modal animation from every internal tab.
+        // The modal is mounted by openDetailsModal/showAppModal; forcing
+        // `.show` here while it is hidden was the source of the transparent
+        // Unit List view.
+        if (detailsModal.style.display !== 'flex') showAppModal('detailsModal');
+        detailsModal.style.visibility = 'visible';
+        detailsModal.style.pointerEvents = 'auto';
+        detailsModal.style.zIndex = '10020';
+      }
       const unit = currentDetailsUnit;
       let html = '';
 
@@ -4609,25 +5047,25 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       return `<button type="button" title="Delete photo" onclick="event.stopPropagation();${js}" style="position:absolute;top:4px;right:4px;background:#EF4444;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;line-height:1;z-index:2;box-shadow:0 1px 3px rgba(0,0,0,.4);">✕</button>`;
     }
 
-    function askConfirm(msg, onYes) {
+    function askConfirm(msg, onYes, onNo, yesLabel = 'Delete', dialogTitle = 'Confirm deletion') {
       const m = document.createElement('div');
       m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:center;justify-content:center;';
       m.innerHTML = `<div style="background:#fff;border-radius:10px;padding:24px;max-width:360px;width:90%;box-shadow:0 10px 30px rgba(0,0,0,.3);">
-        <div style="font-size:16px;font-weight:600;margin-bottom:8px;color:#111827;">Confirm deletion</div>
+        <div style="font-size:16px;font-weight:600;margin-bottom:8px;color:#111827;">${dialogTitle}</div>
         <div style="font-size:14px;color:#4B5563;margin-bottom:18px;">${msg}</div>
         <div style="display:flex;gap:10px;justify-content:flex-end;">
           <button type="button" id="acNo" style="padding:9px 18px;border:1px solid #D1D5DB;background:#F3F4F6;border-radius:6px;cursor:pointer;font-weight:600;">Cancel</button>
-          <button type="button" id="acYes" style="padding:9px 18px;border:none;background:#EF4444;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">Delete</button>
+          <button type="button" id="acYes" style="padding:9px 18px;border:none;background:#EF4444;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">${yesLabel}</button>
         </div></div>`;
       document.body.appendChild(m);
-      m.querySelector('#acNo').onclick = () => m.remove();
+      m.querySelector('#acNo').onclick = () => { m.remove(); if (onNo) onNo(); };
       m.querySelector('#acYes').onclick = () => { m.remove(); onYes(); };
-      m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+      m.addEventListener('click', e => { if (e.target === m) { m.remove(); if (onNo) onNo(); } });
     }
 
     async function syncUnitSystem(u, system) {
       try {
-        if (!u.id || !sbClient) return;
+        if (!u.id || !sbClient || window.location.protocol === 'file:' || LOCAL_PROJECT_MODE) return;
         const sd = u.systems[system];
         await syncUnitSystemSafe(u, system);
       } catch (e) { console.warn('sync photo delete failed', e); }
@@ -4758,26 +5196,54 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     function showAppModal(id) {
       const modal = document.getElementById(id);
       if (!modal) return null;
+      if (modal._closeTimer) {
+        clearTimeout(modal._closeTimer);
+        modal._closeTimer = null;
+      }
+      const isDetailsModal = id === 'detailsModal';
+      if (isDetailsModal) {
+        // Unit Details can be reopened repeatedly. Clear the previous
+        // animation state before mounting it so it never remains translucent
+        // until an internal tab is clicked.
+        modal.classList.remove('show');
+        modal.style.visibility = 'visible';
+        modal.style.pointerEvents = 'auto';
+        modal.style.zIndex = '10020';
+      }
       modal.style.display = 'flex';
       modal.classList.remove('insp-closing');
       modal.removeAttribute('aria-hidden');
-      requestAnimationFrame(() => modal.classList.add('show'));
+      requestAnimationFrame(() => {
+        modal.classList.add('show');
+        if (isDetailsModal) {
+          modal.style.visibility = 'visible';
+          modal.style.pointerEvents = 'auto';
+        }
+      });
       return modal;
     }
 
     function animateModalClose(id, after) {
       const modal = document.getElementById(id);
       if (!modal) return;
+      if (modal._closeTimer) clearTimeout(modal._closeTimer);
       modal.classList.add('insp-closing');
       modal.setAttribute('aria-hidden', 'true');
-      setTimeout(() => {
+      modal._closeTimer = setTimeout(() => {
         modal.classList.remove('show', 'insp-closing');
         modal.style.display = 'none';
         modal.removeAttribute('aria-hidden');
+        modal._closeTimer = null;
         if (after) after();
       }, 520);
     }
-    function closeDetailsModal() { animateModalClose('detailsModal'); }
+    function closeDetailsModal() {
+      const detailsModal = document.getElementById('detailsModal');
+      if (detailsModal) delete detailsModal.dataset.unitView;
+      animateModalClose('detailsModal', () => {
+        document.body.style.overflow = '';
+      });
+    }
 
     function openAddEventModal() {
       if (!currentDetailsUnit) return;
@@ -4880,7 +5346,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     const STORAGE_BUCKET = 'identus-files';
     let storageOk = true;
     async function uploadToStorage(dataUrl, path, contentType) {
-      if (!storageOk || !sbClient) return dataUrl;
+      if (!storageOk || !sbClient || window.location.protocol === 'file:' || LOCAL_PROJECT_MODE) return dataUrl;
       try {
         const blob = await (await fetch(dataUrl)).blob();
         const { error } = await sbClient.storage.from(STORAGE_BUCKET).upload(path, blob, { contentType: contentType || blob.type || 'image/jpeg', upsert: true });
@@ -4966,7 +5432,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         });
       }
 
-      if (unit && unit.id && sbClient) {
+      if (unit && unit.id && sbClient && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
         // Update only this unit/system (no delete-all + reinsert: faster and never leaves a system "not applicable")
         try { await syncUnitSystemSafe(unit, system); } catch (e) { console.warn('⚠️ unit system sync failed:', e); }
       } else {
@@ -4979,7 +5445,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       closeAddEventModal();
 
       // Sync to Supabase
-      if (unit && unit.id && sbClient) {
+      if (unit && unit.id && sbClient && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
         (async () => {
           try {
 
@@ -5054,7 +5520,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         if (value === '') {
           matches = data.map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 15);
         } else {
-          matches = data.filter(u => u.apt.toLowerCase().includes(value)).map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 15);
+          matches = data.filter(u => String(u.apt || '').toLowerCase().startsWith(value)).map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 15);
         }
 
         if (matches.length > 0) {
@@ -5230,7 +5696,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         if (value === '') {
           matches = data.map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 15);
         } else {
-          matches = data.filter(u => u.apt.toLowerCase().includes(value)).map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 15);
+          matches = data.filter(u => String(u.apt || '').toLowerCase().startsWith(value)).map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 15);
         }
 
         if (matches.length > 0) {
@@ -5391,16 +5857,27 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         });
       }
 
-      if (existingUnit && existingUnit.id && sbClient) {
+      if (existingUnit && existingUnit.id && sbClient && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
         try { await syncUnitSystemSafe(existingUnit, system); } catch (e) { console.warn('⚠️ quick sync failed:', e); }
       } else {
         saveData();
       }
+      window.data = data;
       renderUnits();
       updateMetrics();
       updateCharts();
       closeQuickAddModal();
       alert('Unit saved quickly');
+    }
+
+    function getPunchlistForCurrentStatusFilter() {
+      const statusFilter = window._punchStatusFilter || 'All';
+      return (punchlist || []).filter(item => {
+        if (isLocallyDeletedPunch(item)) return false;
+        const normalizedStatus = normalizePunchStatus(item.status);
+        if (item.status !== normalizedStatus) item.status = normalizedStatus;
+        return statusFilter === 'All' || normalizedStatus === statusFilter;
+      });
     }
 
     function updateMetrics() {
@@ -5417,9 +5894,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       document.getElementById('behindUnits').textContent = behind;
 
       // Update punch list metrics
-      const openCount = punchlist.filter(p => p.status === 'Open').length;
-      const pendingCount = punchlist.filter(p => p.status === 'Pending Review').length;
-      const closedCount = punchlist.filter(p => p.status === 'Closed').length;
+      const visiblePunchlist = getPunchlistForCurrentStatusFilter();
+      const openCount = visiblePunchlist.filter(p => p.status === 'Open').length;
+      const pendingCount = visiblePunchlist.filter(p => p.status === 'Pending Review').length;
+      const closedCount = visiblePunchlist.filter(p => p.status === 'Closed').length;
 
       const openEl = document.getElementById('punchOpenCount');
       const pendingEl = document.getElementById('punchPendingCount');
@@ -5920,10 +6398,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
 
       // Punch List Status Chart
-      const punchlistOpenCount = punchlist.filter(p => p.status === 'Open').length;
-      const punchlistPendingCount = punchlist.filter(p => p.status === 'Pending Review').length;
-      const punchlistClosedCount = punchlist.filter(p => p.status === 'Closed').length;
-      const punchlistTotal = punchlist.length;
+      const visiblePunchlist = getPunchlistForCurrentStatusFilter();
+      const punchlistOpenCount = visiblePunchlist.filter(p => p.status === 'Open').length;
+      const punchlistPendingCount = visiblePunchlist.filter(p => p.status === 'Pending Review').length;
+      const punchlistClosedCount = visiblePunchlist.filter(p => p.status === 'Closed').length;
+      const punchlistTotal = visiblePunchlist.length;
 
       if (punchlistTotal > 0) {
         const punchlistCtx = document.getElementById('punchlistChart');
@@ -6016,6 +6495,9 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             }]
           });
         }
+      } else if (punchlistTotal === 0 && charts.punchlist) {
+        charts.punchlist.destroy();
+        charts.punchlist = null;
       }
     }
 
@@ -6089,12 +6571,21 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     }
 
     function backupData() {
+      const inspectionDrafts = {};
+      Object.keys(localStorage).filter(key => key.startsWith('inspection_draft_')).forEach(key => {
+        inspectionDrafts[key] = localStorage.getItem(key);
+      });
       const backup = {
         version: 1,
         exportedAt: new Date().toISOString(),
         units: data,
         punchlist: punchlist,
         localProjectSetup: JSON.parse(localStorage.getItem('local_project_setup') || 'null'),
+        localProjectData: JSON.parse(localStorage.getItem('local_project_data') || 'null'),
+        inspectionData: JSON.parse(localStorage.getItem('inspections_data') || '[]'),
+        inspectionConfig: JSON.parse(localStorage.getItem('insp_building_config') || 'null'),
+        inspectionDrafts,
+        deletedPunchIds: JSON.parse(localStorage.getItem('local_deleted_punch_ids') || '[]'),
         auditLog: JSON.parse(localStorage.getItem('local_audit_log') || '[]')
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
@@ -6122,6 +6613,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           data = backup.units;
           punchlist = backup.punchlist || [];
           if (backup.localProjectSetup) localStorage.setItem('local_project_setup', JSON.stringify(backup.localProjectSetup));
+          if (backup.localProjectData) localStorage.setItem('local_project_data', JSON.stringify(backup.localProjectData));
+          if (Array.isArray(backup.inspectionData)) localStorage.setItem('inspections_data', JSON.stringify(backup.inspectionData));
+          if (backup.inspectionConfig) localStorage.setItem('insp_building_config', JSON.stringify(backup.inspectionConfig));
+          if (backup.inspectionDrafts && typeof backup.inspectionDrafts === 'object') Object.entries(backup.inspectionDrafts).forEach(([key, value]) => localStorage.setItem(key, value));
+          if (Array.isArray(backup.deletedPunchIds)) localStorage.setItem('local_deleted_punch_ids', JSON.stringify(backup.deletedPunchIds));
           if (Array.isArray(backup.auditLog)) localStorage.setItem('local_audit_log', JSON.stringify(backup.auditLog));
           saveData();
           // All data now synced to Supabase directly
@@ -6130,7 +6626,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           updateMetrics();
           updateCharts();
 
-          if (!LOCAL_PROJECT_MODE) {
+          if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:') {
             await syncDataToSupabase();
             await savePunchlist();
           }
@@ -6157,8 +6653,18 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
     function closeCreateEventModal() {
       const modal = document.getElementById('createEventModal');
-      if (modal) modal.classList.add('insp-closing');
-      setTimeout(() => { if (modal) modal.classList.remove('show', 'insp-closing'); }, 480);
+      if (modal) {
+        if (modal._closeTimer) clearTimeout(modal._closeTimer);
+        modal.classList.remove('show');
+        modal.classList.add('insp-closing');
+        modal.setAttribute('aria-hidden', 'true');
+        modal._closeTimer = setTimeout(() => {
+          modal.classList.remove('show', 'insp-closing');
+          modal.style.display = 'none';
+          modal.removeAttribute('aria-hidden');
+          modal._closeTimer = null;
+        }, 480);
+      }
       // Reset editing state
       window.isEditingEvent = false;
       window.editingEventIndex = undefined;
@@ -6264,6 +6770,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
     function syncInspectionFailuresToPunchlist() {
       if (typeof inspGetInspections !== 'function') return;
+      let locallyDeletedIds = new Set();
+      try {
+        const stored = JSON.parse(localStorage.getItem('local_deleted_punch_ids') || '[]');
+        if (Array.isArray(stored)) locallyDeletedIds = new Set(stored);
+      } catch (_) {}
       const latest = new Map();
       inspGetInspections().forEach(record => {
         const key = `${record.apt}::${record.typeId || record.type}`;
@@ -6276,14 +6787,18 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const id = `inspection-${record.id}-${itemIndex}`;
         activeIds.add(id);
         let event = punchlist.find(p => p.id === id);
+        if (event) event.inspectionId = event.inspectionId || record.id;
         if (!event) {
-          event = { id, source:'inspection', typeId:record.typeId || '', typeNum:record.typeNum || '', status:'Open', priority:'High', building:record.building || '', location:record.apt || '', description:`${record.typeNum || ''}. ${item.description || ''}`, assignee:record.inspector || '', photoCount:(item.photos || []).length, photos:item.photos || [], createdAt:record.date || new Date().toISOString(), reviewedAt:null, closedAt:null, history:[{ action:'created', inspectionId:record.id, date:record.date || new Date().toISOString(), inspector:record.inspector || '' }] };
+          event = { id, source:'inspection', inspectionId:record.id, typeId:record.typeId || '', typeNum:record.typeNum || '', type:record.type || 'Inspection', status:'Open', priority:'High', building:record.building || '', location:record.apt || '', description:`${record.typeNum || ''}. ${item.description || ''}`, comment:item.comment || '', assignee:record.inspector || '', photoCount:(item.photos || []).length, photos:item.photos || [], createdAt:record.date || new Date().toISOString(), reviewedAt:null, closedAt:null, history:[{ action:'created', inspectionId:record.id, date:record.date || new Date().toISOString(), inspector:record.inspector || '' }] };
           punchlist.push(event);
         } else {
           // Keep an explicitly completed punch item completed until a newer
           // inspection failure creates a new item/revision.
           if (event.status !== 'Closed') event.status = 'Open';
-          event.priority = 'High'; event.assignee = record.inspector || event.assignee; event.photos = item.photos || []; event.photoCount = event.photos.length;
+          event.priority = 'High'; event.assignee = record.inspector || event.assignee; event.photos = item.photos || []; event.photoCount = event.photos.length; event.comment = item.comment || event.comment || '';
+          event.history = parsePunchHistory(event.history);
+          if (!event.history.length) event.history.push({ action:'created', inspectionId:record.id, date:record.date || new Date().toISOString(), inspector:record.inspector || '' });
+          if (!event.history.some(h => h.action === 'updated' && h.inspectionId === record.id)) event.history.push({ action:'updated', inspectionId:record.id, date:record.date || new Date().toISOString(), inspector:record.inspector || '' });
         }
       }));
       punchlist.filter(p => p.source === 'inspection' && !activeIds.has(p.id) && p.status !== 'Closed').forEach(p => {
@@ -6312,7 +6827,13 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       let html = `<div class="punch-filters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"><select id="punchStatusFilter" class="form-select" style="max-width:180px"><option value="All">All Statuses</option><option value="Open">Open</option><option value="Pending Review">Pending Review</option><option value="Closed">Completed</option></select><input id="punchUnitSearch" class="form-input" style="max-width:220px" placeholder="Search unit..."></div>`;
       const statusFilter = window._punchStatusFilter || 'All';
       const unitQuery = (window._punchUnitQuery || '').trim().toLowerCase();
-      const visiblePunchlist = punchlist.filter(item => (statusFilter === 'All' || item.status === statusFilter) && (!unitQuery || String(item.location || '').toLowerCase().startsWith(unitQuery)));
+      const visiblePunchlist = punchlist.filter(item => {
+        if (isLocallyDeletedPunch(item)) return false;
+        const normalizedStatus = normalizePunchStatus(item.status);
+        if (item.status !== normalizedStatus) item.status = normalizedStatus;
+        return (statusFilter === 'All' || normalizedStatus === statusFilter)
+          && (!unitQuery || String(item.location || '').toLowerCase().startsWith(unitQuery));
+      });
       visiblePunchlist.forEach((item) => {
         const idx = punchlist.indexOf(item);
         const priorityColor = item.priority === 'High' ? '#EF4444' : item.priority === 'Medium' ? '#F59E0B' : '#3B82F6';
@@ -6340,6 +6861,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
               <div>Created: ${createdDate}</div>
               <div>Reviewed: ${reviewedDate}</div>
               <div>Closed: ${closedDate}</div>
+              ${formatPunchHistory(item)}
               ${item.status === 'Closed' && item.resolution ? `<div>Resolution: ${item.resolution}${item.closedBy ? ` · ${item.closedBy}` : ''}</div>` : ''}
             </div>
             <div class="issue-actions">
@@ -6356,7 +6878,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       container.innerHTML = html;
       const statusFilterEl = document.getElementById('punchStatusFilter');
       const unitSearchEl = document.getElementById('punchUnitSearch');
-      if (statusFilterEl) { statusFilterEl.value = window._punchStatusFilter || 'All'; statusFilterEl.onchange = () => { window._punchStatusFilter = statusFilterEl.value; renderPunchlist(); }; }
+      if (statusFilterEl) { statusFilterEl.value = window._punchStatusFilter || 'All'; statusFilterEl.onchange = () => { window._punchStatusFilter = statusFilterEl.value; renderPunchlist(); updateMetrics(); updateCharts(); }; }
       if (unitSearchEl) {
         unitSearchEl.value = window._punchUnitQuery || '';
         unitSearchEl.oninput = () => {
@@ -6498,6 +7020,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
                 `).join('') : '<div style="font-size:13px; color:#9CA3AF;">Photos were uploaded but are not stored locally.</div>'}
               </div>
             ` : ''}
+            <div style="border-top:1px solid #E5E7EB;padding-top:12px;margin-top:12px;font-size:13px;color:#6B7280;line-height:1.5;">
+              <strong style="color:#374151">Change History</strong>
+              ${formatPunchHistory(item)}
+            </div>
           </div>
           <div class="modal-actions">
             <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">Close</button>
@@ -6525,54 +7051,92 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     }
 
     async function deletePunchEvent(idx) {
-      console.log('deletePunchEvent called with idx:', idx);
-      console.log('punchlist length before:', punchlist.length);
-
       const eventToDelete = punchlist[idx];
+      if (!eventToDelete) return;
+      askConfirm('Are you sure you want to delete this event?', async () => {
+        const localPreview = LOCAL_PROJECT_MODE || window.location.protocol === 'file:';
+        const inspectionDerived = eventToDelete.source === 'inspection'
+          || String(eventToDelete.id || '').startsWith('inspection-')
+          || Boolean(eventToDelete.inspectionId);
+        const sourceInspection = inspectionDerived && typeof inspFindPunchInspection === 'function'
+          ? inspFindPunchInspection(eventToDelete) : null;
 
-      // Create custom centered modal instead of confirm
-      const modalHTML = `
-        <div id="deleteConfirmModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;">
-          <div style="background: white; padding: 30px; border-radius: 8px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.2); max-width: 400px;">
-            <div style="font-size: 16px; font-weight: 600; margin-bottom: 20px; color: #1F2937;">Are you sure you want to delete this event?</div>
-            <div style="display: flex; gap: 12px; justify-content: center;">
-              <button id="deleteConfirmYes" style="padding: 10px 24px; background: #EF4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">Delete</button>
-              <button id="deleteConfirmNo" style="padding: 10px 24px; background: #E5E7EB; color: #1F2937; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">Cancel</button>
-            </div>
-          </div>
-        </div>
-      `;
-      document.body.insertAdjacentHTML('beforeend', modalHTML);
-
-      const modal = document.getElementById('deleteConfirmModal');
-      const yesBtn = document.getElementById('deleteConfirmYes');
-      const noBtn = document.getElementById('deleteConfirmNo');
-
-      yesBtn.addEventListener('click', async () => {
-        console.log('Delete confirmed');
-
-        // Delete from Supabase if it has an ID
-        if (sbClient && eventToDelete.id) {
+        // Inspection-generated Punch items belong to the source inspection.
+        // Delete the complete source record and related Punch items together.
+        if (localPreview && inspectionDerived && sourceInspection) {
+          const apt = String(sourceInspection.apt || eventToDelete.location || '');
+          const typeId = String(sourceInspection.typeId || eventToDelete.typeId || '');
+          const typeNum = String(sourceInspection.typeNum || eventToDelete.typeNum || '');
+          const typeName = String(sourceInspection.type || eventToDelete.type || '').trim().toLowerCase();
+          const sameInspection = item => String(item?.apt || item?.location || '') === apt
+            && ((typeId && String(item?.typeId || '') === typeId)
+              || (typeNum && String(item?.typeNum || '') === typeNum)
+              || (typeName && String(item?.type || item?.typeName || '').trim().toLowerCase() === typeName));
+          const keptInspections = inspGetInspections().filter(item => !sameInspection(item));
+          const relatedPunch = item => (item?.source === 'inspection'
+            || String(item?.id || '').startsWith('inspection-')
+            || Boolean(item?.inspectionId)) && sameInspection(item);
+          punchlist = punchlist.filter(item => !relatedPunch(item));
+          inspRemoteRecords = keptInspections;
           try {
-            await sbClient.from('punch_list').delete().eq('id', eventToDelete.id);
-            console.log('Deleted from Supabase');
-          } catch (err) {
-            console.warn('Could not delete from Supabase:', err);
-          }
+            localStorage.setItem('inspections_data', JSON.stringify(keptInspections));
+            localStorage.setItem('local_punchlist', JSON.stringify(punchlist));
+            localStorage.removeItem(`inspection_draft_${apt}_${typeId}`);
+          } catch (_) {}
+          try {
+            const audit = JSON.parse(localStorage.getItem('local_audit_log') || '[]');
+            localStorage.setItem('local_audit_log', JSON.stringify(audit.filter(entry => {
+              const details = entry?.details || {};
+              return !(String(details.unit || '') === apt && String(details.type || '').trim().toLowerCase() === typeName);
+            })));
+          } catch (_) {}
+          renderPunchlist();
+          updateMetrics();
+          updateCharts();
+          if (typeof inspLoadPunchList === 'function') inspLoadPunchList();
+          if (typeof toast === 'function') toast('Inspection and related Punch List data deleted successfully');
+          else if (typeof inspShowToast === 'function') inspShowToast('Inspection and related Punch List data deleted successfully', 'success');
+          return;
         }
 
+        if (localPreview && eventToDelete.id && !inspectionDerived) {
+          try {
+            const stored = JSON.parse(localStorage.getItem('local_deleted_punch_ids') || '[]');
+            const deletedIds = new Set(Array.isArray(stored) ? stored : []);
+            deletedIds.add(eventToDelete.id);
+            localStorage.setItem('local_deleted_punch_ids', JSON.stringify([...deletedIds]));
+          } catch (_) {}
+        }
         punchlist.splice(idx, 1);
-        console.log('punchlist length after splice:', punchlist.length);
-        await savePunchlist();
-        renderPunchlist();
-        updateMetrics();
-        updateCharts();
-        modal.remove();
-        alert('Event deleted successfully');
-      });
+        // Local preview must complete synchronously: do not start a remote sync or
+        // leave an old async error toast behind while the local UI is refreshing.
+        if (localPreview) {
+          try { localStorage.setItem('local_punchlist', JSON.stringify(punchlist || [])); } catch (_) {}
+          renderPunchlist();
+          updateMetrics();
+          updateCharts();
+          if (typeof toast === 'function') toast('Event deleted successfully');
+          else if (typeof inspShowToast === 'function') inspShowToast('Event deleted successfully', 'success');
+          return;
+        }
 
-      noBtn.addEventListener('click', () => {
-        modal.remove();
+        // Production: update the UI immediately, then sync with Supabase.
+        renderPunchlist();
+        setTimeout(() => { updateMetrics(); updateCharts(); }, 0);
+
+        try {
+          if (sbClient && eventToDelete.id) {
+            const { error } = await sbClient.from('punch_list').delete().eq('id', eventToDelete.id);
+            if (error) throw error;
+          }
+          await savePunchlist();
+          if (typeof toast === 'function') toast('Event deleted successfully');
+          else if (typeof inspShowToast === 'function') inspShowToast('Event deleted successfully', 'success');
+        } catch (err) {
+          console.warn('Punch List delete sync failed:', err);
+          if (typeof toast === 'function') toast('Event removed locally; synchronization failed.');
+          else if (typeof inspShowToast === 'function') inspShowToast('Event removed locally; synchronization failed.', 'error');
+        }
       });
     }
 
@@ -6585,21 +7149,17 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       btn.textContent = '🔍 Inspection Failures';
         return;
       }
-      // Load inspection fails from localStorage
-      let inspections = [];
-      try { inspections = JSON.parse(localStorage.getItem('inspections_data') || '[]'); } catch(e) {}
-      const allFails = [];
-      const latestByInspection = new Map();
-      inspections.forEach(r => {
-        const key = `${r.apt}::${r.typeId || r.type}`;
-        const previous = latestByInspection.get(key);
-        if (!previous || new Date(r.date || r.createdAt || 0) >= new Date(previous.date || previous.createdAt || 0)) latestByInspection.set(key, r);
-      });
-      Array.from(latestByInspection.values()).forEach(r => {
-        (r.items || []).filter(i => i.status === 'FAIL').forEach(i => {
-          allFails.push({ apt: r.apt, building: r.building, inspector: r.inspector, type: r.type, typeNum: r.typeNum, date: r.date, description: i.description, comment: i.comment, priority: 'High' });
-        });
-      });
+      // Reuse the loaded Punch List source. Reading localStorage here caused
+      // hosted/Supabase inspection failures to disappear from the Dashboard.
+      syncInspectionFailuresToPunchlist();
+      const allFails = (punchlist || []).filter(item => item.source === 'inspection').map(item => ({
+        ...item,
+        apt: item.location || item.apt || '',
+        inspector: item.assignee || item.inspector || '',
+        type: item.type || 'Inspection',
+        status: normalizePunchStatus(item.status),
+        priority: item.priority || 'High'
+      }));
       const list = document.getElementById('punchInspFailsList');
       if (allFails.length === 0) {
       list.innerHTML = '<div style="padding:20px;text-align:center;color:#6B7280;font-size:13px;">✅ No pending inspection failures</div>';
@@ -6611,9 +7171,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
               <div style="font-size:11px;color:#6B7280">${f.building || ''}</div>
             </div>
             <div style="flex:1;min-width:0">
-              <div style="font-size:12px;font-weight:600;color:#374151">${f.typeNum}. ${f.type} <span style="display:inline-block;padding:2px 6px;border-radius:99px;background:#fee2e2;color:#dc2626;font-size:10px;font-weight:700">HIGH PRIORITY</span></div>
+              <div style="font-size:12px;font-weight:600;color:#374151">${f.typeNum ? `${f.typeNum}. ` : ''}${f.type} <span style="display:inline-block;padding:2px 6px;border-radius:99px;background:${f.status === 'Closed' ? '#dcfce7' : '#fee2e2'};color:${f.status === 'Closed' ? '#15803d' : '#dc2626'};font-size:10px;font-weight:700">${f.status === 'Closed' ? 'COMPLETED' : 'HIGH PRIORITY'}</span></div>
               <div style="font-size:11px;color:#6B7280;margin-top:2px">Inspector: ${f.inspector || 'Unknown'}</div>
               <div style="font-size:12px;color:#374151;margin-top:2px">${f.description || ''}</div>
+              <div style="font-size:11px;color:#6B7280;margin-top:3px">${formatPunchHistory(f)}</div>
               ${f.comment ? `<div style="font-size:11px;color:#6B7280;margin-top:2px">💬 ${f.comment}</div>` : ''}
             </div>
             <div style="flex-shrink:0">
@@ -6854,6 +7415,116 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       `;
     }
 
+    // Risk and systems report overrides: filter-aware and based on current history.
+    function generateCriticalPath() {
+      const output = document.getElementById('reportOutput');
+      const scopedUnits = (data || []).filter(typeof shouldShowUnit === 'function' ? shouldShowUnit : () => true);
+      const now = Date.now();
+      const openPunch = Array.isArray(punchlist) ? punchlist.filter(item => item.status !== 'Closed' && item.status !== 'Completed') : [];
+      const risks = [];
+      scopedUnits.forEach(unit => Object.entries(unit.systems || {}).forEach(([system, value]) => {
+        const events = (value.events || []).filter(event => Number.isFinite(Date.parse(event.timestamp || event.date || event.createdAt)));
+        const lastUpdate = events.length ? Math.max(...events.map(event => Date.parse(event.timestamp || event.date || event.createdAt))) : 0;
+        const unitPunch = openPunch.filter(item => String(item.location || item.apt || '') === String(unit.apt));
+        const stale = !lastUpdate || now - lastUpdate > 7 * 864e5;
+        const failureCount = unitPunch.filter(item => {
+          const label = String(item.system || item.systemName || item.type || '').toLowerCase();
+          return !label || label.includes(String(system).toLowerCase().replace(/[-_]/g, ' '));
+        }).length;
+        const score = (value.status === 'Behind' ? 4 : 0) + failureCount * 5 + (stale ? 3 : 0) + ((Number(value.progress) || 0) < 50 ? 2 : 0);
+        if (score > 0) risks.push({ unit, system, value, score, failureCount, stale, lastUpdate });
+      }));
+      risks.sort((a, b) => b.score - a.score);
+      const escText = value => typeof esc === 'function' ? esc(String(value)) : String(value);
+      output.innerHTML = `<div class="chart-container"><div class="chart-title">Critical Risks</div>
+        <p style="color:#6B7280;font-size:12px;padding:10px 0;">Prioritized risks from the active building, floor and unit filters.</p>
+        ${risks.length ? `<div style="max-height:430px;overflow-y:auto;">${risks.map(r => `<div style="padding:14px;border-bottom:1px solid #E5E7EB;display:flex;justify-content:space-between;gap:12px;align-items:center;"><div><div style="font-weight:600;">Unit ${escText(r.unit.apt)} · ${escText(r.system)}</div><div style="font-size:12px;color:#64748B;margin-top:4px;">${r.value.progress || 0}% progress · ${r.failureCount} open failure${r.failureCount === 1 ? '' : 's'}${r.stale ? ' · No update in 7 days' : ''}</div></div><span style="background:${r.score >= 8 ? '#FEE2E2' : '#FEF3C7'};color:${r.score >= 8 ? '#B91C1C' : '#B45309'};border-radius:999px;padding:4px 9px;font-size:11px;font-weight:700;white-space:nowrap;">RISK ${r.score}</span></div>`).join('')}</div>` : '<div style="padding:28px;text-align:center;color:#64748B;">No critical risks in the selected scope.</div>'}
+      </div>`;
+    }
+
+    function generateSystemsReport() {
+      const output = document.getElementById('reportOutput');
+      const scopedUnits = (data || []).filter(typeof shouldShowUnit === 'function' ? shouldShowUnit : () => true);
+      const now = Date.now();
+      const openPunch = Array.isArray(punchlist) ? punchlist.filter(item => item.status !== 'Closed' && item.status !== 'Completed') : [];
+      const stats = {};
+      scopedUnits.forEach(unit => Object.entries(unit.systems || {}).forEach(([system, value]) => {
+        const item = stats[system] ||= { progress: 0, units: 0, behind: 0, failures: 0, trend: 0, recent: 0, lastUpdate: 0 };
+        item.progress += Number(value.progress) || 0; item.units++;
+        if (value.status === 'Behind') item.behind++;
+        item.failures += openPunch.filter(punch => {
+          if (String(punch.location || punch.apt || '') !== String(unit.apt)) return false;
+          const label = String(punch.system || punch.systemName || punch.type || '').toLowerCase();
+          return label && label.includes(String(system).toLowerCase().replace(/[-_]/g, ' '));
+        }).length;
+        const events = (value.events || []).map(event => ({ date: Date.parse(event.timestamp || event.date || event.createdAt), progress: Number(event.progress) })).filter(event => Number.isFinite(event.date) && Number.isFinite(event.progress));
+        if (events.length) {
+          item.lastUpdate = Math.max(item.lastUpdate, ...events.map(event => event.date));
+          const previous = events.filter(event => event.date <= now - 30 * 864e5).at(-1);
+          const latest = events.filter(event => event.date <= now).at(-1);
+          if (previous && latest) item.trend += Math.max(0, latest.progress - previous.progress);
+          if (events.some(event => event.date >= now - 7 * 864e5)) item.recent++;
+        }
+      }));
+      const escText = value => typeof esc === 'function' ? esc(String(value)) : String(value);
+      const rows = Object.entries(stats).map(([system, item]) => {
+        const avg = item.units ? item.progress / item.units : 0;
+        const status = item.behind || item.failures || avg < 50 ? 'Behind' : (!item.recent || item.trend <= 0 ? 'At Risk' : 'On Track');
+        const color = status === 'Behind' ? '#DC2626' : status === 'At Risk' ? '#D97706' : '#047857';
+        return `<tr><td style="padding:10px 8px;font-weight:600;">${escText(system)}</td><td style="padding:10px 8px;">${avg.toFixed(1)}%</td><td style="padding:10px 8px;color:${item.trend >= 0 ? '#047857' : '#DC2626'};">${item.trend >= 0 ? '+' : ''}${item.trend.toFixed(1)} pts</td><td style="padding:10px 8px;">${item.units}</td><td style="padding:10px 8px;">${item.behind}</td><td style="padding:10px 8px;">${item.failures}</td><td style="padding:10px 8px;color:${color};font-weight:600;">${status}</td></tr>`;
+      }).join('');
+      output.innerHTML = `<div class="chart-container"><div class="chart-title">Systems Performance</div><p style="color:#6B7280;font-size:12px;padding:10px 0;">Performance for the active building, floor and unit filters.</p><div style="overflow-x:auto;"><table style="width:100%;font-size:12px;border-collapse:collapse;"><thead><tr style="background:#F3F4F6;text-align:left;"><th style="padding:10px 8px;">System</th><th style="padding:10px 8px;">Current</th><th style="padding:10px 8px;">30-day change</th><th style="padding:10px 8px;">Units</th><th style="padding:10px 8px;">Behind</th><th style="padding:10px 8px;">Open failures</th><th style="padding:10px 8px;">Status</th></tr></thead><tbody>${rows || '<tr><td colspan="7" style="padding:24px;text-align:center;color:#64748B;">No systems in the selected scope.</td></tr>'}</tbody></table></div></div>`;
+    }
+
+    // Timeline forecast override: uses filtered units and real historical velocity.
+    function generateTimeline() {
+      const output = document.getElementById('reportOutput');
+      const scopedUnits = (data || []).filter(typeof shouldShowUnit === 'function' ? shouldShowUnit : () => true);
+      const rows = [];
+      scopedUnits.forEach(unit => Object.entries(unit.systems || {}).forEach(([system, value]) => {
+        const events = (value.events || []).map(event => ({ date: Date.parse(event.timestamp || event.date || event.createdAt), progress: Number(event.progress) }))
+          .filter(event => Number.isFinite(event.date) && Number.isFinite(event.progress)).sort((a, b) => a.date - b.date);
+        rows.push({ unit, system, current: Math.max(0, Math.min(100, Number(value.progress) || 0)), events });
+      }));
+      const avgProgress = rows.length ? rows.reduce((sum, row) => sum + row.current, 0) / rows.length : 0;
+      const now = Date.now();
+      const velocityFor = days => {
+        const cutoff = now - days * 864e5; let change = 0; let measured = 0;
+        rows.forEach(row => {
+          const before = row.events.filter(event => event.date <= cutoff).at(-1);
+          const latest = row.events.filter(event => event.date <= now).at(-1);
+          if (before && latest) { change += Math.max(0, latest.progress - before.progress); measured++; }
+        });
+        return { change, measured, perDay: measured ? change / days : 0 };
+      };
+      const velocity7 = velocityFor(7), velocity30 = velocityFor(30);
+      const velocity = velocity7.perDay > 0 ? velocity7 : velocity30;
+      const daysRemaining = velocity.perDay > 0 && avgProgress < 100 ? Math.ceil((100 - avgProgress) / velocity.perDay) : null;
+      const recentCutoff = now - 7 * 864e5;
+      const previousCutoff = now - 14 * 864e5;
+      const recentEvents = rows.flatMap(row => row.events.filter(event => event.date >= recentCutoff).map(event => ({ ...event, unit: row.unit, system: row.system })));
+      const previousEvents = rows.flatMap(row => row.events.filter(event => event.date >= previousCutoff && event.date < recentCutoff));
+      const recentUnits = new Set(recentEvents.map(event => String(event.unit.apt)));
+      const recentSystems = new Set(recentEvents.map(event => `${event.unit.apt}:${event.system}`));
+      const activityDelta = recentEvents.length - previousEvents.length;
+      const behind = rows.filter(row => row.unit.systems[row.system]?.status === 'Behind').length;
+      const forecast = daysRemaining === null ? 'Not enough data' : `${daysRemaining} day${daysRemaining === 1 ? '' : 's'}`;
+      const scopeLabel = `${scopedUnits.length} unit${scopedUnits.length === 1 ? '' : 's'}`;
+      output.innerHTML = `<div class="chart-container"><div class="chart-title">Project Timeline Forecast</div>
+        <p style="color:#6B7280;font-size:12px;padding:10px 0;">Based on ${scopeLabel} and the active filters.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;padding-bottom:16px;">
+          <div style="padding:16px;background:#F3F4F6;border-radius:8px;text-align:center;"><div style="font-size:28px;font-weight:700;color:#1E40AF;">${avgProgress.toFixed(1)}%</div><div style="font-size:11px;color:#64748B;">CURRENT PROGRESS</div></div>
+          <div style="padding:16px;background:#F3F4F6;border-radius:8px;text-align:center;"><div style="font-size:28px;font-weight:700;color:#0284C7;">${forecast}</div><div style="font-size:11px;color:#64748B;">ESTIMATED REMAINING</div></div>
+          <div style="padding:16px;background:#F3F4F6;border-radius:8px;text-align:center;"><div style="font-size:28px;font-weight:700;color:#047857;">${velocity.perDay.toFixed(2)}%</div><div style="font-size:11px;color:#64748B;">DAILY SPEED (${velocity === velocity7 ? '7' : '30'} DAYS)</div></div>
+          <div style="padding:16px;background:#F3F4F6;border-radius:8px;text-align:center;"><div style="font-size:28px;font-weight:700;color:#F59E0B;">${recentEvents.length}</div><div style="font-size:11px;color:#64748B;">UPDATES RECORDED IN THE LAST 7 DAYS</div><div style="font-size:10px;color:#94A3B8;margin-top:5px;">${recentSystems.size} systems across ${recentUnits.size} units · ${activityDelta >= 0 ? '+' : ''}${activityDelta} vs previous 7 days</div></div>
+        </div><div style="border-top:1px solid #E5E7EB;padding-top:14px;font-size:12px;color:#64748B;line-height:1.7;">
+          <div><strong>7-day progress:</strong> ${velocity7.change.toFixed(1)} points across ${velocity7.measured} systems with history.</div>
+          <div><strong>30-day progress:</strong> ${velocity30.change.toFixed(1)} points across ${velocity30.measured} systems with history.</div>
+          <div><strong>Behind systems:</strong> ${behind}</div>
+          ${daysRemaining === null ? '<div style="margin-top:8px;color:#B45309;">Add progress updates over time to generate a reliable forecast.</div>' : ''}
+        </div></div>`;
+    }
+
     function generateBuildingComparison() {
       const output = document.getElementById('reportOutput');
       const buildingStats = {};
@@ -7034,7 +7705,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       }
       let flushing = false;
       async function flushOutbox() {
-        if (flushing || !outbox.length || !navigator.onLine || !sbClient) return;
+        if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:' || flushing || !outbox.length || !navigator.onLine || !sbClient) return;
         flushing = true; let done = 0;
         try {
           if (typeof storageOk !== 'undefined') storageOk = true;
@@ -7076,6 +7747,13 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           try { kvSet('dataCache', JSON.parse(JSON.stringify(data, (k, v) => (typeof v === 'string' && v.startsWith('data:')) ? undefined : v))); } catch (e) {}
         }
         if (!failed) notifyDiff(before);
+      });
+      // Local edits should trigger completion suggestions immediately.
+      wrap('saveData', o => async function () {
+        const before = snapshotStatuses();
+        const result = await o.apply(this, arguments);
+        notifyDiff(before);
+        return result;
       });
       wrap('loadPunchlist', o => async function () { try { return await o.apply(this, arguments); } catch (e) { if (!navigator.onLine) { console.warn('offline: punchlist skipped'); return; } throw e; } });
       wrap('fixBuildingAssignments', o => async function () { try { return await o.apply(this, arguments); } catch (e) { if (!navigator.onLine) return; throw e; } });
@@ -7189,13 +7867,81 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       }
       function injectChips() {
         if ($('quickFilters')) return;
-         const anchor = document.querySelector('#dashboardTab .charts-row'); if (!anchor) return;
+         const anchor = document.getElementById('inspectionRequiredPanel') || document.querySelector('#dashboardTab .charts-row'); if (!anchor) return;
         const wrapEl = document.createElement('div'); wrapEl.style.cssText = 'margin-bottom:24px;';
         wrapEl.innerHTML = '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#6B7280;margin-bottom:12px;">Pending</div><div id="quickFilters" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"></div>';
          anchor.insertAdjacentElement('afterend', wrapEl);
         renderChips();
       }
-      wrap('renderUnits', o => function () { const r = o.apply(this, arguments); injectChips(); renderChips(); return r; });
+      function getInspectionRequiredTasks() {
+        try { return JSON.parse(localStorage.getItem('inspection_required_tasks') || '[]'); } catch (e) { return []; }
+      }
+      function saveInspectionRequiredTasks(tasks) {
+        try { localStorage.setItem('inspection_required_tasks', JSON.stringify(tasks)); } catch (e) {}
+      }
+      function syncInspectionRequiredTasks() {
+        const tasks = getInspectionRequiredTasks();
+        const byKey = new Map(tasks.map(task => [task.key, task]));
+        const activeKeys = new Set();
+        (data || []).forEach(unit => Object.entries(unit.systems || {}).forEach(([system, value]) => {
+          if ((Number(value.progress) || 0) < 100) return;
+          const completedEvent = (value.events || []).filter(event => (Number(event.progress) || 0) >= 100).sort((a, b) => Date.parse(a.timestamp || a.date || 0) - Date.parse(b.timestamp || b.date || 0)).at(-1);
+          const completedAt = Date.parse(completedEvent?.timestamp || completedEvent?.date || completedEvent?.createdAt || '') || Date.now();
+          const key = `${unit.id || unit.apt}|${system}`;
+          activeKeys.add(key);
+          const prior = byKey.get(key);
+          if (!prior || completedAt > Number(prior.completedAt || 0)) byKey.set(key, { key, apt: unit.apt, building: unit.building, floor: unit.floor, system, completedAt, resolvedAt: null, lastAttempt: null });
+        }));
+        // Remove stale 100% notifications when Quick Add, Edit, or Undo lowers
+        // the system progress again. The notification must follow live unit data.
+        const next = Array.from(byKey.values()).filter(task => activeKeys.has(task.key));
+        saveInspectionRequiredTasks(next);
+        return next;
+      }
+      function renderInspectionRequiredTasks() {
+        const panel = document.getElementById('inspectionRequiredPanel');
+        const list = document.getElementById('inspectionRequiredList');
+        if (!panel || !list) return;
+        const tasks = syncInspectionRequiredTasks().filter(task => !task.resolvedAt && (!shouldShowUnit || (data || []).some(unit => String(unit.apt) === String(task.apt) && shouldShowUnit(unit))));
+        panel.style.display = tasks.length ? 'block' : 'none';
+        list.innerHTML = tasks.map(task => `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid #E5E7EB;flex-wrap:wrap;"><div><div style="font-size:13px;font-weight:600;color:#1F2937;">Unit ${String(task.apt)} · ${String(task.system)}</div><div style="font-size:12px;color:#64748B;margin-top:3px;">System completed at 100% · Inspection required${task.lastAttempt ? ' · Previous inspection failed' : ''}</div></div><button type="button" class="btn btn-primary" data-inspection-start="${String(task.apt).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" style="font-size:12px;padding:7px 10px;">Start Inspection</button></div>`).join('');
+        list.querySelectorAll('[data-inspection-start]').forEach(button => {
+          button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            window.startInspectionRequiredTask(button.dataset.inspectionStart);
+          });
+        });
+      }
+      window.startInspectionRequiredTask = function (apt) {
+        const tab = document.querySelector('.tab-main[onclick*="inspections"]');
+        if (tab) switchMainTab('inspections', tab);
+        if (typeof inspShowTab === 'function') inspShowTab('new');
+        const openCards = () => {
+          if (typeof inspSelectUnit !== 'function') { toast('Inspection module is still loading. Please try again.'); return; }
+          inspSelectUnit(String(apt));
+          if (typeof inspGoStep === 'function' && typeof inspCurrentUnit !== 'undefined' && inspCurrentUnit) {
+            inspGoStep(2);
+            if (typeof inspRenderTypeGrid === 'function') inspRenderTypeGrid();
+          }
+        };
+        setTimeout(openCards, 0);
+      };
+      window.updateInspectionRequiredTasks = function (record) {
+        if (!record) return;
+        const tasks = getInspectionRequiredTasks();
+        const normalize = value => String(value || '').toLowerCase().replace(/[\s/_-]+/g, '');
+        const updated = tasks.map(task => {
+          if (String(task.apt) !== String(record.apt) || task.resolvedAt || Number(record.date ? Date.parse(record.date) : 0) < Number(task.completedAt || 0)) return task;
+          const system = normalize(task.system), type = normalize(record.type);
+          const matches = type.includes(system) || (system.includes('roughin') && type.includes('rough')) || (system.includes('firestop') && type.includes('firestop')) || (system.includes('firealarm') && type.includes('firealarm')) || (system.includes('trimout') && type.includes('trim'));
+          if (!matches) return task;
+          return record.failedCount > 0 ? { ...task, lastAttempt: record.date || new Date().toISOString() } : { ...task, resolvedAt: record.date || new Date().toISOString(), lastAttempt: null };
+        });
+        saveInspectionRequiredTasks(updated);
+        renderInspectionRequiredTasks();
+      };
+      wrap('renderUnits', o => function () { const r = o.apply(this, arguments); injectChips(); renderChips(); renderInspectionRequiredTasks(); return r; });
 
       // ---------- Notifications ----------
       const notifOn = () => localStorage.getItem('cfg_alerts') === 'on';
@@ -7219,6 +7965,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           const b = before[k]; if (!b) return;
           if (a.p >= 100 && b.p < 100) msgs.push(`✅ Unit ${a.apt} · ${a.sys} completed`);
           else if (b.p > 20 && a.p > 0 && a.p <= 20 || (b.p > 0 && a.p === 0)) msgs.push(`⚠️ Unit ${a.apt} · ${a.sys} dropped to ${a.p}%`);
+        });
+        Object.entries(after).forEach(([k, a]) => {
+          const b = before[k];
+          if (b && a.p >= 100 && b.p < 100) msgs.push(`Next step: perform the applicable inspection for Unit ${a.apt} · ${a.sys}.`);
         });
         (data || []).forEach(u => {
           const ks = Object.keys(u.systems || {}); if (!ks.length) return;
@@ -7248,8 +7998,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         return r;
       });
       const si = $('unitsSearchInput');
-      // Never allow browser/email autofill to populate the unit search field.
-      if (si && /@/.test(si.value)) { si.value = ''; unitsSearchTerm = ''; }
+      // Unit List search is never a credential field: reject email autofill and
+      // clear it even when a browser/password manager injects it after focus.
+      const isCredentialSearchValue = value => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(value || '').trim());
+      window.isCredentialSearchValue = isCredentialSearchValue;
+      if (si && isCredentialSearchValue(si.value)) { si.value = ''; unitsSearchTerm = ''; }
       if (si && !si.parentNode.classList.contains('search-wrap')) {
         const w = document.createElement('span');
         w.className = 'search-wrap'; w.style.cssText = 'position:relative;display:inline-flex;align-items:center;margin-left:-8px;';
@@ -7261,7 +8014,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         w.appendChild(x);
         const sync = () => { x.style.display = si.value ? 'block' : 'none'; };
         const clearCredentialAutofill = () => {
-          if (!si || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(si.value.trim())) return;
+          if (!si || !isCredentialSearchValue(si.value)) return;
           si.value = ''; unitsSearchTerm = ''; sync(); handleUnitsSearch();
         };
         si.addEventListener('input', sync);
@@ -7269,6 +8022,9 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         si.addEventListener('input', clearCredentialAutofill);
         si.addEventListener('change', clearCredentialAutofill);
         si.addEventListener('blur', clearCredentialAutofill);
+        si.addEventListener('click', clearCredentialAutofill);
+        // Some credential managers inject values without firing input/change.
+        if (!si._credentialGuardTimer) si._credentialGuardTimer = setInterval(clearCredentialAutofill, 300);
         x.addEventListener('mousedown', e => e.preventDefault());
         x.addEventListener('click', () => { si.value = ''; sync(); handleUnitsSearch(); si.focus(); });
       }
@@ -7336,7 +8092,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const AUTH_REQUIRED = !LOCAL_PROJECT_MODE;
       const $ = id => document.getElementById(id);
       const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-      window.userRole = null; window.userName = '';
+      // Local preview uses a safe admin test account so user/role controls
+      // remain available before Supabase authentication is connected.
+      window.userRole = LOCAL_PROJECT_MODE ? 'admin' : null;
+      window.userName = LOCAL_PROJECT_MODE ? (localStorage.getItem('cfg_user_name') || 'Carlos') : '';
       window.authIsActive = () => AUTH_REQUIRED || /[?&]login=1/.test(location.search);
       window.getAccessToken = async () => { try { const { data } = await sbClient.auth.getSession(); return (data && data.session && data.session.access_token) || null; } catch (e) { return null; } };
 
@@ -7376,7 +8135,13 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       }
 
       window.authGate = async function () {
-        if (!window.authIsActive()) return;
+        if (!window.authIsActive()) {
+          // The local preview has no Supabase session, but it still needs to
+          // repaint the admin identity after the main initializer runs. The
+          // older local label listener otherwise overwrites it with “change”.
+          if (LOCAL_PROJECT_MODE && typeof window.updateUserLabel === 'function') window.updateUserLabel();
+          return;
+        }
         let msg = '';
         for (let i = 0; i < 20; i++) {
           const { data: { session } } = await sbClient.auth.getSession();
@@ -7403,6 +8168,14 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       // Header line: name, role, sign out, manage users
       window.updateUserLabel = function () {
         const el = $('userLabel'); if (!el) return;
+        const localAdmin = typeof LOCAL_PROJECT_MODE !== 'undefined' && LOCAL_PROJECT_MODE;
+        if (localAdmin) {
+          const name = esc(localStorage.getItem('cfg_user_name') || window.userName || 'Carlos');
+          el.innerHTML = `👤 ${name} (admin) · <a href="#" id="lnkOut" style="color:#1E40AF;">Sign out</a> · <a href="#" id="lnkUsers" style="color:#1E40AF;">👥 Users</a>`;
+          $('lnkOut').onclick = e => { e.preventDefault(); toast('Local admin preview remains active until the page is refreshed.'); };
+          $('lnkUsers').onclick = e => { e.preventDefault(); openUsers(); };
+          return;
+        }
         if (!window.authIsActive() || !window.userRole) { el.innerHTML = `👤 ${esc(localStorage.getItem('cfg_user_name') || 'No name set')} · <a href="#" onclick="changeUserName();return false;" style="color:#1E40AF;">change</a>`; return; }
         el.innerHTML = `👤 ${esc(window.userName)} <span style="color:#6B7280;">(${window.userRole})</span> · <a href="#" id="lnkOut" style="color:#1E40AF;">Sign out</a>` + (window.userRole === 'admin' ? ` · <a href="#" id="lnkUsers" style="color:#1E40AF;">👥 Users</a>` : '');
         $('lnkOut').onclick = async e => { e.preventDefault(); await sbClient.auth.signOut(); location.reload(); };
@@ -7411,6 +8184,27 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
       // ---------- Users management (admin) ----------
       async function adminCall(action, payload) {
+        if (LOCAL_PROJECT_MODE) {
+          const key = 'local_users'; const p = payload || {};
+          let users = [];
+          try { users = JSON.parse(localStorage.getItem(key) || '[]'); } catch (e) { users = []; }
+          if (!users.length) users = [{ id: 'local-admin', name: localStorage.getItem('cfg_user_name') || 'Carlos', email: 'admin@local.test', role: 'admin', disabled: false }];
+          if (action === 'list') { localStorage.setItem(key, JSON.stringify(users)); return { users, me: 'local-admin' }; }
+          if (action === 'create') {
+            if (!String(p.name || '').trim() || !String(p.email || '').trim() || String(p.password || '').length < 8) throw new Error('Enter a name, email, and a password of at least 8 characters.');
+            if (users.some(u => u.email.toLowerCase() === String(p.email).trim().toLowerCase())) throw new Error('A user with this email already exists.');
+            users.push({ id: 'local-' + Date.now(), name: String(p.name).trim(), email: String(p.email).trim(), role: p.role || 'inspector', disabled: false });
+          } else if (action === 'setRole') {
+            const u = users.find(x => x.id === p.id); if (!u) throw new Error('User not found.'); if (u.id === 'local-admin') throw new Error('The local admin role cannot be changed.'); u.role = p.role;
+          } else if (action === 'setActive') {
+            const u = users.find(x => x.id === p.id); if (!u) throw new Error('User not found.'); u.disabled = !p.active;
+          } else if (action === 'delete') {
+            users = users.filter(u => u.id !== p.id && u.id !== 'local-admin');
+          } else if (action === 'resetPassword' && String(p.password || '').length < 8) {
+            throw new Error('Password must have at least 8 characters.');
+          }
+          localStorage.setItem(key, JSON.stringify(users)); return { users, me: 'local-admin' };
+        }
         const token = await window.getAccessToken();
         const res = await fetch('/.netlify/functions/admin-users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ action, ...(payload || {}) }) });
         let body = {}; try { body = await res.json(); } catch (e) {}
@@ -7457,6 +8251,12 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           } catch (e) { msg(e.message); }
         };
         refresh();
+      }
+      // This auth module is parsed after the main initializer. Repaint the
+      // local admin header even when init() already ran before authGate existed.
+      if (LOCAL_PROJECT_MODE) {
+        if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', () => window.updateUserLabel());
+        else window.updateUserLabel();
       }
     })();
   </script>
@@ -7674,10 +8474,35 @@ const INSP_INSPECTION_TYPES = [
       'Equipment manuals and warranties delivered to owner/GC',
       'Work area clean - no materials, tools, or debris'
     ]
+  },
+  {
+    id: 'underground_electrical', name: 'Underground Electrical', num: 10,
+    requiredSystem: 'Underground',
+    items: [
+      'Approved underground electrical plans and utility layout are available on site (NEC 110.3(B))',
+      'The underground route matches the approved plans and site layout',
+      'Measure and record the required cover using the applicable row and column of NEC Table 300.5; do not use one fixed depth for every installation',
+      'If rock prevents the required cover, the approved raceway and concrete protection are provided as allowed by Table 300.5 (minimum 2 in. concrete where applicable)',
+      'The conduit or wiring method is listed and suitable for underground installation (NEC 110.3(B), Chapter 3)',
+      'Conductors, cables, terminals, and connections are suitable for damp or wet conditions (NEC 300.5(B), 310.10(C))',
+      'Required separation from water, gas, communications, and other utilities is maintained',
+      'For applicable underground service conductors, warning ribbon is installed at least 12 in. above the installation when buried 18 in. or more below grade (NEC 300.5(D)(3))',
+      'Where wiring emerges from grade, physical protection extends at least 8 ft above finished grade and no more than 18 in. below grade (NEC 300.5(D)(1))',
+      'Raceways installed under a building use an approved method and are protected as required (NEC 300.5(C))',
+      'Building sleeves, wall penetrations, and raceway ends are sealed against water and gases (NEC 300.5(G), 300.5(J))',
+      'Underground boxes and fittings allow drainage and prevent water accumulation (NEC 300.5(B), 314.15)',
+      'Bends, pull points, and pull boxes provide safe installation and service access',
+      'For angle or U pulls and splices, pull-box dimensions provide at least 6 times the largest raceway trade size, plus added entry distances where required (NEC 314.28)',
+      'Conductor sizes match the approved plans, electrical load, overcurrent protection, and voltage-drop requirements',
+      'Neutral and equipment-grounding conductors are correctly identified, routed, and terminated (NEC 200.6, 250.119)',
+      'Grounding and bonding connections are complete and properly installed (NEC Article 250)',
+      'Splices and terminations are inside approved, accessible, and protected enclosures; no unapproved buried splice is present',
+      'The installation was inspected, photographed, tested, and approved before backfill; measurements and as-built information are complete'
+    ]
   }
 ];
 
-// DEMO UNITS (98 units)
+// DEMO UNITS (101 units)
 const INSP_DEMO_UNITS = [];
 for (let f = 1; f <= 3; f++) {
   for (let u = 1; u <= 12; u++) {
@@ -7697,6 +8522,9 @@ for (let f = 1; f <= 3; f++) {
     INSP_DEMO_UNITS.push({ apt: `3${num}`, building: 'Building 3', floor: `Floor ${f}` });
   }
 }
+INSP_DEMO_UNITS.push({ apt: '1U', building: 'Building 1', floor: 'Underground' });
+INSP_DEMO_UNITS.push({ apt: '2U', building: 'Building 2', floor: 'Underground' });
+INSP_DEMO_UNITS.push({ apt: '3U', building: 'Building 3', floor: 'Underground' });
 INSP_DEMO_UNITS.push({ apt: 'CH-001', building: 'Clubhouse', floor: 'N/A' });
 INSP_DEMO_UNITS.push({ apt: 'PK-001', building: 'Parking', floor: 'N/A' });
 
@@ -7710,14 +8538,32 @@ let inspTempComment = '';
 let inspRemoteRecords = [];
 let inspRemoteConfig = null;
 let inspRemoteReady = false;
+let inspRemoteLoadPromise = null;
 const inspRemoteDrafts = new Map();
+
+function inspLoadRemoteModuleDataOnce() {
+  if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:' || inspRemoteReady) return Promise.resolve();
+  if (!inspRemoteLoadPromise) {
+    // One automatic retry handles the first-load race without requiring the
+    // user to click History or Punch List repeatedly.
+    inspRemoteLoadPromise = withTimeout(inspLoadRemoteModuleData(), 15000, 'Inspection data').catch(error => {
+      console.warn('Inspection module first load failed; retrying once.', error);
+      return withTimeout(inspLoadRemoteModuleData(), 15000, 'Inspection data retry');
+    }).catch(error => {
+      console.warn('Inspection module could not be loaded after retry.', error);
+      inspRemoteReady = true;
+      return null;
+    });
+  }
+  return inspRemoteLoadPromise;
+}
 
 function inspDraftKey() {
   return inspCurrentUnit && inspCurrentType ? `inspection_draft_${inspCurrentUnit.apt}_${inspCurrentType.id}` : '';
 }
-function inspSaveDraft() {
+async function inspSaveDraft() {
   const key = inspDraftKey();
-  if (!key || !inspChecklistItems.length) return;
+  if (!key || !inspChecklistItems.length) return false;
   const draft = {
     savedAt: new Date().toISOString(),
     apt: inspCurrentUnit.apt,
@@ -7728,18 +8574,19 @@ function inspSaveDraft() {
     inspector: inspGetCurrentInspector(),
     items: inspChecklistItems
   };
-  if (!LOCAL_PROJECT_MODE) {
+  if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:') {
     inspRemoteDrafts.set(key, draft);
-    inspPersistRemoteDraft(draft).catch(error => console.error('Remote draft save failed:', error));
-    return;
+    await inspPersistRemoteDraft(draft);
+    return true;
   }
   localStorage.setItem(key, JSON.stringify(draft));
+  return true;
 }
 function inspLoadDraft() {
   const key = inspDraftKey();
   if (!key) return false;
   try {
-    const draft = LOCAL_PROJECT_MODE ? JSON.parse(localStorage.getItem(key) || 'null') : inspRemoteDrafts.get(key);
+    const draft = (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? JSON.parse(localStorage.getItem(key) || 'null') : inspRemoteDrafts.get(key);
     if (!draft || !Array.isArray(draft.items)) return false;
     inspChecklistItems = inspCurrentType.items.map((description, i) => ({
       status: draft.items[i]?.status || null,
@@ -7752,15 +8599,20 @@ function inspLoadDraft() {
 function inspClearDraft() {
   const key = inspDraftKey();
   if (!key) return;
-  if (!LOCAL_PROJECT_MODE) {
+  if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:') {
     inspRemoteDrafts.delete(key);
     inspDeleteRemoteDraft().catch(error => console.error('Remote draft delete failed:', error));
     return;
   }
   localStorage.removeItem(key);
 }
-function inspSaveDraftAndReturn() {
-  inspSaveDraft();
+async function inspSaveDraftAndReturn() {
+  try {
+    await inspSaveDraft();
+  } catch (error) {
+    inspShowToast(`Draft could not be saved: ${error.message || 'connection error'}`, 'error');
+    return;
+  }
   const isSpanish = (localStorage.getItem('cfg_language') || 'en') === 'es';
   inspShowToast(isSpanish ? 'Borrador guardado. Puedes retomar esta inspección después.' : 'Draft saved. You can resume this inspection later.', 'success');
   inspReturnToTypeList();
@@ -7775,7 +8627,7 @@ function inspCancelInspection() {
 }
 
 async function inspLoadRemoteModuleData() {
-  if (LOCAL_PROJECT_MODE || !sbClient) return;
+  if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:' || !sbClient) return;
   const seedRows = INSP_INSPECTION_TYPES.map(type => ({
     project_id: PROJECT_ID,
     code: type.id,
@@ -7786,16 +8638,36 @@ async function inspLoadRemoteModuleData() {
     is_active: true,
     updated_at: new Date().toISOString()
   }));
-  const { error: seedError } = await sbClient.from('inspection_types').upsert(seedRows, { onConflict: 'project_id,code' });
-  if (seedError) throw seedError;
-  const [{ data: typeRows, error: typeError }, { data: assignmentRows, error: assignmentError }, { data: recordRows, error: recordError }] = await Promise.all([
-    sbClient.from('inspection_types').select('id,code,name_en,name_es,display_order,is_active').eq('project_id', PROJECT_ID).eq('is_active', true).order('display_order'),
+  let { data: typeRows, error: typeError } = await sbClient
+    .from('inspection_types').select('id,code,name_en,name_es,display_order,is_active')
+    .eq('project_id', PROJECT_ID).eq('is_active', true).order('display_order');
+  if (typeError) {
+    console.warn('Inspection types unavailable; loading saved records anyway.', typeError);
+    typeRows = [];
+  }
+  const existingCodes = new Set((typeRows || []).map(row => row.code));
+  const missingSeedRows = seedRows.filter(row => !existingCodes.has(row.code));
+  if (missingSeedRows.length) {
+    const { error: seedError } = await sbClient.from('inspection_types').upsert(missingSeedRows, { onConflict: 'project_id,code' });
+    if (seedError) {
+      console.warn('Inspection type seed unavailable; keeping existing records.', seedError);
+    } else {
+      const refreshed = await sbClient.from('inspection_types').select('id,code,name_en,name_es,display_order,is_active')
+        .eq('project_id', PROJECT_ID).eq('is_active', true).order('display_order');
+      if (refreshed.error) console.warn('Inspection type refresh unavailable.', refreshed.error);
+      else typeRows = refreshed.data || [];
+    }
+  }
+  const [{ data: assignmentRows, error: assignmentError }, { data: recordRows, error: recordError }] = await Promise.all([
     sbClient.from('building_inspection_types').select('building_id,inspection_type_id,is_enabled').eq('project_id', PROJECT_ID).eq('is_enabled', true),
     sbClient.from('inspection_records').select('*').eq('project_id', PROJECT_ID).order('created_at', { ascending: true })
   ]);
-  if (typeError) throw typeError;
-  if (assignmentError) throw assignmentError;
-  if (recordError) throw recordError;
+  if (recordError) {
+    console.warn('Inspection records unavailable; keeping the rest of the page usable.', recordError);
+  }
+  // Building/type assignments only control applicability; they are optional
+  // for displaying saved History and Punch List records.
+  if (assignmentError) console.warn('Inspection assignments unavailable; continuing with saved records.', assignmentError);
 
   const typesById = new Map((typeRows || []).map(row => [row.id, row]));
   const buildingNames = new Map((Array.isArray(data) ? data : []).map(unit => [unit.building_id, unit.building]));
@@ -7813,8 +8685,8 @@ async function inspLoadRemoteModuleData() {
   let itemRows = [];
   if (recordIds.length) {
     const { data, error } = await sbClient.from('inspection_record_items').select('*').in('inspection_record_id', recordIds);
-    if (error) throw error;
-    itemRows = data || [];
+    if (error) console.warn('Inspection item details unavailable; showing record history without item details.', error);
+    else itemRows = data || [];
   }
   const itemsByRecord = new Map();
   itemRows.forEach(item => {
@@ -7859,7 +8731,9 @@ async function inspLoadRemoteModuleData() {
   const inspectorId = authData?.user?.id;
   if (inspectorId) {
     const { data: draftRows, error: draftError } = await sbClient.from('inspection_drafts').select('unit_id,inspection_type_id,payload').eq('project_id', PROJECT_ID).eq('inspector_id', inspectorId);
-    if (draftError) throw draftError;
+    // Drafts are optional. A permissions/RLS issue here must not hide saved
+    // inspection history or prevent inspection failures from reaching Punch List.
+    if (draftError) console.warn('Inspection drafts unavailable; continuing with saved records.', draftError);
     (draftRows || []).forEach(row => {
       const unit = unitById.get(row.unit_id);
       const type = typesById.get(row.inspection_type_id);
@@ -7868,26 +8742,46 @@ async function inspLoadRemoteModuleData() {
     });
   }
   inspRemoteReady = true;
+  // Inspection failures are also represented in the Dashboard Punch List.
+  // Rebuild that view after remote records/items finish loading so startup
+  // order cannot leave the Dashboard empty until the next refresh.
+  if (typeof syncInspectionFailuresToPunchlist === 'function') {
+    syncInspectionFailuresToPunchlist();
+    if (typeof renderPunchlist === 'function') renderPunchlist();
+    if (typeof inspLoadPunchList === 'function') inspLoadPunchList();
+    if (typeof updateMetrics === 'function') updateMetrics();
+    if (typeof updateCharts === 'function') updateCharts();
+  }
+  // If the user opened one of these tabs before the remote load completed,
+  // refresh the visible list now instead of requiring a tab switch.
+  if (document.getElementById('insp-tab-history')?.style.display !== 'none' && typeof inspLoadHistory === 'function') {
+    inspLoadHistory();
+  }
+  if (document.getElementById('insp-tab-punchlist')?.style.display !== 'none' && typeof inspLoadPunchList === 'function') {
+    inspLoadPunchList();
+  }
 }
 
 function inspGetInspections() {
-  if (!LOCAL_PROJECT_MODE) return Array.isArray(inspRemoteRecords) ? inspRemoteRecords : [];
+  if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:') return Array.isArray(inspRemoteRecords) ? inspRemoteRecords : [];
   try { return JSON.parse(localStorage.getItem('inspections_data') || '[]'); } catch(e) { return []; }
 }
 
 async function inspPersistRemoteRecord(record) {
-  if (LOCAL_PROJECT_MODE || !sbClient || !record) return;
+  if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:' || !sbClient || !record) return;
   const unit = (Array.isArray(data) ? data : []).find(u => String(u.apt) === String(record.apt));
   if (!unit?.id) throw new Error('The selected unit is not synchronized with Supabase.');
   const { data: typeRows, error: typeError } = await sbClient.from('inspection_types').select('id,code').eq('project_id', PROJECT_ID).eq('code', record.typeId).limit(1);
   if (typeError) throw typeError;
   const typeRow = typeRows?.[0];
   if (!typeRow) throw new Error(`Inspection type ${record.typeId} is not configured in Supabase.`);
+  const { data: authData } = await sbClient.auth.getUser();
   const payload = {
     project_id: PROJECT_ID,
     unit_id: unit.id,
     building_id: unit.building_id,
     inspection_type_id: typeRow.id,
+    inspector_id: authData?.user?.id || null,
     inspector_name: record.inspector,
     status: record.failedCount > 0 ? 'submitted' : 'completed',
     revision_number: record.revision || 1,
@@ -7917,7 +8811,7 @@ async function inspPersistRemoteRecord(record) {
 }
 
 async function inspPersistRemoteDraft(draft) {
-  if (LOCAL_PROJECT_MODE || !sbClient || !draft) return;
+  if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:' || !sbClient || !draft) return;
   const unit = (Array.isArray(data) ? data : []).find(u => String(u.apt) === String(draft.apt));
   if (!unit?.id) return;
   const { data: typeRows, error: typeError } = await sbClient.from('inspection_types').select('id,code').eq('project_id', PROJECT_ID).eq('code', draft.typeId).limit(1);
@@ -7939,7 +8833,7 @@ async function inspPersistRemoteDraft(draft) {
 }
 
 async function inspDeleteRemoteDraft() {
-  if (LOCAL_PROJECT_MODE || !sbClient || !inspCurrentUnit || !inspCurrentType) return;
+  if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:' || !sbClient || !inspCurrentUnit || !inspCurrentType) return;
   const unit = (Array.isArray(data) ? data : []).find(u => String(u.apt) === String(inspCurrentUnit.apt));
   const { data: typeRows } = await sbClient.from('inspection_types').select('id,code').eq('project_id', PROJECT_ID).eq('code', inspCurrentType.id).limit(1);
   const { data: authData } = await sbClient.auth.getUser();
@@ -8069,17 +8963,43 @@ function inspNormalizeNavButtons() {
     normalizeGlobal();
   }
 }
-function inspSaveInspections(arr) {
-  if (!LOCAL_PROJECT_MODE) {
+async function inspSaveInspections(arr) {
+  if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:') {
     inspRemoteRecords = Array.isArray(arr) ? arr : [];
     const latest = inspRemoteRecords[inspRemoteRecords.length - 1];
-    if (latest) inspPersistRemoteRecord(latest).catch(error => {
-      console.error('Remote inspection save failed:', error);
-      inspShowToast('Inspection could not be saved to Supabase.', 'error');
-    });
-    return;
+    if (latest) await inspPersistRemoteRecord(latest);
+    return true;
   }
-  try { localStorage.setItem('inspections_data', JSON.stringify(arr)); } catch(e) {}
+  const records = Array.isArray(arr) ? arr : [];
+  try {
+    localStorage.setItem('inspections_data', JSON.stringify(records));
+    return true;
+  } catch (error) {
+    // A previous inspection may contain large base64 photos. Remove only the
+    // duplicated remote cache and retry before reporting a real storage error.
+    try { localStorage.removeItem('identus_remote_data_cache'); } catch (_) {}
+    try {
+      localStorage.setItem('inspections_data', JSON.stringify(records));
+      return true;
+    } catch (retryError) {
+      console.warn('Inspection history exceeds local storage; saving a compact history.', retryError);
+      const compact = records.map(record => ({
+        ...record,
+        items: Array.isArray(record.items) ? record.items.map(item => ({
+          ...item,
+          photos: [],
+          photoCount: item.photoCount || (Array.isArray(item.photos) ? item.photos.length : 0)
+        })) : record.items
+      }));
+      try {
+        localStorage.setItem('inspections_data', JSON.stringify(compact));
+        return true;
+      } catch (finalError) {
+        console.error('Inspection history could not be saved locally:', finalError);
+        return false;
+      }
+    }
+  }
 }
 
 function inspShowSummaryPopup() {
@@ -8105,7 +9025,7 @@ function inspShowSummaryPopup() {
   const summaryControls = summary.querySelector('.insp-summary-controls');
   if (summaryControls) {
     const buttons = summaryControls.querySelectorAll('button');
-    if (buttons.length) buttons[buttons.length - 1].onclick = inspCloseInspectionView;
+    if (buttons.length) buttons[buttons.length - 1].onclick = inspCloseSummaryView;
   }
 }
 
@@ -8171,13 +9091,12 @@ function openQuickInspectionModal() {
             <div id="quickInspectionUnitSuggestions" class="suggestions-list"></div>
             <input type="hidden" id="quickInspectionUnit">
           </div>
-          <div class="form-group">
-            <label class="form-label">Inspection Type</label>
-            <select class="form-select" id="quickInspectionType" required></select>
+          <div id="quickInspectionHint" style="font-size:12px;color:#64748b;margin:12px 0 4px;">
+            Select a unit to view its available inspection cards and current progress.
           </div>
           <div class="form-actions">
             <button type="button" class="btn btn-secondary" onclick="closeQuickInspectionModal()">Cancel</button>
-            <button type="submit" class="btn btn-primary">Open New Inspection</button>
+            <button type="submit" class="btn btn-primary">View Inspections</button>
           </div>
         </form>
       </div>`;
@@ -8190,14 +9109,11 @@ function openQuickInspectionModal() {
     .sort((a, b) => a.apt.localeCompare(b.apt, undefined, { numeric:true }));
   const unitSearch = document.getElementById('quickInspectionUnitSearch');
   const unitSelect = document.getElementById('quickInspectionUnit');
-  const typeSelect = document.getElementById('quickInspectionType');
-  if (!unitSearch || !unitSelect || !typeSelect) return;
+  if (!unitSearch || !unitSelect) return;
   window.quickInspectionUnits = units;
   unitSearch.value = '';
   unitSelect.value = '';
   document.getElementById('quickInspectionUnitSuggestions').innerHTML = '';
-  typeSelect.innerHTML = '<option value="">Select Inspection Type</option>' + INSP_INSPECTION_TYPES.map(t => `<option value="${t.id}">${t.num}. ${t.name}</option>`).join('');
-  updateQuickInspectionTypeOptions(null);
   showAppModal('quickInspectionModal');
 }
 
@@ -8207,7 +9123,7 @@ function updateQuickInspectionTypeOptions(unit) {
   [...select.options].forEach(option => {
     if (!option.value) return;
     const type = INSP_INSPECTION_TYPES.find(t => String(t.id) === String(option.value));
-    const applicable = !unit || !type || inspIsInspectionTypeApplicableForBuilding(type, unit.building);
+    const applicable = !unit || !type || inspIsInspectionTypeApplicableForUnit(type, unit);
     option.disabled = !applicable;
     option.textContent = type ? `${type.num}. ${type.name}${applicable ? '' : ' (not applicable)'}` : option.textContent;
   });
@@ -8248,39 +9164,53 @@ function closeQuickInspectionModal() { animateModalClose('quickInspectionModal')
 function startQuickInspection(event) {
   event.preventDefault();
   const apt = document.getElementById('quickInspectionUnit')?.value || document.getElementById('quickInspectionUnitSearch')?.value.trim();
-  const typeId = document.getElementById('quickInspectionType')?.value;
   const liveUnit = Array.isArray(window.data) ? window.data.find(u => String(u.apt || u.unit_number || '') === String(apt)) : null;
   inspCurrentUnit = liveUnit || INSP_DEMO_UNITS.find(u => String(u.apt) === String(apt));
-  inspCurrentType = INSP_INSPECTION_TYPES.find(t => String(t.id) === String(typeId));
-  if (!inspCurrentUnit || !inspCurrentType) return;
-  if (!inspIsInspectionTypeApplicableForBuilding(inspCurrentType, inspCurrentUnit.building)) {
-    alert('This inspection type is not applicable to the selected unit.');
+  if (!inspCurrentUnit) {
+    filterQuickInspectionUnits();
+    inspShowToast('Select a unit from the search results.', 'error');
     return;
   }
   window.inspLastSelectedUnit = inspCurrentUnit;
   window.inspReturnAfterInspection = 'inspection-type-list';
-  inspChecklistItems = inspCurrentType.items.map(() => ({ status:null, comment:'', photos:[] }));
   animateModalClose('quickInspectionModal', () => {
     const selectedUnit = inspCurrentUnit;
-    const selectedType = inspCurrentType;
-    const selectedItems = inspChecklistItems;
     const tab = document.querySelector('.tab-main[onclick*="inspections"]');
     if (tab) switchMainTab('inspections', tab);
     inspShowTab('new');
-    // inspShowTab('new') resets the search step; restore the Quick Inspection selection.
+    // Reuse the same unit-specific inspection cards shown by New Inspection.
     inspCurrentUnit = selectedUnit;
-    inspCurrentType = selectedType;
-    inspChecklistItems = selectedItems;
     window.inspLastSelectedUnit = selectedUnit;
-    inspGoStep(3);
+    inspGoStep(2);
+    inspRenderTypeGrid();
   });
 }
 
 function inspShowTab(name) {
   if (name !== 'new' && document.querySelector('.insp-summary-popup')) {
-    inspCloseSummaryPopup();
-    setTimeout(() => inspShowTab(name), 560);
-    return;
+    // Remove a stale summary overlay immediately so it cannot swallow the
+    // first History/Punch click. The destination tab can render in the same
+    // event instead of requiring repeated clicks.
+    inspResetInspectionViewState();
+  }
+  // A direct click on History/Punch List must show the complete list. Keep a
+  // unit filter only when returning from a unit-specific summary/view.
+  if (name === 'history' || name === 'punchlist' || name === 'report') {
+    const preserveUnitFilter = window.inspPreserveUnitFilter === name;
+    if (!preserveUnitFilter && (name === 'history' || name === 'punchlist')) window.inspHistoryUnitFilter = '';
+    if (preserveUnitFilter) window.inspPreserveUnitFilter = '';
+    if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:' && !inspRemoteReady) {
+      const pendingList = document.getElementById(name === 'history' ? 'insp-history-list' : name === 'punchlist' ? 'insp-punchlist-body' : 'insp-tab-report');
+      if (pendingList) {
+        const target = name === 'report' ? pendingList.querySelector('[data-report-body]') : pendingList;
+        if (target) target.innerHTML = '<div class="insp-empty">Loading inspection data...</div>';
+      }
+      inspLoadRemoteModuleDataOnce().then(() => {
+        if (name === 'history') inspLoadHistory();
+        else if (name === 'punchlist') inspLoadPunchList();
+        else inspLoadReport();
+      }).catch(error => console.warn('Inspection data load failed:', error));
+    }
   }
   if (name !== 'new' && document.getElementById('inspectionsTab')?.style.display === 'none') {
     const inspectionsButton = document.querySelector('.tab-main[onclick*="inspections"]');
@@ -8499,7 +9429,7 @@ function inspGetApplicableTypes() {
 
     function inspIsInspectionTypeApplicableForBuilding(type, building) {
       let cfg = null;
-      if (!LOCAL_PROJECT_MODE && inspRemoteReady) cfg = inspRemoteConfig;
+      if (window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE && inspRemoteReady) cfg = inspRemoteConfig;
       else try { cfg = JSON.parse(localStorage.getItem('insp_building_config') || 'null'); } catch(e) {}
       if (!cfg || !building || !type) return true;
       if (!cfg[type.id]) return true;
@@ -8507,7 +9437,13 @@ function inspGetApplicableTypes() {
     }
 
     function inspIsInspectionTypeApplicable(type) {
-      return inspIsInspectionTypeApplicableForBuilding(type, inspCurrentUnit?.building);
+      return inspIsInspectionTypeApplicableForUnit(type, inspCurrentUnit);
+    }
+
+    function inspIsInspectionTypeApplicableForUnit(type, unit) {
+      if (!type || !unit) return true;
+      if (type.requiredSystem && !unit.systems?.[type.requiredSystem]) return false;
+      return inspIsInspectionTypeApplicableForBuilding(type, unit.building);
 }
 
 function inspRenderTypeGrid() {
@@ -8537,7 +9473,9 @@ function inspRenderTypeGrid() {
     const prev = unitInspections.filter(r => r.typeId === t.id);
     const lastInsp = prev[prev.length - 1];
     const draftKey = `inspection_draft_${inspCurrentUnit.apt}_${t.id}`;
-    const hasDraft = Boolean(localStorage.getItem(draftKey));
+    const hasDraft = (LOCAL_PROJECT_MODE || window.location.protocol === 'file:')
+      ? Boolean(localStorage.getItem(draftKey))
+      : inspRemoteDrafts.has(draftKey);
     let badge = '';
     let cls = isApplicable ? '' : 'insp-type-disabled';
     if (hasDraft && !lastInsp) {
@@ -8553,8 +9491,12 @@ function inspRenderTypeGrid() {
       }
     }
     if (!isApplicable) badge = '<div class="insp-badge insp-badge-na" style="margin-top:6px">Not applicable</div>';
+    const resetButton = (LOCAL_PROJECT_MODE || window.location.protocol === 'file:')
+      ? `<button type="button" class="insp-card-reset" data-reset-inspection-card="${t.id}" title="Reset inspection" aria-label="Reset inspection">↻</button>`
+      : '';
     return `
-      <a href="#inspection-${t.id}" class="insp-type-btn ${cls}" data-insp-type-id="${t.id}" ${isApplicable ? '' : 'aria-disabled="true" tabindex="-1"'}>
+      <a href="#inspection-${t.id}" class="insp-type-btn ${cls}" data-insp-type-id="${t.id}" ${isApplicable ? '' : 'aria-disabled="true" tabindex="-1"'} style="position:relative">
+        ${resetButton}
   <div class="insp-type-num">Inspection ${t.num}</div>
         <div class="insp-type-name">${t.name}</div>
         <div class="insp-type-count">${t.items.length} items</div>
@@ -8567,6 +9509,13 @@ function inspRenderTypeGrid() {
   if (!grid._inspTypeClickBound) {
     grid._inspTypeClickBound = true;
     grid.addEventListener('click', event => {
+      const resetButton = event.target.closest('[data-reset-inspection-card]');
+      if (resetButton && grid.contains(resetButton)) {
+        event.preventDefault();
+        event.stopPropagation();
+        inspResetInspectionCard(resetButton.dataset.resetInspectionCard);
+        return;
+      }
       const card = event.target.closest('.insp-type-btn');
       if (!card || !grid.contains(card)) return;
       if (card.getAttribute('aria-disabled') === 'true') return;
@@ -9007,7 +9956,73 @@ function inspLocalizeChecklistText(value, lang) {
     ['Rough In / Walls','Preinstalación / Paredes'], ['Overhead Rough','Preinstalación de techos'],
     ['Electrical Room / Switchboard / Main Dashboard','Cuarto eléctrico / Tablero / Panel principal'],
     ['Pre Power','Preenergización'], ['Hot Check','Prueba en caliente'], ['Fire Alarm','Alarma contra incendios'],
-    ['Emergency Light','Luz de emergencia'], ['Final Inspection','Inspección final'], ['Fire Stop','Sellado contra incendios'],
+    ['Emergency Light','Luz de emergencia'], ['Final Inspection','Inspección final'], ['Underground Electrical','Inspección eléctrica subterránea'], ['Fire Stop','Sellado contra incendios'],
+    ['Approved underground electrical plans and utility layout are available on site','Los planos eléctricos subterráneos aprobados y la distribución de servicios están disponibles en el sitio'],
+    ['The underground route matches the approved plans','La ruta subterránea coincide con los planos aprobados'],
+    ['Trench depth and cover meet the approved project requirements','La profundidad y cobertura de la zanja cumplen con los requisitos aprobados del proyecto'],
+    ['The conduit or wiring method is suitable for underground installation','El conduit o método de cableado es adecuado para una instalación subterránea'],
+    ['Conduit is properly supported, protected, and free of damage','El conduit está correctamente sostenido, protegido y libre de daños'],
+    ['Conductors, cables, terminals, and connections are suitable for damp or wet conditions','Los conductores, cables, terminales y conexiones son adecuados para condiciones húmedas o mojadas'],
+    ['Required separation from water, gas, communications, and other utilities is maintained','Se mantiene la separación requerida de agua, gas, comunicaciones y otros servicios'],
+    ['Warning tape or underground identification markers are installed where required','La cinta de advertencia o los marcadores subterráneos están instalados donde corresponde'],
+    ['Conduit is protected where it comes out of the ground or becomes exposed','El conduit está protegido donde sale del terreno o queda expuesto'],
+    ['Building sleeves, wall penetrations, and conduit ends are sealed against water and gases','Los sleeves del edificio, las penetraciones de muros y los extremos del conduit están sellados contra agua y gases'],
+    ['Underground boxes and conduit fittings allow drainage and prevent water accumulation','Las cajas subterráneas y los accesorios del conduit permiten el drenaje y evitan la acumulación de agua'],
+    ['Bends, pull points, and pull boxes allow the conductors to be installed and serviced safely','Las curvas, puntos de halado y cajas de halado permiten instalar y mantener los conductores de forma segura'],
+    ['Conductor sizes match the approved plans and the required electrical load','El tamaño de los conductores coincide con los planos aprobados y la carga eléctrica requerida'],
+    ['Neutral and grounding conductors are correctly identified, routed, and terminated','Los conductores neutro y de puesta a tierra están correctamente identificados, tendidos y terminados'],
+    ['Grounding and bonding connections are complete and properly installed','Las conexiones de puesta a tierra y equipotencialidad están completas y correctamente instaladas'],
+    ['Splices and terminations are inside approved, accessible, and protected enclosures','Los empalmes y terminaciones están dentro de cajas aprobadas, accesibles y protegidas'],
+    ['The installation was inspected, photographed, and approved before backfill','La instalación fue inspeccionada, fotografiada y aprobada antes del relleno'],
+    ['Measurements, test results, warning locations, and as-built information are complete','Las mediciones, resultados de pruebas, ubicaciones de advertencia e información conforme a obra están completos'],
+    ['Approved underground electrical plans and utility layout are available on site (NEC 110.3(B))','Los planos eléctricos subterráneos aprobados y la distribución de servicios están disponibles en el sitio (NEC 110.3(B))'],
+    ['The underground route matches the approved plans and site layout','La ruta subterránea coincide con los planos aprobados y la distribución del sitio'],
+    ['Measure and record the required cover using the applicable row and column of NEC Table 300.5; do not use one fixed depth for every installation','Mida y registre la cobertura requerida usando la fila y columna correspondientes de la Tabla 300.5 del NEC; no use una sola profundidad para todas las instalaciones'],
+    ['If rock prevents the required cover, the approved raceway and concrete protection are provided as allowed by Table 300.5 (minimum 2 in. concrete where applicable)','Si la roca impide alcanzar la cobertura requerida, se proporciona la canalización aprobada y la protección de concreto permitida por la Tabla 300.5 (mínimo 2 pulgadas de concreto cuando corresponda)'],
+    ['The conduit or wiring method is listed and suitable for underground installation (NEC 110.3(B), Chapter 3)','El conduit o método de cableado está certificado y es adecuado para una instalación subterránea (NEC 110.3(B), Capítulo 3)'],
+    ['Conductors, cables, terminals, and connections are suitable for damp or wet conditions (NEC 300.5(B), 310.10(C))','Los conductores, cables, terminales y conexiones son adecuados para condiciones húmedas o mojadas (NEC 300.5(B), 310.10(C))'],
+    ['For applicable underground service conductors, warning ribbon is installed at least 12 in. above the installation when buried 18 in. or more below grade (NEC 300.5(D)(3))','Para conductores de servicio subterráneos cuando corresponda, la cinta de advertencia está instalada al menos 12 pulgadas por encima cuando están enterrados a 18 pulgadas o más bajo el nivel del terreno (NEC 300.5(D)(3))'],
+    ['Where wiring emerges from grade, physical protection extends at least 8 ft above finished grade and no more than 18 in. below grade (NEC 300.5(D)(1))','Cuando el cableado sale del terreno, la protección física se extiende al menos 8 pies sobre el nivel terminado y no más de 18 pulgadas bajo el nivel del terreno (NEC 300.5(D)(1))'],
+    ['Raceways installed under a building use an approved method and are protected as required (NEC 300.5(C))','Las canalizaciones instaladas bajo un edificio utilizan un método aprobado y están protegidas según corresponda (NEC 300.5(C))'],
+    ['Building sleeves, wall penetrations, and raceway ends are sealed against water and gases (NEC 300.5(G), 300.5(J))','Los sleeves del edificio, las penetraciones de muros y los extremos de las canalizaciones están sellados contra agua y gases (NEC 300.5(G), 300.5(J))'],
+    ['Underground boxes and fittings allow drainage and prevent water accumulation (NEC 300.5(B), 314.15)','Las cajas subterráneas y los accesorios permiten el drenaje y evitan la acumulación de agua (NEC 300.5(B), 314.15)'],
+    ['For angle or U pulls and splices, pull-box dimensions provide at least 6 times the largest raceway trade size, plus added entry distances where required (NEC 314.28)','Para halados en ángulo o en U y empalmes, las dimensiones de la caja proporcionan al menos 6 veces el tamaño comercial de la canalización más grande, más las distancias adicionales requeridas (NEC 314.28)'],
+    ['Conductor sizes match the approved plans, electrical load, overcurrent protection, and voltage-drop requirements','El tamaño de los conductores coincide con los planos aprobados, la carga eléctrica, la protección contra sobrecorriente y los requisitos de caída de tensión'],
+    ['Neutral and equipment-grounding conductors are correctly identified, routed, and terminated (NEC 200.6, 250.119)','Los conductores neutro y de puesta a tierra del equipo están correctamente identificados, tendidos y terminados (NEC 200.6, 250.119)'],
+    ['Grounding and bonding connections are complete and properly installed (NEC Article 250)','Las conexiones de puesta a tierra y equipotencialidad están completas y correctamente instaladas (Artículo 250 del NEC)'],
+    ['Splices and terminations are inside approved, accessible, and protected enclosures; no unapproved buried splice is present','Los empalmes y terminaciones están dentro de cajas aprobadas, accesibles y protegidas; no hay empalmes enterrados sin aprobación'],
+    ['The installation was inspected, photographed, tested, and approved before backfill; measurements and as-built information are complete','La instalación fue inspeccionada, fotografiada, probada y aprobada antes del relleno; las mediciones y la información conforme a obra están completas'],
+    ['Approved underground electrical plans, utility layout, and revisions available (NEC 110.3(B))','Planos eléctricos subterráneos aprobados, distribución de servicios y revisiones disponibles (NEC 110.3(B))'],
+    ['Raceway or direct-burial wiring method is permitted, listed, and installed per its listing (NEC 110.3(B), Chapter 3)','El método de canalización o cableado enterrado directo está permitido, listado e instalado conforme a su certificación (NEC 110.3(B), Capítulo 3)'],
+    ['Minimum cover is verified using the applicable wiring-method row and column of NEC Table 300.5','La cobertura mínima se verifica usando la fila y columna correspondientes al método de cableado en la Tabla 300.5 del NEC'],
+    ['Trench route, depth, clearances, and finished-grade elevations match the approved design (NEC 300.5(A))','La ruta, profundidad, separaciones y elevaciones de acabado de la zanja coinciden con el diseño aprobado (NEC 300.5(A))'],
+    ['Underground raceway is treated as a wet location; conductors, cable, terminals, and splices are listed for wet locations (NEC 300.5(B), 310.10(C))','La canalización subterránea se considera un lugar húmedo; conductores, cables, terminales y empalmes están certificados para lugares húmedos (NEC 300.5(B), 310.10(C))'],
+    ['Conduit type, trade size, schedule, and mechanical protection are correct for the location (NEC 300.5(D), 352, 358)','El tipo, tamaño comercial, cédula y protección mecánica del conduit son correctos para la ubicación (NEC 300.5(D), 352, 358)'],
+    ['Raceway is protected from physical damage where it emerges from grade or is exposed (NEC 300.5(D)(1))','La canalización está protegida contra daños físicos donde emerge del terreno o queda expuesta (NEC 300.5(D)(1))'],
+    ['Required warning ribbon or marking is installed above buried conductors or raceways (NEC 300.5(D)(3), where applicable)','La cinta o señalización de advertencia requerida está instalada sobre los conductores o canalizaciones enterrados (NEC 300.5(D)(3), cuando corresponda)'],
+    ['Required separation from water, gas, communications, and other utilities is maintained per plans and adopted code','Se mantienen las separaciones requeridas de agua, gas, comunicaciones y otros servicios según los planos y el código adoptado'],
+    ['Raceways under buildings use an approved method and are encased or protected where required (NEC 300.5(E))','Las canalizaciones bajo edificios usan un método aprobado y están encamisadas o protegidas cuando corresponde (NEC 300.5(E))'],
+    ['Building penetrations and raceway ends are sealed against moisture and gases (NEC 300.5(G), 300.5(J))','Las penetraciones del edificio y los extremos de las canalizaciones están sellados contra humedad y gases (NEC 300.5(G), 300.5(J))'],
+    ['Raceway drainage, underground boxes, and fittings prevent water accumulation and are listed for the location (NEC 300.5(B), 314.15)','El drenaje de las canalizaciones, las cajas subterráneas y los accesorios evitan la acumulación de agua y están certificados para la ubicación (NEC 300.5(B), 314.15)'],
+    ['Conduit bends, pull points, and pull boxes provide the required access and bending space (NEC 314.28, 352.26, 358.26)','Las curvas, puntos de halado y cajas de halado proporcionan el acceso y espacio de curvatura requeridos (NEC 314.28, 352.26, 358.26)'],
+    ['Conductors are sized for ampacity, temperature, overcurrent protection, and voltage drop per the approved design (NEC 215.2, 215.3, 310.16)','Los conductores tienen el tamaño adecuado para ampacidad, temperatura, protección contra sobrecorriente y caída de tensión según el diseño aprobado (NEC 215.2, 215.3, 310.16)'],
+    ['Neutral and equipment grounding conductors are identified, routed, and terminated correctly (NEC 200.6, 250.119, 250.32(B) where applicable)','Los conductores neutro y de puesta a tierra del equipo están identificados, tendidos y terminados correctamente (NEC 200.6, 250.119, 250.32(B), cuando corresponda)'],
+    ['Grounding electrode, bonding, and service/feeder requirements are complete where applicable (NEC 250.32, 250.50, 250.53)','Los requisitos de electrodo de puesta a tierra, equipotencialidad y servicio o alimentador están completos cuando corresponde (NEC 250.32, 250.50, 250.53)'],
+    ['Splices and terminations are accessible, listed, protected, and not buried without an approved enclosure (NEC 110.14, 300.5(I), 314.29)','Los empalmes y terminaciones son accesibles, certificados y protegidos; no están enterrados sin una caja aprobada (NEC 110.14, 300.5(I), 314.29)'],
+    ['Inspection, photos, measurements, test results, warning locations, and as-built records are complete before backfill (NEC 300.5 and project requirements)','La inspección, fotos, mediciones, resultados de pruebas, ubicaciones de advertencia y registros conforme a obra están completos antes del relleno (NEC 300.5 y requisitos del proyecto)'],
+    ['Approved underground electrical plans and utility layout available on site','Planos eléctricos subterráneos aprobados y distribución de servicios disponibles en el sitio'],
+    ['Underground route matches the approved plans and required clearances','La ruta subterránea coincide con los planos aprobados y mantiene las separaciones requeridas'],
+    ['Trench depth and cover meet the approved design and applicable code','La profundidad y cobertura de la zanja cumplen con el diseño aprobado y el código aplicable'],
+    ['Conduit type, size, schedule, and rating are correct for the installation','El tipo, tamaño, cédula y clasificación del conduit son correctos para la instalación'],
+    ['Conduit is properly bedded, supported, protected, and free of damage','El conduit está correctamente asentado, sostenido y protegido, sin daños'],
+    ['Required separation from plumbing, gas, communications, and other utilities','Se mantiene la separación requerida de plomería, gas, comunicaciones y otros servicios'],
+    ['Sweeps, bends, and pull points meet the permitted radius and access requirements','Las curvas, dobleces y puntos de halado cumplen con el radio permitido y los requisitos de acceso'],
+    ['Conduit ends are capped, sealed, and protected from water and debris','Los extremos del conduit están tapados, sellados y protegidos contra agua y residuos'],
+    ['Pull strings or pulling provisions are installed where required','Se instalaron cordones guía o medios de halado donde corresponde'],
+    ['Grounding and bonding conductors are installed and identified correctly','Los conductores de puesta a tierra y equipotencialidad están instalados e identificados correctamente'],
+    ['Sleeves, wall penetrations, and waterproofing are sealed as specified','Los sleeves, penetraciones de muros e impermeabilizaciones están sellados según las especificaciones'],
+    ['Underground installation was inspected and documented before backfill','La instalación subterránea fue inspeccionada y documentada antes del relleno'],
+    ['Photos, measurements, test results, and as-built information are complete','Las fotos, mediciones, resultados de pruebas e información conforme a obra están completos'],
     ['Approved','Aprobado'], ['electrical','eléctrico'], ['plans','planos'], ['available on site','disponibles en el sitio'],
     ['available','disponible'], ['required','requerido'], ['correct','correcto'], ['per specifications','según las especificaciones'],
     ['per code','según el código'], ['per plans','según los planos'], ['installed','instalado'], ['installation','instalación'],
@@ -9336,7 +10351,7 @@ function inspOpenPhotoViewer(photos, index = 0) {
 // SUBMIT
 // Backward-compatible handler used by the checklist button.
 function inspSubmit() { return inspSubmitInspection(); }
-function inspSubmitInspection() {
+async function inspSubmitInspection() {
   const unanswered = inspChecklistItems.filter(i => i.status === null).length;
   if (unanswered > 0) {
     const warn = document.getElementById('insp-submit-warning');
@@ -9400,12 +10415,20 @@ function inspSubmitInspection() {
 
   const inspections = inspGetInspections();
   inspections.push(record);
-  inspSaveInspections(inspections);
+  inspShowToast('Saving inspection to Supabase...', 'success');
+  try {
+    await inspSaveInspections(inspections);
+  } catch (error) {
+    console.error('Remote inspection save failed:', error);
+    inspShowToast(`Inspection could not be saved: ${error.message || 'connection error'}`, 'error');
+    return;
+  }
   if (typeof addLocalAudit === 'function') addLocalAudit(previous ? 'Reinspection submitted' : 'Inspection submitted', { unit: record.apt, type: record.type, failures: failItems.length, revision: record.revision });
   inspClearDraft();
   window.inspLastSummaryRecord = record;
+  if (typeof window.updateInspectionRequiredTasks === 'function') window.updateInspectionRequiredTasks(record);
   if (typeof renderPunchlist === 'function') renderPunchlist();
-  if (typeof savePunchlist === 'function') savePunchlist();
+  if (typeof savePunchlist === 'function') await savePunchlist();
   if (typeof updateMetrics === 'function') updateMetrics();
   if (typeof updateCharts === 'function') updateCharts();
 
@@ -9414,8 +10437,9 @@ function inspSubmitInspection() {
   const savedMessage = previous
     ? (failItems.length > 0 ? `Reinspection saved successfully with ${failItems.length} failure(s)` : 'Reinspection saved successfully')
     : (failItems.length > 0 ? `Inspection saved successfully with ${failItems.length} failure(s)` : 'Inspection saved successfully');
-  inspShowToast(savedMessage, failItems.length > 0 ? 'error' : 'success');
-  inspShowToast(failItems.length > 0 ? `⚠️ Inspection with ${failItems.length} failure(s) saved` : '✅ Inspection completed successfully', failItems.length > 0 ? 'error' : 'success');
+  // A saved inspection is successful even when its result contains failures.
+  // The FAIL status is shown in the Summary and Punch List, not as a save error.
+  inspShowToast(savedMessage, 'success');
 }
 
 function inspPrintSummary() {
@@ -9433,14 +10457,22 @@ function inspPrintSummary() {
 
 function inspCloseSummaryView() {
   const popup = document.querySelector('.insp-summary-popup');
-  const returnTarget = window.inspReturnAfterInspection || 'dashboard';
+  const visibleHistory = document.getElementById('insp-tab-history')?.style.display !== 'none';
+  const returnTarget = window.inspReturnAfterInspection || (visibleHistory ? 'history' : 'dashboard');
+  if (window.inspSummaryReturnTimer) {
+    clearTimeout(window.inspSummaryReturnTimer);
+    window.inspSummaryReturnTimer = null;
+  }
   if (popup) {
     // Remove the click-blocking overlay immediately when using X.
     inspResetInspectionViewState();
     inspCloseSummaryPopup();
-    setTimeout(() => {
+    window.inspSummaryReturnTimer = setTimeout(() => {
       inspResetInspectionViewState();
-      if (returnTarget === 'history' || returnTarget === 'punchlist' || returnTarget === 'report') inspShowTab(returnTarget);
+      if (returnTarget === 'history' || returnTarget === 'punchlist' || returnTarget === 'report') {
+        if (returnTarget === 'history' || returnTarget === 'punchlist') window.inspPreserveUnitFilter = returnTarget;
+        inspShowTab(returnTarget);
+      }
       else if (returnTarget === 'inspection-type-list') {
         const tab = document.querySelector('.tab-main[onclick*=\"inspections\"]');
         if (tab) switchMainTab('inspections', tab);
@@ -9458,11 +10490,17 @@ function inspCloseSummaryView() {
         const search = document.getElementById('insp-unit-search');
         if (search && apt) { search.value = String(apt); inspSearchUnits(String(apt)); }
       } else if (returnTarget === 'unit') {
+        // Unit List View owns the return screen. Reopen the same details modal
+        // instead of navigating through Dashboard, then restore its inspections tab.
+        const details = showAppModal('detailsModal');
+        document.body.style.overflow = 'hidden';
+        if (details && currentDetailsUnit) switchDetailsTab('inspections');
+      } else {
+        document.body.style.overflow = '';
         switchMainTab('dashboard', document.querySelector('.tab-main[onclick*=dashboard]'));
-        const details = document.getElementById('detailsModal');
-        if (details) { details.style.display = 'flex'; details.classList.add('show'); }
-      } else switchMainTab('dashboard', document.querySelector('.tab-main[onclick*=dashboard]'));
+      }
       window.inspReturnAfterInspection = '';
+      window.inspSummaryReturnTimer = null;
     }, 540);
     return;
   }
@@ -9512,7 +10550,206 @@ if (document.body?._inspGlobalNavObserver?.disconnect) document.body._inspGlobal
 if (inspNavRoot) inspNavRoot._inspNavObserver = { disconnect() {}, observe() {} };
 if (document.body) document.body._inspGlobalNavObserver = { disconnect() {}, observe() {} };
 
+function isInspectionAdmin() {
+  // Local mode has no authentication, so it acts as the admin test environment.
+  return window.userRole === 'admin' || (typeof LOCAL_PROJECT_MODE !== 'undefined' && (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') && (!window.authIsActive || !window.authIsActive()));
+}
+
+async function inspResetCurrentInspection(options = {}) {
+  const fileLocalMode = window.location.protocol === 'file:';
+  const remoteMode = typeof LOCAL_PROJECT_MODE !== 'undefined' && !LOCAL_PROJECT_MODE && !fileLocalMode;
+  if (remoteMode && !sbClient) {
+    inspShowToast('Supabase is not connected. The inspection was not reset.', 'error');
+    return;
+  }
+
+  const record = window.inspLastSummaryRecord || {};
+  const unit = inspCurrentUnit || { apt: record.apt };
+  const type = inspCurrentType || { id: record.typeId, num: record.typeNum, name: record.type };
+  const apt = String(unit?.apt || record.apt || '');
+  const typeId = String(type?.id || record.typeId || '');
+  const typeNum = String(type?.num || record.typeNum || '');
+  const typeName = String(type?.name || record.type || '').trim().toLowerCase();
+  if (!apt || (!typeId && !typeNum && !typeName)) {
+    inspShowToast('Unable to identify the inspection to reset.', 'error');
+    return;
+  }
+
+  const confirmed = await new Promise(resolve => askConfirm(
+    `Reset inspection for Unit ${apt}? This permanently removes its inspection history, failures, photos, and inspection-generated Punch List items. The unit will return to Not Started.`,
+    () => resolve(true),
+    () => resolve(false),
+    'Reset',
+    'Reset Inspection'
+  ));
+  if (!confirmed) return;
+
+  const sameInspection = item => {
+    if (String(item?.apt || '') !== apt) return false;
+    return (typeId && String(item?.typeId || '') === typeId)
+      || (typeNum && String(item?.typeNum || '') === typeNum)
+      || (typeName && String(item?.type || item?.typeName || '').trim().toLowerCase() === typeName);
+  };
+
+  try {
+    const replaceLocalData = (key, value) => {
+      const serialized = JSON.stringify(value);
+      try {
+        localStorage.setItem(key, serialized);
+      } catch (storageError) {
+        // Photos can fill the quota. Removing the old large value first
+        // releases space before writing the reduced dataset.
+        if (!/quota|storage/i.test(String(storageError?.name || storageError?.message || ''))) throw storageError;
+        try { localStorage.removeItem('identus_remote_data_cache'); } catch (_) {}
+        localStorage.removeItem(key);
+        try {
+          localStorage.setItem(key, serialized);
+        } catch (retryError) {
+          if (key === 'inspections_data') {
+            const compactHistory = Array.isArray(value) ? value.map(record => ({
+              ...record,
+              items: Array.isArray(record.items) ? record.items.map(item => ({
+                ...item,
+                photos: [],
+                photoCount: item.photoCount || (Array.isArray(item.photos) ? item.photos.length : 0)
+              })) : record.items
+            })) : value;
+            localStorage.setItem(key, JSON.stringify(compactHistory));
+          } else if (key === 'local_punchlist') {
+            // Inspection photos remain in inspections_data/Summary. Avoid
+            // storing a second base64 copy inside the Punch List.
+            const compact = Array.isArray(value) ? value.map(item => item?.source === 'inspection'
+              ? { ...item, photos: [], photoCount: item.photoCount || 0 }
+              : item) : value;
+            localStorage.setItem(key, JSON.stringify(compact));
+          } else {
+            throw retryError;
+          }
+        }
+      }
+    };
+    const inspections = inspGetInspections();
+    const keptInspections = inspections.filter(item => !sameInspection(item));
+    if (LOCAL_PROJECT_MODE || fileLocalMode) {
+      inspRemoteRecords = keptInspections;
+      replaceLocalData('inspections_data', keptInspections);
+    } else {
+      const remoteUnit = (Array.isArray(data) ? data : []).find(u => String(u.apt) === apt);
+      if (!remoteUnit?.id) throw new Error('The selected unit is not synchronized with Supabase.');
+      const { data: typeRows, error: typeError } = await sbClient
+        .from('inspection_types').select('id').eq('project_id', PROJECT_ID).eq('code', typeId).limit(1);
+      if (typeError) throw typeError;
+      const remoteTypeId = typeRows?.[0]?.id;
+      if (!remoteTypeId) throw new Error('The inspection type is not configured in Supabase.');
+      const { data: remoteRecords, error: recordError } = await sbClient
+        .from('inspection_records').select('id').eq('project_id', PROJECT_ID)
+        .eq('unit_id', remoteUnit.id).eq('inspection_type_id', remoteTypeId);
+      if (recordError) throw recordError;
+      const remoteRecordIds = (remoteRecords || []).map(row => row.id).filter(Boolean);
+      if (remoteRecordIds.length) {
+        const { error: punchError } = await sbClient.from('punch_list').delete()
+          .eq('project_id', PROJECT_ID).in('inspection_id', remoteRecordIds);
+        if (punchError) throw punchError;
+        const { error: deleteRecordError } = await sbClient.from('inspection_records').delete()
+          .eq('project_id', PROJECT_ID).in('id', remoteRecordIds);
+        if (deleteRecordError) throw deleteRecordError;
+      }
+      const { data: authData } = await sbClient.auth.getUser();
+      const inspectorId = authData?.user?.id;
+      if (inspectorId) {
+        const { error: draftError } = await sbClient.from('inspection_drafts').delete()
+          .eq('project_id', PROJECT_ID).eq('unit_id', remoteUnit.id)
+          .eq('inspection_type_id', remoteTypeId).eq('inspector_id', inspectorId);
+        if (draftError) throw draftError;
+      }
+      inspRemoteRecords = keptInspections;
+    }
+
+    if (Array.isArray(punchlist)) {
+      punchlist = punchlist.filter(item => {
+        const inspectionDerived = item?.source === 'inspection'
+          || String(item?.id || '').startsWith('inspection-')
+          || Boolean(item?.inspectionId);
+        const relatedInspection = sameInspection({
+          apt: item.location || item.apt,
+          typeId: item.typeId,
+          typeNum: item.typeNum,
+          type: item.type || item.typeName
+        });
+        if (!inspectionDerived && !relatedInspection) return true;
+        return !relatedInspection;
+      });
+      if (LOCAL_PROJECT_MODE || fileLocalMode) replaceLocalData('local_punchlist', punchlist);
+      else if (!fileLocalMode) await savePunchlist();
+    }
+
+    localStorage.removeItem(`inspection_draft_${apt}_${typeId}`);
+    try {
+      const audit = JSON.parse(localStorage.getItem('local_audit_log') || '[]');
+      localStorage.setItem('local_audit_log', JSON.stringify(audit.filter(entry => {
+        const details = entry?.details || {};
+        const inspectionAction = /inspection submitted|reinspection submitted/i.test(String(entry?.action || ''));
+        return !(inspectionAction && String(details.unit || '') === apt && String(details.type || '').trim().toLowerCase() === typeName);
+      })));
+    } catch (_) {}
+
+    const refreshAfterReset = fn => {
+      try { if (typeof fn === 'function') fn(); }
+      catch (refreshError) { console.warn('Reset refresh warning:', refreshError); }
+    };
+    refreshAfterReset(renderPunchlist);
+    refreshAfterReset(inspLoadPunchList);
+    refreshAfterReset(updateMetrics);
+    refreshAfterReset(updateCharts);
+    refreshAfterReset(renderUnits);
+    window.inspLastSummaryRecord = null;
+    if (options.returnToCards) {
+      refreshAfterReset(inspRenderTypeGrid);
+    } else {
+      refreshAfterReset(inspCloseSummaryView);
+    }
+    const resetMessage = (localStorage.getItem('cfg_language') || 'en') === 'es'
+      ? 'Inspección reiniciada correctamente. Se eliminaron el historial, fallos, fotos y Punch List relacionados.'
+      : 'Inspection reset successfully. History, failures, photos, and related Punch List items were removed.';
+    inspShowToast(resetMessage, 'success');
+  } catch (error) {
+    console.error('Inspection reset failed:', error);
+    inspShowToast(`Inspection reset failed: ${error.message || 'unknown error'}`, 'error');
+  }
+}
+
+async function inspResetInspectionCard(typeId) {
+  if (!inspCurrentUnit) return;
+  const type = INSP_INSPECTION_TYPES.find(item => String(item.id) === String(typeId));
+  if (!type) return;
+  inspCurrentType = type;
+  window.inspLastSummaryRecord = inspGetLastInspection(inspCurrentUnit.apt, type.id) || null;
+  await inspResetCurrentInspection({ returnToCards: true });
+}
+
 function inspShowSummary(record) {
+  const existingToast = document.getElementById('insp-toast');
+  if (existingToast) {
+    clearTimeout(window.inspToastTimer);
+    existingToast.classList.add('insp-toast-hide');
+    existingToast.style.transform = 'translateY(100px)';
+    existingToast.style.opacity = '0';
+  }
+  // Always render the complete configured checklist. Older/sparse records may
+  // contain only answered items, so fill the missing rows from the type.
+  const savedItems = Array.isArray(record.items) ? record.items : [];
+  const configuredItems = Array.isArray(inspCurrentType?.items) ? inspCurrentType.items : [];
+  if (configuredItems.length > savedItems.length) {
+    record.items = configuredItems.map((description, index) => ({
+      ...(savedItems[index] || {}),
+      idx: index,
+      description: savedItems[index]?.description || description,
+      status: savedItems[index]?.status || 'N/A',
+      comment: savedItems[index]?.comment || '',
+      photos: savedItems[index]?.photos || [],
+      photoCount: savedItems[index]?.photoCount || (savedItems[index]?.photos || []).length
+    }));
+  }
   const hasFail = record.failedCount > 0;
   const hasStarted = (record.items || []).some(item => item.status === 'PASS' || item.status === 'FAIL' || item.status === 'N/A');
 
@@ -9558,7 +10795,7 @@ function inspShowSummary(record) {
     const returnButton = singleSummaryNav.querySelector('button:last-child');
     if (returnButton) {
       returnButton.textContent = '\u21a9';
-      returnButton.onclick = inspCloseInspectionView;
+      returnButton.onclick = inspCloseSummaryView;
       returnButton.title = 'Return';
       returnButton.setAttribute('aria-label', 'Return');
       returnButton.classList.add('insp-icon-nav');
@@ -9695,11 +10932,15 @@ function inspLoadReport(selectedBuildingArg, selectedFloorArg) {
   if (!panel) return;
   const allRecords = inspGetInspections().map(r => ({...r,
     building: r.building || r.building_name || r.buildingName || '',
-    floor: r.floor || r.floor_name || r.floorName || ''
+    floor: r.floor || r.floor_name || r.floorName || '',
+    items: Array.isArray(r.items) ? r.items : [],
+    passCount: Number(r.passCount) || 0,
+    failedCount: Number(r.failedCount) || 0,
+    naCount: Number(r.naCount) || 0
   }));
-  const latestRecords = new Map();
-  allRecords.forEach(r => latestRecords.set(`${r.apt}::${r.typeId}`, r));
-  let records = Array.from(latestRecords.values());
+  // Reports must include every inspection/reinspection record, not only the
+  // latest revision for each unit and inspection type.
+  let records = allRecords.slice().sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
   let filters = panel.querySelector('[data-report-filters]');
   if (!filters) {
     filters = document.createElement('div'); filters.dataset.reportFilters = '1'; filters.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;padding:16px;border-bottom:1px solid #e5e7eb';
@@ -9749,7 +10990,9 @@ function inspLoadReport(selectedBuildingArg, selectedFloorArg) {
 function inspLoadHistory() {
   const query = (document.getElementById('insp-history-search')?.value || '').trim().toLowerCase();
   const unitFilter = window.inspHistoryUnitFilter ? String(window.inspHistoryUnitFilter) : '';
-  const inspections = inspGetInspections().reverse().filter(r =>
+  const inspections = [...inspGetInspections()].sort((a, b) =>
+    new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0)
+  ).filter(r =>
     (!unitFilter || String(r.apt) === unitFilter) &&
     (!query || [r.apt, r.type, r.inspector, r.building].some(v => String(v || '').toLowerCase().includes(query)))
   );
@@ -9768,7 +11011,7 @@ function inspLoadHistory() {
 
   container.innerHTML = `<div class="insp-list">${
     inspections.map(r => {
-const dateStr = new Date(r.date).toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+const dateStr = new Date(r.date || r.createdAt || Date.now()).toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
       const badge = r.failedCount > 0
         ? `<span class="insp-badge insp-badge-fail">❌ ${r.failedCount} FAIL</span>`
         : `<span class="insp-badge insp-badge-pass">✅ PASS</span>`;
@@ -9777,7 +11020,7 @@ const dateStr = new Date(r.date).toLocaleDateString('en-US', {year:'numeric', mo
           <div class="insp-unit">${r.apt}</div>
           <div class="insp-type">${r.typeNum}. ${r.type}<br><small>${r.building}</small><br><small>Inspector: ${r.inspector || 'Unknown'}</small>${r.isReinspection ? `<br><small>Reinspection · Revision ${r.revision || 2}</small>` : ''}</div>
           <div>${badge}</div>
-          <div class="insp-date">${dateStr}</div>
+          <div class="insp-date">${dateStr}<br><small>Created: ${r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-US') : '-'}<br>Completed: ${r.completedAt ? new Date(r.completedAt).toLocaleDateString('en-US') : '-'}</small></div>
           <div class="insp-actions"><button class="insp-btn insp-btn-sm insp-btn-outline" onclick="inspViewHistoryRecord('${r.id}')">View</button>
             <button class="insp-btn insp-btn-sm insp-btn-outline" onclick="inspRetakeInspection('${r.apt}','${r.typeId}')">🔄 Retomar</button>
           </div>
@@ -9797,7 +11040,7 @@ function inspRetakeInspection(apt, typeId) {
   }, 0);
   const liveUnit = Array.isArray(window.data) ? window.data.find(u => String(u.apt || u.unit_number || '') === String(apt)) : null;
   inspCurrentUnit = liveUnit || INSP_DEMO_UNITS.find(u => u.apt === apt);
-  inspCurrentType = INSP_INSPECTION_TYPES.find(t => t.id === typeId);
+  inspCurrentType = INSP_INSPECTION_TYPES.find(t => String(t.id) === String(typeId));
   if (!inspCurrentUnit || !inspCurrentType) return;
   // Check for prior inspection and show modal
   const prior = inspGetLastInspection(apt, typeId);
@@ -9878,7 +11121,10 @@ function inspCloseInspectionView() {
   inspResetInspectionViewState();
   const returnTab = checklistWasOpen ? 'inspection-type-list' : (window.inspReturnAfterInspection || 'dashboard');
   window.inspReturnAfterInspection = '';
-  if (returnTab === 'history' || returnTab === 'punchlist' || returnTab === 'report') inspShowTab(returnTab);
+  if (returnTab === 'history' || returnTab === 'punchlist' || returnTab === 'report') {
+    if (returnTab === 'history' || returnTab === 'punchlist') window.inspPreserveUnitFilter = returnTab;
+    inspShowTab(returnTab);
+  }
   else if (returnTab === 'inspection-type-list') {
     if (!inspCurrentUnit) {
       inspCurrentUnit = window.inspLastSelectedUnit || null;
@@ -9941,7 +11187,7 @@ function inspOpenUnitInspectionSummary(apt, typeId) {
     || INSP_DEMO_UNITS.find(u => String(u.apt) === String(apt)) || { apt, building: '', floor: '' };
   const type = INSP_INSPECTION_TYPES.find(t => String(t.id) === String(typeId));
   if (!type) return;
-  if (!inspIsInspectionTypeApplicableForBuilding(type, unit.building)) {
+  if (!inspIsInspectionTypeApplicableForUnit(type, unit)) {
     alert('This inspection type is not applicable to the selected building.');
     return;
   }
@@ -9959,8 +11205,17 @@ function inspOpenUnitInspectionSummary(apt, typeId) {
     inspShowTab('new');
   }
   window.inspLastSummaryRecord = emptyRecord;
+  if (fromUnitView) inspHideUnitDetailsForSummary();
   inspShowSummary(emptyRecord);
   inspShowSummaryPopup();
+}
+
+function inspHideUnitDetailsForSummary() {
+  const details = document.getElementById('detailsModal');
+  if (!details) return;
+  details.classList.remove('show');
+  details.style.display = 'none';
+  details.setAttribute('aria-hidden', 'true');
 }
 
 function inspOpenInspectionRecord(recordId) {
@@ -9996,6 +11251,7 @@ function inspOpenInspectionRecord(recordId) {
     inspShowTab('new');
   }
   window.inspLastSummaryRecord = record;
+  if (fromUnitView) inspHideUnitDetailsForSummary();
   inspShowSummary(record);
   setTimeout(() => inspShowSummaryPopup(), 0);
 }
@@ -10003,6 +11259,13 @@ function inspOpenInspectionRecord(recordId) {
 // PUNCH LIST
 function inspFindPunchInspection(item) {
   const records = inspGetInspections();
+  const directId = String(item.inspectionId || '');
+  const generatedId = String(item.id || '');
+  const directRecord = records.find(r =>
+    (directId && String(r.id) === directId) ||
+    (generatedId && generatedId.startsWith(`inspection-${r.id}-`))
+  );
+  if (directRecord && normalizePunchStatus(item.status) !== 'Closed') return directRecord;
   const historyId = Array.isArray(item.history) ? [...item.history].reverse().find(h => h.inspectionId)?.inspectionId : null;
   if (historyId) {
     const byId = records.find(r => String(r.id) === String(historyId));
@@ -10011,7 +11274,12 @@ function inspFindPunchInspection(item) {
   const apt = String(item.location || item.apt || '');
   const typeNum = String(item.typeNum || '');
   const description = String(item.description || item.title || '').replace(/^\s*\d+\.\s*/, '').trim().toLowerCase();
-  const candidates = records.filter(r => String(r.apt) === apt && (!typeNum || String(r.typeNum) === typeNum));
+  const candidates = records.filter(r => String(r.apt) === apt && (!typeNum
+    ? (!directRecord?.typeId || String(r.typeId) === String(directRecord.typeId))
+    : String(r.typeNum) === typeNum));
+  if (normalizePunchStatus(item.status) === 'Closed') {
+    return candidates.slice().sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0))[0] || null;
+  }
   return candidates.slice().reverse().find(r => (r.items || []).some(i => String(i.description || '').trim().toLowerCase() === description && i.status === 'FAIL')) || candidates[candidates.length - 1] || null;
 }
 
@@ -10020,14 +11288,40 @@ function inspOpenPunchInspection(recordId) {
   inspOpenInspectionRecord(recordId);
 }
 
+function inspOpenPunchItem(itemId, mode) {
+  const item = Array.isArray(punchlist) ? punchlist.find(entry => String(entry.id) === String(itemId)) : null;
+  if (!item) return;
+  const record = inspFindPunchInspection(item);
+  if (!record) {
+    inspShowToast('The related inspection could not be found.', 'error');
+    return;
+  }
+  if (mode === 'resume') {
+    inspRetakeInspection(item.location || item.apt || record.apt, item.typeId || record.typeId);
+  } else {
+    inspOpenInspectionRecord(record.id);
+  }
+}
+
 function inspLoadPunchList() {
   const unitFilter = window.inspHistoryUnitFilter ? String(window.inspHistoryUnitFilter) : '';
   const query = (document.getElementById('insp-punch-unit-search')?.value || '').trim().toLowerCase();
   const punchHistory = Array.isArray(punchlist) ? punchlist.filter(item =>
+    !isLocallyDeletedPunch(item) &&
     (!unitFilter || String(item.location || item.apt || '') === unitFilter) &&
     (!query || String(item.location || item.apt || '').toLowerCase().startsWith(query))
   ) : [];
-  const allFails = punchHistory.length ? punchHistory.map(item => ({
+  const allFails = punchHistory.length ? punchHistory.map(item => {
+    const linkedInspection = inspFindPunchInspection(item);
+    const itemHistory = parsePunchHistory(item.history);
+    const historyInspectionId = [...itemHistory].reverse().find(entry => entry?.inspectionId)?.inspectionId || '';
+    const history = itemHistory.length ? itemHistory : (linkedInspection ? [{
+      action: 'created',
+      date: linkedInspection.date || linkedInspection.createdAt || new Date().toISOString(),
+      inspectionId: linkedInspection.id,
+      inspector: linkedInspection.inspector || item.assignee || ''
+    }] : []);
+    return {
     id: item.id,
     apt: item.location || item.apt || '',
     building: item.building || '',
@@ -10036,15 +11330,17 @@ function inspLoadPunchList() {
     inspector: item.assignee || item.inspector || '',
     date: item.createdAt || item.date || new Date().toISOString(),
     closedAt: item.closedAt || null,
-    status: item.status || 'Open',
+    status: normalizePunchStatus(item.status),
     description: item.description || item.title || '',
     comment: item.comment || '',
     priority: item.priority || 'High',
+    typeId: item.typeId || linkedInspection?.typeId || '',
     photoCount: item.photoCount || (item.photos || []).length,
     photos: item.photos || [],
-    history: Array.isArray(item.history) ? item.history : [],
-    inspectionId: inspFindPunchInspection(item)?.id || null
-  })) : [];
+    history,
+    inspectionId: linkedInspection?.id || item.inspectionId || historyInspectionId || null
+    };
+  }) : [];
 
   const container = document.getElementById('insp-punchlist-body');
   if (!container) return;
@@ -10076,12 +11372,11 @@ function inspLoadPunchList() {
           <div style="font-size:13px;margin-top:2px">${f.description}</div>
           <div style="font-size:12px;color:#64748b;margin-top:2px">💬 ${f.comment}</div>
           ${f.photoCount > 0 ? `<div style="font-size:12px;color:#64748b">📷 ${f.photoCount} foto(s)</div>` : ''}
-          <div style="font-size:12px;color:#64748b;margin-top:3px">History: ${f.history.length ? `${f.history.length} change(s) recorded` : 'No history recorded'}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:3px">${formatPunchHistory(f)}</div>
         </div>
          <div style="font-size:12px;color:#64748b;white-space:nowrap">Created: ${new Date(f.date).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}${f.closedAt ? `<br>Closed: ${new Date(f.closedAt).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}` : ''}</div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-          ${f.inspectionId ? `<button class="insp-btn insp-btn-sm insp-btn-outline" onclick='inspOpenPunchInspection(${JSON.stringify(f.inspectionId)})'>View</button>` : ''}
-          ${f.photos?.length ? `<button class="insp-btn insp-btn-sm insp-btn-outline" onclick="inspOpenPunchPhotos('${f.apt}', '${f.typeNum}')">View Photos</button>` : ''}
+          ${f.inspectionId ? `<button class="insp-btn insp-btn-sm insp-btn-outline" onclick='inspOpenPunchItem(${JSON.stringify(f.id)},"view")'>View</button><button class="insp-btn insp-btn-sm insp-btn-outline" onclick='inspOpenPunchItem(${JSON.stringify(f.id)},"resume")'>Resume</button>` : ''}
         </div>
       </div>
     `).join('')}
@@ -10148,10 +11443,8 @@ document.addEventListener('DOMContentLoaded', function() {
   const inspectionFailuresTitle = document.querySelector('#punchInspFailsPanel strong');
   if (inspectionFailuresTitle) inspectionFailuresTitle.textContent = 'Inspection Failures — Pending';
 });
-setInterval(function() {
-  const report = document.getElementById('insp-tab-report');
-  if (report && report.style.display !== 'none') inspLoadReport();
-}, 1000);
+// Report refreshes on tab entry and filter changes. Avoid a polling loop here:
+// it repeatedly rebuilt the report while the user was reading or typing.
 </script>
 </body>
 </html>
