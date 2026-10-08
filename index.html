@@ -2122,7 +2122,7 @@
     'Check Project Setup':'Revisa el Project Setup', 'Inspection Types by Area':'Tipos de Inspección por Área',
     'No inspections recorded yet':'Aún no hay inspecciones registradas', 'item(s) pending correction':'ítem(s) pendiente(s) de corrección',
     'Underground':'Nivel subterráneo', 'Clubhouse':'Casa club', 'Parking':'Estacionamiento', 'Wiring':'Cableado',
-    'Electric Panel':'Panel eléctrico', 'Testing':'Pruebas', 'Data':'Datos', 'Fire Alarm':'Alarma contra incendios',
+    'Electric Panel':'Panel eléctrico / Centro de carga', 'Electrical Panel / Load Center':'Panel eléctrico / Centro de carga', 'Testing':'Pruebas', 'Data':'Datos', 'Fire Alarm':'Alarma contra incendios',
     'Lighting':'Iluminación', 'At Risk':'En riesgo', 'In Progress':'En progreso', 'Behind':'Atrasado',
     'Low':'Baja', 'Medium':'Media', 'High':'Alta',
     'QA/QC Inspection System':'Sistema de Inspección QA/QC', 'Last updated':'Última actualización', 'just now':'ahora',
@@ -2209,7 +2209,7 @@ Object.assign(APP_TRANSLATIONS.en, {
   'Marcar como cerrado':'Mark as Closed', 'Deshacer esta actualización':'Undo this update', 'Limpiar':'Clear',
   'Alertas activadas':'Alerts on', 'Activar alertas':'Enable alerts',
   'Nivel subterráneo':'Underground', 'Casa club':'Clubhouse', 'Estacionamiento':'Parking', 'Cableado':'Wiring',
-  'Panel eléctrico':'Electric Panel', 'Pruebas':'Testing', 'Datos':'Data', 'Alarma contra incendios':'Fire Alarm',
+  'Panel eléctrico':'Electric Panel', 'Panel eléctrico / Centro de carga':'Electrical Panel / Load Center', 'Pruebas':'Testing', 'Datos':'Data', 'Alarma contra incendios':'Fire Alarm',
   'Iluminación':'Lighting', 'En riesgo':'At Risk', 'En progreso':'In Progress', 'Atrasado':'Behind',
   'Baja':'Low', 'Media':'Medium', 'Alta':'High',
   'Sistema de Inspección QA/QC':'QA/QC Inspection System', 'Última actualización':'Last updated', 'ahora':'now',
@@ -2276,6 +2276,9 @@ Object.assign(APP_TRANSLATIONS.en, {
     const map = APP_TRANSLATIONS[lang] || APP_TRANSLATIONS.en;
     const entries = Object.entries(map).sort((a, b) => b[0].length - a[0].length);
     const translateValue = (input) => entries.reduce((value, [from, to]) => {
+      // "Panel" is a valid dashboard translation, but never rewrite the
+      // electrical term "Electrical Panel / Load Center" to "Dashboard".
+      if (from === 'Panel' && /Electrical Panel\b/i.test(value)) return value;
       const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const wholeWord = /^[\p{L}\p{N} ]+$/u.test(from);
       const pattern = wholeWord
@@ -2514,9 +2517,22 @@ Object.assign(APP_TRANSLATIONS.en, {
     function activeSystemsOf(u) {
       const hasSystemConfig = !!(u && u.systems && typeof u.systems === 'object');
       if (!hasSystemConfig) return SYSTEMS;
-      return SYSTEMS.filter(s => u.systems[s]);
+      return SYSTEMS.filter(s => u.systems[s] || u.systems[systemStorageAlias(s)]);
     }
     const SYSTEMS = ['Rough-In', 'Trim-Out', 'Fire-Stop', 'Wiring', 'Electric Panel', 'Testing', 'Data', 'Fire Alarm', 'Lighting', 'Underground'];
+    // Keep the storage key stable while presenting the correct field terminology.
+    const SYSTEM_DISPLAY_NAMES = { 'Electric Panel': 'Electrical Panel / Load Center' };
+    const SYSTEM_ALIASES = { 'Electric Dashboard': 'Electric Panel', 'Electrical Dashboard': 'Electric Panel' };
+    function canonicalSystemName(name) {
+      const raw = String(name || '').trim();
+      if (/^electric(?:al)? dashboard(?:\s*\/\s*load center)?$/i.test(raw)) return 'Electric Panel';
+      return SYSTEM_ALIASES[raw] || raw;
+    }
+    function systemStorageAlias(name) {
+      const canonical = canonicalSystemName(name);
+      return Object.keys(SYSTEM_ALIASES).find(alias => SYSTEM_ALIASES[alias] === canonical) || '';
+    }
+    function systemDisplayName(name) { return SYSTEM_DISPLAY_NAMES[canonicalSystemName(name)] || canonicalSystemName(name); }
     const BUILDINGS = ['Building 1', 'Building 2', 'Building 3', 'Clubhouse', 'Parking'];
     // Note: Clubhouse and Parking are standalone buildings (not sub-units of Building 2)
     const FLOORS = ['Floor 1', 'Floor 2', 'Floor 3', 'Underground'];
@@ -3140,6 +3156,7 @@ Object.assign(APP_TRANSLATIONS.en, {
 
         if (systemsStatus) {
           systemsStatus.forEach(s => {
+            s.system_id = canonicalSystemName(s.system_id);
             if (!statusByUnit.has(s.unit_id)) {
               statusByUnit.set(s.unit_id, new Map());
             }
@@ -3951,7 +3968,7 @@ showAppModal('projectSetupModal');
           const bId = unitIdToBuildingId[row.unit_id];
           if (!bId) return;
           if (!systemsByBuilding[bId]) systemsByBuilding[bId] = new Set();
-          systemsByBuilding[bId].add(row.system_id);
+          systemsByBuilding[bId].add(canonicalSystemName(row.system_id));
         });
 
         // Group units by building_id
@@ -4146,9 +4163,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     function renderSystemCheckboxes(activeSystems) {
       // activeSystems = array of system names that are checked; null = all checked
       return SYSTEMS.map(sys => {
-        const checked = activeSystems === null || activeSystems.includes(sys) ? 'checked' : '';
+        const normalizedActive = activeSystems === null ? null : new Set((activeSystems || []).map(canonicalSystemName));
+        const checked = normalizedActive === null || normalizedActive.has(sys) ? 'checked' : '';
         return `<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap;">
-          <input type="checkbox" ${checked} value="${sys}" data-system="${sys}" style="cursor:pointer;"> ${sys}
+          <input type="checkbox" ${checked} value="${sys}" data-system="${sys}" style="cursor:pointer;"> ${systemDisplayName(sys)}
         </label>`;
       }).join('');
     }
@@ -4568,7 +4586,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const on = set.has(value);
         return `<label class="filter-option ${on ? 'active' : ''}" data-filter-type="${type}" data-filter-value="${value}">
           <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleFilter(this)">
-          <span>${value}</span>
+          <span>${type === 'systems' ? systemDisplayName(value) : value}</span>
         </label>`;
       };
 
@@ -4939,14 +4957,14 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         SYSTEMS.forEach(sysName => {
           const sysData = unit.systems[sysName];
           if (!sysData) {
-            html += `<div class="system-details" style="opacity:0.35;"><div class="system-details-header"><span>${sysName}</span><span style="font-weight:600;">Not applicable</span></div></div>`;
+            html += `<div class="system-details" style="opacity:0.35;"><div class="system-details-header"><span>${systemDisplayName(sysName)}</span><span style="font-weight:600;">Not applicable</span></div></div>`;
             return;
           }
           const statusColor = sysData.status === 'Completed' ? '#22C55E' : sysData.status === 'Behind' ? '#EF4444' : sysData.status === 'At Risk' ? '#F59E0B' : '#3B82F6';
           html += `
             <div class="system-details">
               <div class="system-details-header">
-                <span>${sysName}</span>
+                <span>${systemDisplayName(sysName)}</span>
                 <span style="color: ${statusColor}; font-weight: 700;">${sysData.status}</span>
               </div>
               <div class="system-details-row">
@@ -4969,7 +4987,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const firstSys = SYSTEMS.find(s => unit.systems[s]) || SYSTEMS[0];
         SYSTEMS.forEach(sys => {
           const na = !unit.systems[sys];
-          html += `<button class="system-tab ${sys === firstSys ? 'active' : ''}" ${na ? 'disabled style="opacity:0.35;cursor:not-allowed;"' : `onclick="switchPhotoSystem('${sys}')"`}>${sys}</button>`;
+          html += `<button class="system-tab ${sys === firstSys ? 'active' : ''}" ${na ? 'disabled style="opacity:0.35;cursor:not-allowed;"' : `onclick="switchPhotoSystem('${sys}')"`}>${systemDisplayName(sys)}</button>`;
         });
         html += '</div><div id="photoContent">';
         html += generatePhotosForSystem(unit, firstSys);
@@ -4979,7 +4997,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const firstSys = SYSTEMS.find(s => unit.systems[s]) || SYSTEMS[0];
         SYSTEMS.forEach(sys => {
           const na = !unit.systems[sys];
-          html += `<button class="system-tab ${sys === firstSys ? 'active' : ''}" ${na ? 'disabled style="opacity:0.35;cursor:not-allowed;"' : `onclick="switchEventSystem('${sys}')"`}>${sys}</button>`;
+          html += `<button class="system-tab ${sys === firstSys ? 'active' : ''}" ${na ? 'disabled style="opacity:0.35;cursor:not-allowed;"' : `onclick="switchEventSystem('${sys}')"`}>${systemDisplayName(sys)}</button>`;
         });
         html += '</div><div id="eventContent">';
         html += generateEventsForSystem(unit, firstSys);
@@ -5457,7 +5475,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             // 2. Insert inspection_event
             // First resolve system UUID from inspection_systems
             const { data: sysList } = await sbClient.from('inspection_systems').select('id,name').eq('project_id', PROJECT_ID);
-            const sysRow = sysList ? sysList.find(s => s.name === system) : null;
+            const sysRow = sysList ? sysList.find(s => canonicalSystemName(s.name) === canonicalSystemName(system)) : null;
             const systemUuid = sysRow ? sysRow.id : null;
             if (!systemUuid) console.warn('⚠️ inspection_systems: no UUID found for system name:', system);
 
@@ -5556,7 +5574,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const form = document.getElementById('systemsForm');
       form.innerHTML = SYSTEMS.map(sys => `
         <div class="form-group">
-          <label class="form-label">${sys}</label>
+          <label class="form-label">${systemDisplayName(sys)}</label>
           <div class="form-row">
             <input type="number" class="form-input" placeholder="%" min="0" max="100" value="0" data-system="${sys}" data-field="progress" onchange="validateProgress(this)">
             <select class="form-select" data-system="${sys}" data-field="status">
@@ -7390,7 +7408,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             </tr>
             ${SYSTEMS.map(sys => `
               <tr style="border-bottom: 1px solid #E5E7EB;">
-                <td style="padding: 8px;">${sys}</td>
+                <td style="padding: 8px;">${systemDisplayName(sys)}</td>
                 <td style="padding: 8px;">${systemStats[sys].avg}%</td>
                 <td style="padding: 8px; color: ${systemStats[sys].behind > 5 ? '#DC2626' : '#6B7280'};">${systemStats[sys].behind}</td>
               </tr>
@@ -7850,7 +7868,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const cnt = f => d.filter(f).length;
         const on = (a) => a ? 'border:1px solid #0B5394;background:#0B5394;color:#fff;' : 'border:1px solid #D1D5DB;background:#fff;color:#374151;';
         const chip = (attr, active, label) => `<button type="button" ${attr} style="padding:6px 12px;border-radius:16px;${on(active)}font-size:12px;font-weight:600;cursor:pointer;">${label}</button>`;
-        const sysOpts = SYSTEMS.map(sn => `<option value="${esc(sn)}" ${qf.sys === sn ? 'selected' : ''}>${esc(sn)} (${cnt(u => u.systems && u.systems[sn] && (u.systems[sn].progress || 0) < 100)})</option>`).join('');
+        const sysOpts = SYSTEMS.map(sn => `<option value="${esc(sn)}" ${qf.sys === sn ? 'selected' : ''}>${esc(systemDisplayName(sn))} (${cnt(u => u.systems && u.systems[sn] && (u.systems[sn].progress || 0) < 100)})</option>`).join('');
         box.innerHTML =
           chip('data-p="new"', qf.phase === 'new', `⚪ Not started (${cnt(u => phaseOf(u) === 'new')})`) +
           chip('data-p="work"', qf.phase === 'work', `🔧 In work (${cnt(u => phaseOf(u) === 'work')})`) +
@@ -8331,7 +8349,7 @@ const INSP_INSPECTION_TYPES = [
     ]
   },
   {
-    id: 'electrical_room', name: 'Electrical Room / Switchboard / Main Panel', num: 4,
+    id: 'electrical_room', name: 'Electrical Room / Switchboard / Electrical Panel / Load Center', num: 4,
     items: [
       'Approved electrical room plans and single-line diagram available on site',
       'Room dimensions meet minimum working clearance (NEC 110.26 - 36" front, 30" width, 6\'6" height)',
@@ -9954,7 +9972,7 @@ function inspLocalizeChecklistText(value, lang) {
     ['Equipment manuals and warranties delivered to owner/GC','Manuales y garantías de los equipos entregados al propietario o contratista general'],
     ['Work area clean - no materials, tools, or debris','Área de trabajo limpia, sin materiales, herramientas ni escombros'],
     ['Rough In / Walls','Preinstalación / Paredes'], ['Overhead Rough','Preinstalación de techos'],
-    ['Electrical Room / Switchboard / Main Dashboard','Cuarto eléctrico / Tablero / Panel principal'],
+    ['Electrical Room / Switchboard / Electrical Panel / Load Center','Cuarto eléctrico / Tablero / Panel eléctrico / Centro de carga'],
     ['Pre Power','Preenergización'], ['Hot Check','Prueba en caliente'], ['Fire Alarm','Alarma contra incendios'],
     ['Emergency Light','Luz de emergencia'], ['Final Inspection','Inspección final'], ['Underground Electrical','Inspección eléctrica subterránea'], ['Fire Stop','Sellado contra incendios'],
     ['Approved underground electrical plans and utility layout are available on site','Los planos eléctricos subterráneos aprobados y la distribución de servicios están disponibles en el sitio'],
