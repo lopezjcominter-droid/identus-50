@@ -8,6 +8,7 @@
   <title>Identus 50</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700&display=swap">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     // Monitor Supabase library loading
@@ -520,6 +521,27 @@
     }
     /* Child dialogs opened from Unit History must sit above the details modal. */
     #unitModal, #quickAddModal, #addEventModal, #createEventModal, #projectSetupModal { z-index: 10040; }
+
+    /* Project Setup keeps its close control fixed while only the form body scrolls. */
+    #projectSetupModal .modal-content {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden !important;
+      max-height: 90vh;
+    }
+    #projectSetupModal .modal-header {
+      flex: 0 0 auto;
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      background: #fff;
+    }
+    #projectSetupModal .modal-content > div:not(.modal-header) {
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
 
     .modal.show {
       display: flex;
@@ -1246,6 +1268,120 @@
   .insp-checklist-header > div { min-width:0; }
   .charts-section, .charts-row { min-width:0; }
 }
+
+/* iPhone portrait: keep the workspace inside the narrow viewport. */
+@media (max-width: 430px) and (orientation: portrait) {
+  html, body { width:100%; max-width:100%; overflow-x:hidden; }
+  .main { width:100%; min-width:0; overflow-x:hidden; }
+  .header { padding:10px 12px !important; gap:7px !important; }
+  .header-left { width:100%; flex:1 1 100% !important; min-width:0 !important; }
+  .header-left h1 { font-size:14px !important; line-height:1.2; overflow-wrap:anywhere; }
+  .header-left p { font-size:10px !important; overflow-wrap:anywhere; }
+  .header-actions { display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)); width:100% !important; gap:6px !important; }
+  .header-actions .btn { width:100% !important; min-width:0 !important; max-width:none !important; padding:7px 4px !important; font-size:10px !important; line-height:1.15; white-space:normal; }
+  .content { padding:10px !important; }
+  #mainTabNav { width:100%; max-width:100%; overflow-x:auto; gap:2px !important; margin-bottom:14px !important; scrollbar-width:none; }
+  #mainTabNav::-webkit-scrollbar { display:none; }
+  #mainTabNav .tab-main { flex:0 0 auto; max-width:none !important; min-width:76px; padding:8px 6px !important; font-size:10px !important; line-height:1.15; white-space:normal !important; }
+  .metrics { gap:6px !important; }
+  .metric-label, .metric-detail, .chart-title { overflow-wrap:anywhere; word-break:break-word; }
+  .quantity-shell { padding:10px 0 20px !important; gap:10px !important; }
+  .quantity-filters { gap:7px !important; }
+  .quantity-filters label { white-space:normal; font-size:11px; }
+  .quantity-plan-board { margin:8px 0 !important; min-height:280px !important; }
+}
+
+/* Quantity Control: plan-first takeoff view */
+.quantity-shell { display:grid; gap:16px; width:100%; max-width:1220px; margin:0 auto; padding:18px 20px 28px; box-sizing:border-box; }
+.quantity-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.quantity-toolbar h2 { margin:0; color:#0F172A; font-size:20px; }
+.quantity-toolbar p { margin:4px 0 0; color:#64748B; font-size:12px; }
+.quantity-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.quantity-filters { display:grid; grid-template-columns:repeat(2,minmax(180px,1fr)) minmax(220px,1.2fr) minmax(180px,1fr); align-items:end; gap:10px; width:100%; }
+.quantity-filters label { display:flex; align-items:center; gap:6px; min-width:0; white-space:nowrap; }
+.quantity-filters label select { flex:1; min-width:0 !important; margin-left:0 !important; }
+.quantity-filters input[type="search"] { width:100%; max-width:none !important; min-height:36px; box-sizing:border-box; }
+.quantity-actions .admin-only-disabled { opacity:.5; pointer-events:none; }
+.quantity-plan-layout { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(260px,.8fr); gap:16px; width:100%; align-items:start; }
+.quantity-card { background:#fff; border:1px solid #E2E8F0; border-radius:10px; box-shadow:0 2px 8px rgba(15,23,42,.05); overflow:hidden; }
+.quantity-card-header { padding:12px 14px; border-bottom:1px solid #E2E8F0; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.quantity-card-header strong { color:#0F172A; font-size:13px; }
+.quantity-card-header span { color:#64748B; font-size:11px; }
+.quantity-plan-board { position:relative; display:grid; place-items:center; min-height:460px; margin:14px; border:1px solid #CBD5E1; border-radius:8px; overflow:hidden; background-color:#F8FAFC; background-image:linear-gradient(#E2E8F0 1px,transparent 1px),linear-gradient(90deg,#E2E8F0 1px,transparent 1px); background-size:32px 32px; }
+.quantity-plan-board > img, .quantity-plan-board > iframe, .quantity-plan-board > canvas { display:block; width:100%; height:100%; min-height:460px; object-fit:contain; background:#fff; border:0; }
+.quantity-plan-board > canvas, .quantity-drawing-stage > canvas { width:auto; height:auto; min-width:0; min-height:0; max-width:100%; max-height:100%; margin:auto; }
+.quantity-plan-media { position:relative; width:100%; max-width:100%; aspect-ratio:1.4; margin:auto; background:#fff; }
+.quantity-plan-media > canvas { position:absolute; inset:0; width:100% !important; height:100% !important; max-width:none; max-height:none; }
+.quantity-plan-contours { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+.quantity-plan-contour { fill:rgba(37,99,235,.06); stroke:#2563EB; stroke-width:.35; vector-effect:non-scaling-stroke; cursor:pointer; transition:fill .15s,stroke .15s; }
+.quantity-plan-contour:hover, .quantity-plan-contour:focus { fill:rgba(34,197,94,.28); stroke:#16A34A; stroke-width:.7; outline:none; }
+.quantity-plan-contour-label { font:600 2px Arial,sans-serif; fill:#1D4ED8; paint-order:stroke; stroke:#fff; stroke-width:.45px; stroke-linejoin:round; pointer-events:none; text-anchor:middle; dominant-baseline:middle; }
+    .quantity-plan-board > iframe, .quantity-drawing-board > iframe { pointer-events:none; }
+.quantity-plan-empty { min-height:460px; display:flex; align-items:center; justify-content:center; text-align:center; padding:28px; color:#64748B; }
+.quantity-plan-empty strong { display:block; color:#334155; margin-bottom:6px; }
+.quantity-unit-pin { position:absolute; transform:translate(-50%,-50%); min-width:54px; padding:7px 9px; border:2px solid #2563EB; border-radius:7px; background:#fff; color:#1D4ED8; font-weight:700; font-size:11px; cursor:pointer; box-shadow:0 2px 5px rgba(15,23,42,.16); }
+.quantity-unit-pin:hover, .quantity-unit-pin:focus { background:#DBEAFE; z-index:2; }
+.quantity-unit-pin.special { border-color:#C2410C; color:#9A3412; }
+.quantity-help { padding:12px 14px; color:#64748B; font-size:12px; line-height:1.5; }
+.quantity-unit-list { display:grid; gap:6px; max-height:320px; overflow:auto; padding:12px 14px; }
+.quantity-unit-list button { display:flex; align-items:center; gap:8px; width:100%; text-align:left; padding:8px 10px; border:1px solid #E2E8F0; border-radius:6px; background:#fff; cursor:pointer; color:#334155; }
+.quantity-unit-list button.quantity-unit-pass { border-color:#86EFAC; background:#F0FDF4; }
+.quantity-unit-list button.quantity-unit-fail { border-color:#FCA5A5; background:#FEF2F2; }
+.quantity-unit-list button.quantity-unit-pass:hover { background:#DCFCE7; }
+.quantity-unit-list button.quantity-unit-fail:hover { background:#FEE2E2; }
+.quantity-unit-list button .quantity-unit-result { margin-left:auto; font-size:10px; font-weight:700; letter-spacing:.03em; }
+.quantity-unit-list button.quantity-unit-pass .quantity-unit-result { color:#15803D; }
+.quantity-unit-list button.quantity-unit-fail .quantity-unit-result { color:#B91C1C; }
+.quantity-unit-list button:hover { border-color:#2563EB; background:#EFF6FF; }
+.quantity-modal-overlay { position:fixed; inset:0; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(15,23,42,.58); z-index:10040; }
+.quantity-modal { width:min(1180px,100%); max-height:92vh; overflow:auto; background:#fff; border-radius:12px; box-shadow:0 25px 70px rgba(15,23,42,.35); animation:modalScaleIn .42s ease both; }
+.quantity-modal-header { position:sticky; top:0; z-index:2; padding:14px 18px; background:#EFF6FF; border-bottom:1px solid #BFDBFE; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.quantity-modal-header h3 { margin:0; color:#0F172A; font-size:18px; }
+.quantity-modal-header p { margin:3px 0 0; color:#64748B; font-size:12px; }
+.quantity-modal-body { display:grid; grid-template-columns:minmax(320px,1fr) minmax(300px,1.15fr); gap:16px; padding:16px; }
+.quantity-checklist { overflow:auto; border:1px solid #E2E8F0; border-radius:8px; }
+.quantity-checklist table { width:100%; border-collapse:collapse; font-size:12px; }
+.quantity-checklist th { padding:9px 8px; text-align:left; background:#F8FAFC; color:#475569; white-space:nowrap; }
+.quantity-checklist td { padding:8px; border-top:1px solid #E2E8F0; color:#334155; vertical-align:middle; }
+.quantity-checklist tr.active { background:#EFF6FF; }
+.quantity-checklist input[type=number] { width:58px; box-sizing:border-box; padding:5px 6px; border:1px solid #CBD5E1; border-radius:5px; text-align:right; font-variant-numeric:tabular-nums; }
+.quantity-template-line { grid-template-columns:28px minmax(0,1fr) 68px 30px !important; gap:5px !important; }
+.quantity-template-line input[type=text] { min-width:0; width:100%; box-sizing:border-box; padding:5px 7px; border:1px solid #CBD5E1; border-radius:5px; }
+.quantity-template-line input[type=number] { width:68px; box-sizing:border-box; padding:5px 6px; border:1px solid #CBD5E1; border-radius:5px; text-align:right; font-variant-numeric:tabular-nums; }
+.quantity-select-item { border:1px solid #CBD5E1; border-radius:5px; background:#fff; padding:5px 7px; font-size:11px; cursor:pointer; }
+.quantity-select-item.active { background:#2563EB; color:#fff; border-color:#2563EB; }
+    .quantity-drawing-board { position:relative; min-height:430px; border:1px solid #CBD5E1; border-radius:8px; overflow:hidden; background:#F8FAFC; background-image:linear-gradient(#E2E8F0 1px,transparent 1px),linear-gradient(90deg,#E2E8F0 1px,transparent 1px); background-size:28px 28px; }
+    .quantity-drawing-stage { position:absolute; inset:0; transform-origin:top left; }
+    .quantity-drawing-stage > img, .quantity-drawing-stage > iframe { display:block; width:100%; height:100%; min-height:430px; object-fit:contain; background:#fff; border:0; pointer-events:none; }
+    .quantity-drawing-tools { display:flex; align-items:center; gap:5px; }
+    .quantity-drawing-tools.quantity-drawing-tools { flex-wrap:nowrap !important; white-space:nowrap; }
+    .quantity-drawing-tools button { min-width:28px; height:28px; padding:2px 7px; border:1px solid #CBD5E1; border-radius:5px; background:#fff; color:#334155; cursor:pointer; font-weight:700; }
+    .quantity-drawing-tools button.active { background:#DBEAFE; border-color:#2563EB; color:#1D4ED8; }
+    .quantity-drawing-zoom-label { min-width:42px; text-align:center; font-size:11px; color:#64748B; font-weight:600; }
+    .quantity-contour-editor-board { position:relative; aspect-ratio:1.4; min-height:280px; border:1px solid #CBD5E1; border-radius:8px; background:#F8FAFC; overflow:hidden; touch-action:none; }
+    .quantity-contour-editor-media { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+    .quantity-contour-editor-overlay { position:absolute; inset:0; width:100%; height:100%; touch-action:none; }
+    .quantity-contour-editor-overlay circle { cursor:grab; }
+    .quantity-contour-editor-overlay circle:active { cursor:grabbing; }
+    .quantity-contour-editor-empty { display:grid; place-items:center; height:100%; color:#64748B; font-size:12px; }
+    .quantity-drawing-hitarea { position:absolute; inset:0; z-index:1; cursor:crosshair; }
+    .quantity-drawing-board.hand-mode .quantity-drawing-hitarea { cursor:grab; }
+    .quantity-drawing-board.hand-mode.is-dragging .quantity-drawing-hitarea { cursor:grabbing; }
+    .quantity-drawing-update-stamp { position:absolute; top:9px; right:9px; z-index:8; padding:4px 7px; border:1px solid rgba(148,163,184,.65); border-radius:5px; background:rgba(255,255,255,.88); color:#334155; font-size:10px; line-height:1.2; pointer-events:none; box-shadow:0 1px 3px rgba(15,23,42,.12); }
+    .quantity-history { margin-top:16px; border:1px solid #E2E8F0; border-radius:8px; overflow:hidden; }
+    .quantity-rfi-row { display:flex; gap:8px; padding:10px; border-bottom:1px solid #E2E8F0; }
+    .quantity-rfi-input { flex:1; min-width:0; padding:7px 9px; border:1px solid #CBD5E1; border-radius:5px; font-size:12px; }
+    .quantity-history-list { max-height:180px; overflow:auto; }
+    .quantity-history-entry { display:flex; justify-content:space-between; gap:12px; padding:9px 10px; border-bottom:1px solid #E2E8F0; font-size:11px; color:#334155; }
+    .quantity-history-entry:last-child { border-bottom:0; }
+    .quantity-history-entry strong { display:block; color:#1D4ED8; margin-bottom:2px; }
+    .quantity-history-entry small { color:#64748B; white-space:nowrap; }
+.quantity-drawing-empty { min-height:430px; display:flex; align-items:center; justify-content:center; text-align:center; padding:28px; color:#64748B; font-size:12px; }
+    .quantity-marker { position:absolute; transform:translate(-50%,-50%); z-index:2; width:17px; height:17px; padding:0; border-radius:50%; border:1px solid #fff; background:#16A34A; color:#fff; font-size:9px; line-height:15px; font-weight:700; cursor:pointer; box-shadow:0 1px 3px rgba(15,23,42,.3); }
+    .quantity-item-number { width:34px; color:#1D4ED8; font-weight:700; text-align:center; }
+.quantity-modal-footer { padding:12px 16px; border-top:1px solid #E2E8F0; display:flex; justify-content:flex-end; gap:8px; }
+@media (max-width: 900px) { .quantity-filters { grid-template-columns:repeat(2,minmax(160px,1fr)); } }
+@media (max-width: 760px) { .quantity-plan-layout, .quantity-modal-body { grid-template-columns:1fr; } .quantity-filters { grid-template-columns:1fr; } .quantity-plan-board,.quantity-plan-board > img,.quantity-plan-empty { min-height:320px; } .quantity-drawing-board,.quantity-drawing-board > img,.quantity-drawing-empty { min-height:320px; } }
 </style>
 </head>
 <body>
@@ -1320,7 +1456,7 @@
         </div>
       </div>
 
-      <div class="content">
+      <div class="content" id="appContent">
         <div class="metrics">
           <div class="metric">
             <div class="metric-label">Total Units</div>
@@ -1338,17 +1474,18 @@
             <div class="metric-detail">Partial progress</div>
           </div>
           <div class="metric">
-            <div class="metric-label">Behind</div>
+            <div class="metric-label">Not Started</div>
             <div class="metric-value" id="behindUnits">0</div>
-            <div class="metric-detail">Needs attention</div>
+            <div class="metric-detail">No progress yet</div>
           </div>
         </div>
 
-        <div style="display: flex; gap: 12px; margin-bottom: 24px; border-bottom: 2px solid #E5E7EB;">
+        <div id="mainTabNav" style="display: flex; gap: 12px; margin-bottom: 24px; border-bottom: 2px solid #E5E7EB;">
           <button onclick="switchMainTab('dashboard', this)" class="tab-main active" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #0B5394; border-bottom: 3px solid #0B5394; cursor: pointer; margin-bottom: -2px;">📊 Dashboard</button>
           <button onclick="switchMainTab('punch', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📝 Punch List</button>
           <button onclick="switchMainTab('report', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📈 Report</button>
 <button onclick="switchMainTab('inspections', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">⚡ Inspections</button>
+          <button onclick="switchMainTab('quantity', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📐 Quantity Control</button>
         </div>
 
         <div id="dashboardTab">
@@ -1367,7 +1504,7 @@
               <canvas id="progressChart"></canvas>
             </div>
             <div class="chart-container">
-              <div class="chart-title">Project Timeline (Weekly Progress)</div>
+              <div class="chart-title">Inspection Timeline (Weekly Progress)</div>
               <canvas id="ganttChart"></canvas>
             </div>
           </div>
@@ -1629,8 +1766,83 @@
     </div>
     <!-- END INSPECCIONES TAB -->
 
+    <!-- ============================================================ -->
+    <!-- QUANTITY CONTROL TAB                                          -->
+    <!-- ============================================================ -->
+    <div id="quantityTab" style="display:none; width:100%;">
+      <div class="quantity-shell">
+        <div class="quantity-toolbar">
+          <div><h2>Quantity Control</h2><p>Review the floor plan, select a unit, and track installed quantities from its drawing.</p></div>
+          <div class="quantity-actions">
+            <label class="btn btn-secondary" style="cursor:pointer;">📐 Upload Floor Plan<input id="quantityFloorPlanInput" type="file" accept="image/*,.pdf" onchange="quantityHandleFloorPlan(this)" style="display:none"></label>
+            <button class="btn btn-secondary" onclick="quantityClearFloorPlan()">Clear Plan</button>
+          </div>
+        </div>
+        <div class="quantity-filters">
+          <label style="font-size:12px;color:#475569;font-weight:600;">Building
+            <select id="quantityBuildingSelect" class="form-select" onchange="renderQuantityControl()" style="margin-left:6px;min-width:145px;"></select>
+          </label>
+          <label style="font-size:12px;color:#475569;font-weight:600;">Floor
+            <select id="quantityFloorSelect" class="form-select" onchange="renderQuantityControl()" style="margin-left:6px;min-width:145px;"></select>
+          </label>
+          <input id="quantityUnitSearch" type="search" placeholder="Search unit..." oninput="quantityHandleUnitSearch()" autocomplete="off" style="padding:8px 10px;border:1px solid #CBD5E1;border-radius:6px;max-width:220px;">
+          <span id="quantityAdminHint" style="font-size:12px;color:#64748B;"></span>
+        </div>
+        <div class="quantity-template-tools" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;padding:10px 12px;border:1px solid #DBEAFE;border-radius:8px;background:#EFF6FF;">
+          <strong style="font-size:12px;color:#1E3A8A;">Contour Template</strong>
+          <button type="button" class="btn btn-primary" style="font-size:11px;padding:6px 9px;" onclick="quantityOpenContourReview()">Review / assign contours</button>
+          <button type="button" class="btn btn-secondary" style="font-size:11px;padding:6px 9px;" onclick="quantityDownloadContourTemplate()">Download contour template</button>
+          <label class="btn btn-secondary" style="font-size:11px;padding:6px 9px;cursor:pointer;">Upload contour template<input id="quantityContourTemplateInput" type="file" accept="application/json,.json" onchange="quantityLoadContourTemplate(this)" style="display:none"></label>
+          <span style="font-size:11px;color:#475569;">Use Setup for unit drawing models and bulk assignments.</span>
+        </div>
+        <div class="quantity-plan-layout">
+          <div class="quantity-card">
+            <div class="quantity-card-header"><strong>Floor / Site Plan</strong><span id="quantityFloorPlanName">No plan uploaded</span></div>
+            <div id="quantityFloorPlanBoard" class="quantity-plan-board"></div>
+            <div id="quantityPlanNotice" class="quantity-help" style="min-height:0;"></div>
+            <div class="quantity-help">Select a unit on the plan to open its quantity checklist and unit drawing. Unit positions are stored independently so the plan can be replaced later.</div>
+          </div>
+          <div class="quantity-card">
+            <div class="quantity-card-header"><strong>Units on this floor</strong><span id="quantityUnitCount"></span></div>
+            <div id="quantityUnitList" class="quantity-unit-list"></div>
+            <div class="quantity-help">The administrator can upload the floor plan and associate the unit drawings. Viewers can open a unit and review its progress.</div>
+          </div>
+        </div>
+      </div>
     </div>
 
+    </div>
+
+  </div>
+
+  <div id="quantityUnitModal" class="quantity-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="quantityUnitTitle">
+    <div class="quantity-modal">
+      <div class="quantity-modal-header"><div><h3 id="quantityUnitTitle">Unit Quantity Control</h3><p id="quantityUnitSubtitle"></p></div><button class="btn btn-secondary" onclick="quantityCloseUnit()" aria-label="Close">✕</button></div>
+      <div id="quantityUnitContent" class="quantity-modal-body"></div>
+      <div class="quantity-modal-footer"><button class="btn btn-secondary" onclick="quantityCloseUnit()">Close</button></div>
+    </div>
+  </div>
+  <div id="quantityContourReviewModal" class="quantity-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="quantityContourReviewTitle">
+    <div class="quantity-modal" style="max-width:860px;">
+      <div class="quantity-modal-header"><div><h3 id="quantityContourReviewTitle">Review Detected Contours</h3><p id="quantityContourReviewSubtitle">Confirm which unit belongs to each detected area before saving.</p></div><button class="btn btn-secondary" onclick="quantityCloseContourReview()" aria-label="Close">✕</button></div>
+      <div id="quantityContourReviewContent" class="quantity-modal-body" style="display:block;"></div>
+      <div class="quantity-modal-footer"><button class="btn btn-secondary" onclick="quantityCloseContourReview()">Cancel</button><button class="btn btn-secondary" onclick="quantityOpenNewContourEditor()">Add contour</button><button class="insp-btn insp-btn-success" onclick="quantitySaveContourReview()">Confirm contours</button></div>
+    </div>
+  </div>
+  <div id="quantityContourEditorModal" class="quantity-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="quantityContourEditorTitle">
+    <div class="quantity-modal" style="max-width:760px;">
+      <div class="quantity-modal-header"><div><h3 id="quantityContourEditorTitle">View / edit contour</h3><p>Adjust the boundary points, then save this unit contour.</p></div><button class="btn btn-secondary" onclick="quantityCloseContourEditor()" aria-label="Close">✕</button></div>
+      <div id="quantityContourEditorContent" class="quantity-modal-body" style="display:block;"></div>
+      <div class="quantity-modal-footer"><button class="btn btn-secondary" onclick="quantityCloseContourEditor()">Cancel</button><button class="insp-btn insp-btn-success" onclick="quantitySaveContourEditor()">Save contour</button></div>
+    </div>
+  </div>
+
+  <div id="quantityChecklistTemplateModal" class="quantity-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="quantityChecklistTemplateTitle" style="z-index:10080 !important;">
+    <div class="quantity-modal" style="max-width:640px;">
+      <div class="quantity-modal-header"><div><h3 id="quantityChecklistTemplateTitle">Model Takeoff Checklist</h3><p id="quantityChecklistTemplateSubtitle">Set the standard quantities used by assigned units.</p></div><button class="btn btn-secondary" onclick="quantityCloseChecklistTemplate()" aria-label="Close">✕</button></div>
+      <div id="quantityChecklistTemplateContent" style="padding:12px 14px;"></div>
+      <div class="quantity-modal-footer"><button class="btn btn-secondary" onclick="quantityCloseChecklistTemplate()">Cancel</button><button type="button" class="btn btn-secondary" onclick="quantityAddTemplateChecklistLine()">+ Add line</button><button type="button" class="insp-btn insp-btn-success" onclick="quantitySaveChecklistTemplate()">Save checklist</button></div>
+    </div>
   </div>
 
   <!-- FAIL MODAL (Inspecciones) -->
@@ -1727,6 +1939,7 @@
         <button class="tab-button" onclick="switchDetailsTab('photos')">Photos</button>
         <button class="tab-button" onclick="switchDetailsTab('events')">History</button>
         <button class="tab-button" onclick="switchDetailsTab('inspections')">Inspections</button>
+        <button class="tab-button" onclick="switchDetailsTab('official_final')">Official Final</button>
       </div>
 
       <div id="detailsContent"></div>
@@ -2005,6 +2218,51 @@
           <div id="setupBuildingsList" style="display:flex;flex-direction:column;gap:10px;"></div>
         </div>
 
+        <!-- Reusable unit drawing model library -->
+        <details id="setupDrawingModelsDetails" style="border:1px solid #BFDBFE;border-radius:8px;overflow:hidden;background:#F8FBFF;">
+          <summary style="padding:12px 14px;font-size:13px;font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;">
+            📐 Unit Drawing Models <span style="font-size:11px;font-weight:400;color:#475569;">Upload once, assign many units</span>
+          </summary>
+          <div style="padding:14px;display:flex;flex-direction:column;gap:10px;background:white;">
+            <div style="font-size:12px;color:#475569;">Create a fixed model such as C1, A1, or B1. Inspectors will see the assigned model read-only. PMs and administrators can later add a unit-specific RFI drawing.</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <input id="setupDrawingModelType" type="text" placeholder="Model: C1" style="width:105px;padding:7px 9px;border:1px solid #BFDBFE;border-radius:6px;text-transform:uppercase;">
+              <label class="btn btn-secondary" style="font-size:11px;padding:6px 9px;cursor:pointer;">📎 Upload model<input id="setupDrawingModelInput" type="file" accept="image/*,.pdf" onchange="saveSetupDrawingModel(this)" style="display:none"></label>
+              <span id="setupDrawingModelMessage" style="font-size:11px;color:#15803D;"></span>
+            </div>
+            <div id="setupDrawingModelsList" style="display:flex;flex-direction:column;gap:6px;"></div>
+            <div style="border-top:1px solid #E5E7EB;padding-top:10px;display:flex;flex-direction:column;gap:8px;">
+              <strong style="font-size:12px;color:#1E3A8A;">Assign a model to units</strong>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <select id="setupDrawingAssignModel" style="padding:7px;border:1px solid #CBD5E1;border-radius:6px;min-width:110px;"></select>
+                <select id="setupDrawingAssignBuilding" onchange="renderSetupDrawingModelFloors()" style="padding:7px;border:1px solid #CBD5E1;border-radius:6px;min-width:125px;"></select>
+                <select id="setupDrawingAssignFloor" style="padding:7px;border:1px solid #CBD5E1;border-radius:6px;min-width:110px;"></select>
+                <input id="setupDrawingAssignUnits" type="text" placeholder="Units: 1101, 1102 or ALL" style="flex:1;min-width:180px;padding:7px 9px;border:1px solid #CBD5E1;border-radius:6px;">
+                <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#475569;white-space:nowrap;"><input id="setupDrawingAssignAcrossFloors" type="checkbox"> Same unit on all floors</label>
+                <button type="button" class="btn btn-secondary" style="font-size:11px;padding:7px 10px;" onclick="assignSetupDrawingModel()">Assign model</button>
+              </div>
+              <div style="font-size:11px;color:#64748B;">Use ALL for every unit on the selected floor. Enable <strong>Same unit on all floors</strong> to apply the same apartment position (for example 01) across every floor in that building.</div>
+            </div>
+          </div>
+        </details>
+
+        <!-- Reusable floor/site plan library -->
+        <details id="setupFloorPlansDetails" style="border:1px solid #BFDBFE;border-radius:8px;overflow:hidden;background:#F8FBFF;margin-top:10px;">
+          <summary style="padding:12px 14px;font-size:13px;font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;">
+            🗺️ Floor / Site Plan Library <span style="font-size:11px;font-weight:400;color:#475569;">Upload by building and floor</span>
+          </summary>
+          <div style="padding:14px;display:flex;flex-direction:column;gap:10px;background:white;">
+            <div style="font-size:12px;color:#475569;">Upload the official site plan once for each Building/Floor. Quantity Control will use it automatically. Replacing a plan keeps the previous version in history.</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <select id="setupFloorPlanBuilding" onchange="renderSetupFloorPlanFloors()" style="padding:7px;border:1px solid #CBD5E1;border-radius:6px;min-width:125px;"></select>
+              <select id="setupFloorPlanFloor" style="padding:7px;border:1px solid #CBD5E1;border-radius:6px;min-width:110px;"></select>
+              <label class="btn btn-secondary" style="font-size:11px;padding:6px 9px;cursor:pointer;">📎 Upload floor/site plan<input id="setupFloorPlanInput" type="file" accept="image/*,.pdf" onchange="saveSetupFloorPlan(this)" style="display:none"></label>
+              <span id="setupFloorPlanMessage" style="font-size:11px;color:#15803D;"></span>
+            </div>
+            <div id="setupFloorPlansList" style="display:flex;flex-direction:column;gap:6px;"></div>
+          </div>
+        </details>
+
         <!-- Inspection Types per Building -->
         <div>
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
@@ -2128,7 +2386,7 @@
     'QA/QC Inspection System':'Sistema de Inspección QA/QC', 'Last updated':'Última actualización', 'just now':'ahora',
     'Filter by Building':'Filtrar por edificio', 'Search unit...':'Buscar unidad...', 'Search units...':'Buscar unidades...',
     'Showing':'Mostrando', 'All apartments':'Todos los apartamentos', 'All systems done':'Todos los sistemas completados',
-    'Status Distribution':'Distribución de estados', 'Overall Progress':'Progreso general',
+    'Status Distribution':'Distribución de estados', 'Overall Progress':'Progreso general', 'Inspection Timeline (Weekly Progress)':'Cronograma de inspecciones (progreso semanal)',
     'Project Timeline (Weekly Progress)':'Cronograma del proyecto (progreso semanal)',
     'Status by Building':'Estado por edificio', 'Status by Floor':'Estado por piso',
     'Progress Systems':'Progreso de sistemas', 'Units List':'Lista de unidades',
@@ -2214,7 +2472,7 @@ Object.assign(APP_TRANSLATIONS.en, {
   'Baja':'Low', 'Media':'Medium', 'Alta':'High',
   'Sistema de Inspección QA/QC':'QA/QC Inspection System', 'Última actualización':'Last updated', 'ahora':'now',
   'Filtrar por edificio':'Filter by Building', 'Buscar unidad...':'Search unit...', 'Buscar unidades...':'Search units...',
-  'Mostrando':'Showing', 'Todos los apartamentos':'All apartments', 'Todos los sistemas completados':'All systems done',
+  'Mostrando':'Showing', 'Todos los apartamentos':'All apartments', 'Todos los sistemas completados':'All systems done', 'Cronograma de inspecciones (progreso semanal)':'Inspection Timeline (Weekly Progress)',
   'Progreso parcial':'Partial progress', 'Necesita atención':'Needs attention', 'Problemas y eventos':'Issues & Events',
   'Nuevo evento':'New Event', 'Fallos de inspección':'Inspection Failures', 'Elemento(s) pendiente(s) de corrección':'Pending correction item(s)',
   'Ver en PUNCH LIST':'View in PUNCH LIST', 'Ver fotos':'View Photos', 'No hay fotos seleccionadas':'No photos selected',
@@ -2481,19 +2739,1114 @@ Object.assign(APP_TRANSLATIONS.en, {
       }, 500);
     }
 
+    // ===== Quantity Control (local preview) =====
+    let quantityCurrentUnit = null;
+    let quantityActiveItem = -1;
+    let quantityRevisionCursor = null;
+    let quantityDrawingZoom = 1;
+    let quantityDrawingPanX = 0;
+    let quantityDrawingPanY = 0;
+    let quantityDrawingHand = false;
+    let quantityDrawingDrag = null;
+    let quantityDrawingSuppressClick = false;
+    let quantityDrawingTouchStartDistance = 0;
+    let quantityDrawingTouchStartZoom = 1;
+    let quantityDrawingGestureActive = false;
+    let quantityContourEditor = null;
+
+    function quantityUnitKey(unit) {
+      return [unit?.apt, unit?.building, unit?.floor].map(v => String(v || '').trim()).join('::');
+    }
+    function quantityStore() {
+      try { return JSON.parse(localStorage.getItem('quantity_control_v1') || '{}') || {}; } catch (_) { return {}; }
+    }
+    function quantitySave(store) {
+      try { localStorage.setItem('quantity_control_v1', JSON.stringify(store)); return true; }
+      catch (error) { console.error('Quantity Control save failed', error); quantitySuccessToast('❌ Could not save Quantity Control data. The drawing may be too large.'); return false; }
+    }
+    function quantityUnitType(unit) {
+      const store = quantityStore(); store.unitTypes = store.unitTypes || {};
+      return String(store.unitTypes[quantityUnitKey(unit)] || unit?.unitType || unit?.unit_type || '').trim().toUpperCase();
+    }
+    function quantityTemplateFor(unit) {
+      const store = quantityStore(); const type = quantityUnitType(unit);
+      return type && store.templates?.[type] ? store.templates[type] : null;
+    }
+    function quantityEffectiveDrawing(unit, state) {
+      return state?.drawing?.dataUrl ? { ...state.drawing, source: 'unit' } : (quantityTemplateFor(unit) ? { ...quantityTemplateFor(unit), source: 'template' } : null);
+    }
+    function quantitySetUnitType(value) {
+      if (!quantityCurrentUnit || !quantityIsAdmin()) return;
+      const type = String(value || '').trim().toUpperCase(); const store = quantityStore(); store.unitTypes = store.unitTypes || {};
+      const key = quantityUnitKey(quantityCurrentUnit); if (type) store.unitTypes[key] = type; else delete store.unitTypes[key];
+      quantitySave(store); quantityRenderUnit();
+      if (typeof toast === 'function') toast(type ? `Unit type ${type} assigned` : 'Unit type cleared');
+    }
+    function quantitySaveTemplate(input) {
+      if (!quantityIsAdmin()) return;
+      const file = input?.files?.[0]; const typeInput = document.getElementById('quantityTemplateType');
+      const type = String(typeInput?.value || '').trim().toUpperCase();
+      if (!file || !type) { if (typeof toast === 'function') toast('Enter a unit type, then choose a template file'); if (input) input.value = ''; return; }
+      quantityReadFile(file, (dataUrl, name, mime) => {
+        const store = quantityStore(); store.templates = store.templates || {}; store.templateHistory = store.templateHistory || {};
+        const previous = store.templates[type];
+        if (previous) { store.templateHistory[type] = Array.isArray(store.templateHistory[type]) ? store.templateHistory[type] : []; store.templateHistory[type].unshift({ ...previous, archivedAt: new Date().toISOString() }); }
+        store.templates[type] = { name, type: mime, dataUrl, updatedAt: new Date().toISOString(), version: (previous?.version || 0) + 1 };
+        quantitySave(store); if (typeInput) typeInput.value = ''; if (input) input.value = ''; renderQuantityControl();
+        if (typeof toast === 'function') toast(`Template ${type} saved`);
+      });
+    }
+    function quantityAssignTemplateToVisible() {
+      if (!quantityIsAdmin()) return;
+      const type = String(document.getElementById('quantityTemplateType')?.value || '').trim().toUpperCase();
+      const store = quantityStore(); const template = store.templates?.[type];
+      const units = quantityVisibleUnits();
+      if (!type || !template) { if (typeof toast === 'function') toast('Save a template for this type first'); return; }
+      if (!units.length) { if (typeof toast === 'function') toast('No visible units match the current filters'); return; }
+      if (!confirm(`Assign template ${type} to ${units.length} visible unit${units.length === 1 ? '' : 's'}?`)) return;
+      store.unitTypes = store.unitTypes || {};
+      store.units = store.units || {};
+      units.forEach(unit => {
+        const key = quantityUnitKey(unit); store.unitTypes[key] = type;
+        const state = quantityUnitState(unit);
+        if (state.checklistMode !== 'custom') { state.items = quantityClone(template.checklist?.length ? template.checklist : quantityDefaultItems()); state.checklistMode = 'template'; store.units[key] = state; }
+      });
+      quantitySave(store); renderQuantityControl();
+      if (typeof toast === 'function') toast(`Template ${type} assigned to ${units.length} unit${units.length === 1 ? '' : 's'}`);
+    }
+    function renderSetupDrawingModels() {
+      const list = document.getElementById('setupDrawingModelsList');
+      const modelSelect = document.getElementById('setupDrawingAssignModel');
+      const buildingSelect = document.getElementById('setupDrawingAssignBuilding');
+      if (!list || !modelSelect || !buildingSelect) return;
+      const store = quantityStore(); const templates = store.templates || {};
+      const types = Object.keys(templates).sort();
+      const previousModel = modelSelect.value; const previousBuilding = buildingSelect.value;
+      modelSelect.innerHTML = types.length ? types.map(type => `<option value="${officialFinalEscape(type)}">${officialFinalEscape(type)}</option>`).join('') : '<option value="">No models saved</option>';
+      if (types.includes(previousModel)) modelSelect.value = previousModel;
+      const buildings = [...new Set((Array.isArray(data) ? data : []).map(unit => String(unit.building || '')).filter(Boolean))];
+      buildingSelect.innerHTML = buildings.map(building => `<option value="${officialFinalEscape(building)}">${officialFinalEscape(building)}</option>`).join('');
+      if (buildings.includes(previousBuilding)) buildingSelect.value = previousBuilding;
+      renderSetupDrawingModelFloors();
+      list.innerHTML = types.length ? types.map(type => {
+        const model = templates[type];
+        const assigned = Object.values(store.unitTypes || {}).filter(value => String(value).toUpperCase() === type).length;
+        const historyCount = Array.isArray(store.templateHistory?.[type]) ? store.templateHistory[type].length : 0;
+        const updateHistoryCount = Array.isArray(store.templateUpdateHistory?.[type]) ? store.templateUpdateHistory[type].length : 0;
+        const undoButton = updateHistoryCount ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityUndoTemplateUpdate(${JSON.stringify(type)})'>Undo</button>` : '';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #E2E8F0;border-radius:6px;background:#F8FAFC;font-size:12px;"><strong style="min-width:55px;color:#1E3A8A;">${officialFinalEscape(type)}</strong><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${officialFinalEscape(model.name || 'Drawing')}</span><span style="color:#64748B;">v${model.version || 1} · ${assigned} assigned${historyCount ? ` · ${historyCount} previous` : ''}</span><span style="color:#15803D;font-weight:600;">Active</span><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityPreviewDrawing(${JSON.stringify(type)},quantityStore().templates[${JSON.stringify(type)}])'>View</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenChecklistTemplate(${JSON.stringify(type)})'>Checklist</button>${undoButton}</div>`;
+      }).join('') : '<div style="font-size:12px;color:#94A3B8;padding:6px 0;">No drawing models saved yet.</div>';
+    }
+    function renderSetupFloorPlans() {
+      const buildingSelect = document.getElementById('setupFloorPlanBuilding');
+      const floorSelect = document.getElementById('setupFloorPlanFloor');
+      const list = document.getElementById('setupFloorPlansList');
+      if (!buildingSelect || !floorSelect || !list) return;
+      const buildings = [...new Set((Array.isArray(data) ? data : []).map(unit => String(unit.building || '')).filter(Boolean))];
+      const previousBuilding = buildingSelect.value;
+      buildingSelect.innerHTML = buildings.map(building => `<option value="${officialFinalEscape(building)}">${officialFinalEscape(building)}</option>`).join('');
+      if (buildings.includes(previousBuilding)) buildingSelect.value = previousBuilding;
+      renderSetupFloorPlanFloors();
+      const store = quantityStore(); const plans = store.sitePlans || {};
+      const entries = Object.entries(plans).sort(([a], [b]) => a.localeCompare(b));
+      list.innerHTML = entries.length ? entries.map(([key, plan]) => {
+        const historyCount = Array.isArray(store.sitePlanHistory?.[key]) ? store.sitePlanHistory[key].length : 0;
+        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #E2E8F0;border-radius:6px;background:#F8FAFC;font-size:12px;"><strong style="min-width:160px;color:#1E3A8A;">${officialFinalEscape(key.replace('::',' / '))}</strong><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${officialFinalEscape(plan.name || 'Floor plan')}</span><span style="color:#64748B;">v${plan.version || 1}${historyCount ? ` · ${historyCount} previous` : ''}</span><span style="color:#15803D;font-weight:600;">Active</span><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityPreviewDrawing(${JSON.stringify(key.replace('::',' / '))},quantityStore().sitePlans[${JSON.stringify(key)}])'>View</button></div>`;
+      }).join('') : '<div style="font-size:12px;color:#94A3B8;padding:6px 0;">No floor/site plans saved yet.</div>';
+    }
+    function renderSetupFloorPlanFloors() {
+      const building = document.getElementById('setupFloorPlanBuilding')?.value || '';
+      const floorSelect = document.getElementById('setupFloorPlanFloor'); if (!floorSelect) return;
+      const floors = [...new Set((Array.isArray(data) ? data : []).filter(unit => String(unit.building || '') === building).map(unit => String(unit.floor || '')).filter(Boolean))];
+      const previous = floorSelect.value;
+      floorSelect.innerHTML = floors.map(floor => `<option value="${officialFinalEscape(floor)}">${officialFinalEscape(floor)}</option>`).join('');
+      if (floors.includes(previous)) floorSelect.value = previous;
+    }
+    function saveSetupFloorPlan(input) {
+      if (!quantityIsAdmin()) return;
+      const file = input?.files?.[0]; const building = document.getElementById('setupFloorPlanBuilding')?.value || ''; const floor = document.getElementById('setupFloorPlanFloor')?.value || ''; const message = document.getElementById('setupFloorPlanMessage');
+      if (!file || !building || !floor) { if (message) { message.textContent = 'Select a building and floor first.'; message.style.color = '#B91C1C'; } if (input) input.value = ''; return; }
+      quantityReadFile(file, (dataUrl, name, type) => {
+        const store = quantityStore(); store.sitePlans = store.sitePlans || {}; store.sitePlanHistory = store.sitePlanHistory || {};
+        const key = `${building}::${floor}`; const previous = store.sitePlans[key];
+        if (previous && !confirm(`Replace the ${building} / ${floor} floor plan? The previous version will be kept in history.`)) { if (input) input.value = ''; return; }
+        if (previous) { store.sitePlanHistory[key] = Array.isArray(store.sitePlanHistory[key]) ? store.sitePlanHistory[key] : []; store.sitePlanHistory[key].unshift({ ...previous, archivedAt: new Date().toISOString() }); store.sitePlanHistory[key] = store.sitePlanHistory[key].slice(0, 20); }
+        store.sitePlans[key] = { name, type, dataUrl: (type.startsWith('image/') || type === 'application/pdf') ? dataUrl : '', updatedAt: new Date().toISOString(), version: (previous?.version || 0) + 1 };
+        quantitySave(store); if (input) input.value = ''; renderSetupFloorPlans();
+        if (message) { message.textContent = `✓ ${building} / ${floor} saved successfully · v${store.sitePlans[key].version}`; message.style.color = '#15803D'; }
+        if (typeof toast === 'function') toast('Floor/site plan saved successfully');
+      });
+    }
+    function renderSetupDrawingModelFloors() {
+      const building = document.getElementById('setupDrawingAssignBuilding')?.value || '';
+      const floorSelect = document.getElementById('setupDrawingAssignFloor'); if (!floorSelect) return;
+      const floors = [...new Set((Array.isArray(data) ? data : []).filter(unit => String(unit.building || '') === building).map(unit => String(unit.floor || '')).filter(Boolean))];
+      const previous = floorSelect.value;
+      floorSelect.innerHTML = floors.map(floor => `<option value="${officialFinalEscape(floor)}">${officialFinalEscape(floor)}</option>`).join('');
+      if (floors.includes(previous)) floorSelect.value = previous;
+    }
+    let quantityChecklistTemplateType = '';
+    let quantityChecklistTemplateMode = 'template';
+    function quantityTemplateItems(type) {
+      const store = quantityStore();
+      const saved = store.templates?.[String(type || '').toUpperCase()]?.checklist;
+      return Array.isArray(saved) && saved.length ? quantityClone(saved) : quantityDefaultItems();
+    }
+    function quantityOpenChecklistTemplate(type) {
+      if (!quantityIsAdmin()) return;
+      quantityChecklistTemplateType = String(type || '').trim().toUpperCase();
+      quantityChecklistTemplateMode = 'template';
+      const template = quantityStore().templates?.[quantityChecklistTemplateType];
+      const modal = document.getElementById('quantityChecklistTemplateModal');
+      const content = document.getElementById('quantityChecklistTemplateContent');
+      if (!template || !modal || !content) return;
+      document.getElementById('quantityChecklistTemplateTitle').textContent = `${quantityChecklistTemplateType} Takeoff Checklist`;
+      document.getElementById('quantityChecklistTemplateSubtitle').textContent = 'These standard lines and quantities will be used by assigned units.';
+      content.innerHTML = `<div style="font-size:12px;color:#475569;margin-bottom:10px;">Add or edit the standard checklist for this model. Saving can update every assigned unit, while units with a custom checklist remain unchanged.</div><div id="quantityTemplateChecklistRows" style="display:flex;flex-direction:column;gap:8px;"></div><div style="font-size:11px;color:#64748B;margin-top:10px;">Installed marks are reset for units receiving the changed checklist; previous revisions remain in history.</div>`;
+      const rows = Array.isArray(template.checklist) && template.checklist.length ? template.checklist : quantityDefaultItems();
+      quantityRenderChecklistTemplateRows(rows);
+      modal.style.display = 'flex';
+    }
+    function quantityOpenUnitChecklist() {
+      if (!quantityIsAdmin() || !quantityCurrentUnit) return;
+      quantityChecklistTemplateMode = 'unit';
+      quantityChecklistTemplateType = quantityUnitType(quantityCurrentUnit) || 'Unit';
+      const modal = document.getElementById('quantityChecklistTemplateModal'); const content = document.getElementById('quantityChecklistTemplateContent');
+      if (!modal || !content) return;
+      document.getElementById('quantityChecklistTemplateTitle').textContent = `Unit ${quantityCurrentUnit.apt} Checklist`;
+      document.getElementById('quantityChecklistTemplateSubtitle').textContent = 'This exception applies only to this unit and will not change its model.';
+      content.innerHTML = '<div style="font-size:12px;color:#475569;margin-bottom:10px;">Edit this unit when it differs from its standard model. Its checklist will be marked as a custom exception.</div><div id="quantityTemplateChecklistRows" style="display:flex;flex-direction:column;gap:8px;"></div>';
+      quantityRenderChecklistTemplateRows(quantityUnitState(quantityCurrentUnit).items);
+      modal.style.display = 'flex';
+    }
+    function quantityCaptureTemplateUpdate(type, store) {
+      const model = store.templates?.[type]; if (!model) return;
+      store.templateUpdateHistory = store.templateUpdateHistory || {};
+      const snapshot = { at: new Date().toISOString(), template: quantityClone(model), units: {} };
+      (Array.isArray(data) ? data : []).filter(unit => String(store.unitTypes?.[quantityUnitKey(unit)] || '').toUpperCase() === type).forEach(unit => {
+        const key = quantityUnitKey(unit); const state = store.units?.[key];
+        // Unit-specific RFI drawings and custom checklists are independent exceptions.
+        if (state?.checklistMode === 'custom' || state?.drawing?.dataUrl) return;
+        if (state) snapshot.units[key] = { items: quantityClone(state.items || []), markers: quantityClone(state.markers || []), history: quantityClone(state.history || []), revisions: quantityClone(state.revisions || []), revisionDrawings: quantityClone(state.revisionDrawings || {}), lastSavedRevisionId: state.lastSavedRevisionId || null };
+      });
+      store.templateUpdateHistory[type].unshift(snapshot);
+      store.templateUpdateHistory[type] = store.templateUpdateHistory[type].slice(0, 5);
+    }
+    function quantityUndoTemplateUpdate(type) {
+      if (!quantityIsAdmin()) return;
+      const store = quantityStore(); const history = store.templateUpdateHistory?.[type]; const previous = Array.isArray(history) ? history[0] : null;
+      if (!previous?.template) { quantitySuccessToast('No previous saved model version is available.'); return; }
+      const affected = Object.keys(previous.units || {}).length;
+      if (!confirm(`Undo the last update to model ${type}? This will restore the previous drawing and checklist for ${affected} assigned unit${affected === 1 ? '' : 's'} and remove marks made after that update.`)) return;
+      store.templates = store.templates || {}; store.templates[type] = quantityClone(previous.template);
+      store.units = store.units || {};
+      Object.entries(previous.units || {}).forEach(([key, saved]) => {
+        const current = store.units[key] || {};
+        store.units[key] = { ...current, items: quantityClone(saved.items || []), markers: quantityClone(saved.markers || []), history: quantityClone(saved.history || []), revisions: quantityClone(saved.revisions || []), revisionDrawings: quantityClone(saved.revisionDrawings || {}), lastSavedRevisionId: saved.lastSavedRevisionId || null, checklistMode: 'template' };
+      });
+      history.shift(); quantitySave(store); renderSetupDrawingModels();
+      if (quantityCurrentUnit && quantityUnitType(quantityCurrentUnit) === type) quantityRenderUnit();
+      quantitySuccessToast(`✅ Model ${type} restored to the previous saved version`);
+    }
+    function quantityRenderChecklistTemplateRows(items) {
+      const host = document.getElementById('quantityTemplateChecklistRows'); if (!host) return;
+      host.innerHTML = (items || []).map((item, index) => `<div class="quantity-template-line" style="display:grid;grid-template-columns:34px minmax(0,1fr) 105px 34px;gap:8px;align-items:center;"><strong style="text-align:center;color:#1E3A8A;">${index + 1}</strong><input class="quantity-template-description" type="text" value="${officialFinalEscape(item.description || '')}" placeholder="Description"><input class="quantity-template-takeoff" type="number" min="0" value="${Number(item.takeoff || 0)}" placeholder="Takeoff"><button type="button" class="btn btn-secondary" title="Remove line" aria-label="Remove line" onclick="this.closest('.quantity-template-line').remove()">✕</button></div>`).join('');
+    }
+    function quantityAddTemplateChecklistLine() {
+      const host = document.getElementById('quantityTemplateChecklistRows'); if (!host) return;
+      const count = host.querySelectorAll('.quantity-template-line').length;
+      const wrapper = document.createElement('div'); wrapper.innerHTML = `<div class="quantity-template-line" style="display:grid;grid-template-columns:34px minmax(0,1fr) 105px 34px;gap:8px;align-items:center;"><strong style="text-align:center;color:#1E3A8A;">${count + 1}</strong><input class="quantity-template-description" type="text" value="" placeholder="Description"><input class="quantity-template-takeoff" type="number" min="0" value="0" placeholder="Takeoff"><button type="button" class="btn btn-secondary" title="Remove line" aria-label="Remove line" onclick="this.closest('.quantity-template-line').remove()">✕</button></div>`;
+      host.appendChild(wrapper.firstElementChild);
+    }
+    function quantityCloseChecklistTemplate() {
+      const modal = document.getElementById('quantityChecklistTemplateModal'); if (modal) modal.style.display = 'none';
+      quantityChecklistTemplateType = ''; quantityChecklistTemplateMode = 'template';
+    }
+    function quantitySaveChecklistTemplate() {
+      if (!quantityIsAdmin() || !quantityChecklistTemplateType) return;
+      const rows = [...document.querySelectorAll('#quantityTemplateChecklistRows .quantity-template-line')];
+      const checklist = rows.map(row => ({ description: String(row.querySelector('.quantity-template-description')?.value || '').trim(), takeoff: Math.max(0, Number(row.querySelector('.quantity-template-takeoff')?.value || 0)) })).filter(item => item.description);
+      if (!checklist.length) { quantitySuccessToast('❌ Add at least one checklist line.'); return; }
+      const store = quantityStore();
+      if (quantityChecklistTemplateMode === 'unit') {
+        const state = quantityUnitState(quantityCurrentUnit); state.items = quantityClone(checklist); state.checklistMode = 'custom'; state.markers = []; quantityAddHistory(state, 'Custom checklist updated', 'Unit-specific checklist saved; installed marks reset');
+        store.units = store.units || {}; store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityCloseChecklistTemplate(); quantityRenderUnit(); quantitySuccessToast(`✅ Unit ${quantityCurrentUnit.apt} checklist saved`); return;
+      }
+      const template = store.templates?.[quantityChecklistTemplateType]; if (!template) return;
+      const assigned = (Array.isArray(data) ? data : []).filter(unit => quantityUnitType(unit) === quantityChecklistTemplateType && !(store.units?.[quantityUnitKey(unit)]?.checklistMode === 'custom'));
+      if (assigned.length && !confirm(`Apply this checklist to ${assigned.length} assigned unit${assigned.length === 1 ? '' : 's'}? Custom unit checklists will remain unchanged.`)) return;
+      quantityCaptureTemplateUpdate(quantityChecklistTemplateType, store);
+      template.checklist = checklist; template.checklistUpdatedAt = new Date().toISOString();
+      store.templates[quantityChecklistTemplateType] = template;
+      store.units = store.units || {};
+      assigned.forEach(unit => {
+        const state = quantityUnitState(unit);
+        if (state.items?.length && state.items.some(item => Number(item.takeoff || 0) > 0 || state.markers?.length)) state.revisions.unshift(quantityRevisionSnapshot(state, 'Automatic snapshot before checklist model update'));
+        state.items = quantityClone(checklist); state.markers = []; state.checklistMode = 'template';
+        quantityAddHistory(state, 'Checklist model updated', `${quantityChecklistTemplateType} standard checklist applied; installed marks reset`);
+        store.units[quantityUnitKey(unit)] = state;
+      });
+      quantitySave(store); quantityCloseChecklistTemplate(); renderSetupDrawingModels();
+      if (quantityCurrentUnit && quantityUnitType(quantityCurrentUnit) === quantityChecklistTemplateType) quantityRenderUnit();
+      quantitySuccessToast(`✅ ${quantityChecklistTemplateType} checklist saved${assigned.length ? ` · applied to ${assigned.length} units` : ''}`);
+    }
+    function saveSetupDrawingModel(input) {
+      if (!quantityIsAdmin()) return;
+      const file = input?.files?.[0]; const typeInput = document.getElementById('setupDrawingModelType');
+      const type = String(typeInput?.value || '').trim().toUpperCase(); const message = document.getElementById('setupDrawingModelMessage');
+      if (!file || !type) { if (message) { message.textContent = 'Enter a model name first.'; message.style.color = '#B91C1C'; } if (input) input.value = ''; return; }
+      quantityReadFile(file, (dataUrl, name, mime) => {
+        const store = quantityStore(); store.templates = store.templates || {}; store.templateHistory = store.templateHistory || {};
+        const previous = store.templates[type];
+        if (previous && !confirm(`Update model ${type}? All units assigned to ${type} will use the new version. Unit-specific RFI drawings will remain unchanged.`)) { if (input) input.value = ''; return; }
+        if (previous) quantityCaptureTemplateUpdate(type, store);
+        if (previous) { store.templateHistory[type] = Array.isArray(store.templateHistory[type]) ? store.templateHistory[type] : []; store.templateHistory[type].unshift({ ...previous, archivedAt: new Date().toISOString() }); }
+        store.templates[type] = { ...previous, name, type: mime, dataUrl: (mime.startsWith('image/') || mime === 'application/pdf') ? dataUrl : '', updatedAt: new Date().toISOString(), version: (previous?.version || 0) + 1 };
+        quantitySave(store); if (typeInput) typeInput.value = ''; if (input) input.value = ''; renderSetupDrawingModels();
+        if (message) { message.textContent = `✓ ${type} saved successfully · v${store.templates[type].version}`; message.style.color = '#15803D'; }
+        if (typeof toast === 'function') toast(`Model ${type} saved successfully`);
+      });
+    }
+    function assignSetupDrawingModel() {
+      if (!quantityIsAdmin()) return;
+      const type = String(document.getElementById('setupDrawingAssignModel')?.value || '').trim().toUpperCase();
+      const building = document.getElementById('setupDrawingAssignBuilding')?.value || '';
+      const floor = document.getElementById('setupDrawingAssignFloor')?.value || '';
+      const rawUnits = String(document.getElementById('setupDrawingAssignUnits')?.value || '').trim();
+      const acrossFloors = !!document.getElementById('setupDrawingAssignAcrossFloors')?.checked;
+      const store = quantityStore(); const units = (Array.isArray(data) ? data : []).filter(unit => String(unit.building || '') === building && String(unit.floor || '') === floor);
+      if (!type || !store.templates?.[type]) { if (typeof toast === 'function') toast('Save a model before assigning it'); return; }
+      const buildingUnits = (Array.isArray(data) ? data : []).filter(unit => String(unit.building || '') === building);
+      const wanted = rawUnits.toUpperCase() === 'ALL' || !rawUnits ? null : rawUnits.split(',').map(value => value.trim()).filter(Boolean);
+      const unitPosition = value => String(value || '').trim().replace(/\s+/g, '').match(/\d+$/)?.[0]?.slice(-2) || String(value || '').trim().toUpperCase();
+      const selected = acrossFloors
+        ? (wanted ? buildingUnits.filter(unit => wanted.some(token => String(unit.apt) === token || unitPosition(unit.apt) === unitPosition(token))) : buildingUnits)
+        : (wanted ? units.filter(unit => wanted.includes(String(unit.apt))) : units);
+      if (!selected.length) { if (typeof toast === 'function') toast('No matching units found'); return; }
+      const scope = acrossFloors ? `across ${new Set(selected.map(unit => String(unit.floor))).size} floors` : `on ${floor}`;
+      if (!confirm(`Assign model ${type} to ${selected.length} unit${selected.length === 1 ? '' : 's'} ${scope}?`)) return;
+      store.unitTypes = store.unitTypes || {}; store.units = store.units || {};
+      selected.forEach(unit => {
+        const key = quantityUnitKey(unit); store.unitTypes[key] = type;
+        const state = quantityUnitState(unit);
+        if (state.checklistMode !== 'custom') { state.items = quantityClone(store.templates[type].checklist?.length ? store.templates[type].checklist : quantityDefaultItems()); state.checklistMode = 'template'; quantityAddHistory(state, 'Unit model assigned', `${type} model assigned with standard checklist`); store.units[key] = state; }
+      });
+      quantitySave(store); renderSetupDrawingModels();
+      if (typeof toast === 'function') toast(`${type} assigned to ${selected.length} unit${selected.length === 1 ? '' : 's'} ${scope}`);
+    }
+    function quantityPlanKey() {
+      const building = document.getElementById('quantityBuildingSelect')?.value || '';
+      const floor = document.getElementById('quantityFloorSelect')?.value || '';
+      return `${building}::${floor}`;
+    }
+    function quantityDefaultItems() {
+      return [
+        { description: 'Receptacles', takeoff: 0 },
+        { description: 'Light fixtures', takeoff: 0 },
+        { description: 'Switches', takeoff: 0 },
+        { description: 'Smoke detectors', takeoff: 0 }
+      ];
+    }
+    function quantityUnitState(unit) {
+      const store = quantityStore();
+      const key = quantityUnitKey(unit);
+      const existing = store.units?.[key];
+      const template = quantityTemplateFor(unit);
+      const state = existing || { items: template?.checklist?.length ? quantityClone(template.checklist) : quantityDefaultItems(), markers: [], drawing: null, checklistMode: template?.checklist?.length ? 'template' : 'custom' };
+      state.items = Array.isArray(state.items) && state.items.length ? state.items : quantityDefaultItems();
+      state.markers = Array.isArray(state.markers) ? state.markers : [];
+      state.history = Array.isArray(state.history) ? state.history : [];
+      state.revisions = Array.isArray(state.revisions) ? state.revisions : [];
+      state.revisionDrawings = state.revisionDrawings && typeof state.revisionDrawings === 'object' ? state.revisionDrawings : {};
+      state.revisions.forEach(revision => {
+        if (!revision.drawing?.dataUrl || revision.drawingRef) return;
+        const ref = `${revision.drawing.name || 'drawing'}::${revision.drawing.updatedAt || revision.savedAt || revision.id}::${revision.drawing.dataUrl.length}`;
+        state.revisionDrawings[ref] = quantityClone(revision.drawing);
+        revision.drawingRef = ref;
+        revision.drawing = { ...revision.drawing, dataUrl: '' };
+      });
+      // Preserve older locally saved revisions while giving them the new
+      // consecutive labels used by the dated navigator.
+      const oldRevisions = state.revisions.filter(revision => revision.revisionNumber == null);
+      oldRevisions.forEach((revision, index) => { revision.revisionNumber = state.revisions.length - 1 - index; revision.isManual = true; });
+      return state;
+    }
+    function quantityClone(value) {
+      return value == null ? value : JSON.parse(JSON.stringify(value));
+    }
+    function quantityAddHistory(state, action, details) {
+      state.history = Array.isArray(state.history) ? state.history : [];
+      state.history.unshift({ id: Date.now() + Math.random(), at: new Date().toISOString(), actor: String(window.userName || localStorage.getItem('cfg_user_name') || 'Admin'), action, details });
+      state.history = state.history.slice(0, 100);
+    }
+    function quantityRevisionSnapshot(state, reason, revisionNumber) {
+      const actor = String(window.userName || localStorage.getItem('cfg_user_name') || 'Admin');
+      const sourceDrawing = quantityClone(state.drawing || null);
+      let drawing = sourceDrawing;
+      let drawingRef = null;
+      if (sourceDrawing?.dataUrl) {
+        state.revisionDrawings = state.revisionDrawings && typeof state.revisionDrawings === 'object' ? state.revisionDrawings : {};
+        drawingRef = `${sourceDrawing.name || 'drawing'}::${sourceDrawing.updatedAt || Date.now()}::${sourceDrawing.dataUrl.length}`;
+        state.revisionDrawings[drawingRef] = sourceDrawing;
+        drawing = { ...sourceDrawing, dataUrl: '' };
+      }
+      return {
+        id: Date.now() + Math.random(),
+        savedAt: new Date().toISOString(),
+        revisionNumber: revisionNumber == null ? null : revisionNumber,
+        isManual: revisionNumber != null,
+        actor,
+        reason: reason || 'Manual save',
+        drawing,
+        drawingRef,
+        drawingHistory: quantityClone(state.drawingHistory || []),
+        items: quantityClone(state.items || []),
+        markers: quantityClone(state.markers || [])
+      };
+    }
+    function quantitySaveRevision() {
+      if (!quantityCurrentUnit) return;
+      const store = quantityStore(); store.units = store.units || {};
+      const key = quantityUnitKey(quantityCurrentUnit); const state = quantityUnitState(quantityCurrentUnit);
+      const revisionNumbers = state.revisions.map(revision => Number(revision.revisionNumber)).filter(Number.isFinite);
+      const revisionNumber = revisionNumbers.length ? Math.max(...revisionNumbers) + 1 : 0;
+      state.revisions.unshift(quantityRevisionSnapshot(state, 'Saved plan and takeoff revision', revisionNumber));
+      state.revisions = state.revisions.slice(0, 30);
+      quantityRevisionCursor = 0;
+      state.lastSavedRevisionId = state.revisions[0].id;
+      quantityAddHistory(state, 'Revision saved', `Rev ${revisionNumber}: plan, takeoff checklist, and installed marks saved (${state.revisions[0].savedAt})`);
+      store.units[key] = state;
+      const saved = quantitySave(store);
+      quantityRenderUnit();
+      if (saved) setTimeout(() => quantitySuccessToast(`✅ Rev ${revisionNumber} saved successfully`), 0);
+    }
+    function quantityUndoLastRevision() {
+      if (!quantityCurrentUnit || !quantityIsAdmin()) return;
+      const store = quantityStore(); store.units = store.units || {};
+      const key = quantityUnitKey(quantityCurrentUnit); const state = quantityUnitState(quantityCurrentUnit);
+      const latestIndex = state.revisions.findIndex(revision => revision.isManual);
+      const latest = latestIndex >= 0 ? state.revisions[latestIndex] : null;
+      const previous = latestIndex >= 0 ? state.revisions[latestIndex + 1] : null;
+      if (!latest || !previous) { quantitySuccessToast('No previous saved revision is available.'); return; }
+      const label = latest.revisionNumber != null ? `Rev ${latest.revisionNumber}` : 'the latest revision';
+      if (!confirm(`Undo ${label} for Unit ${quantityCurrentUnit.apt}? The previous drawing, takeoff, installed marks, and checklist state will be restored.`)) return;
+      const savedDrawing = previous.drawingRef && state.revisionDrawings?.[previous.drawingRef] ? state.revisionDrawings[previous.drawingRef] : previous.drawing;
+      state.drawing = quantityClone(savedDrawing || null);
+      state.drawingHistory = quantityClone(previous.drawingHistory || []);
+      state.items = quantityClone(previous.items || quantityDefaultItems());
+      state.markers = quantityClone(previous.markers || []);
+      state.revisions.splice(latestIndex, 1);
+      state.lastSavedRevisionId = state.revisions[0]?.id || null;
+      state.history = (state.history || []).filter(entry => !(entry.action === 'Revision saved' && String(entry.details || '').includes(label)));
+      quantityRevisionCursor = null;
+      store.units[key] = state; quantitySave(store); quantityRenderUnit();
+      quantitySuccessToast(`✅ ${label} undone · previous saved state restored`);
+    }
+    function quantityResetRevisionHistory() {
+      if (!quantityCurrentUnit || !quantityIsAdmin()) return;
+      if (!confirm(`Reset test history for Unit ${quantityCurrentUnit.apt}? The current drawing and checklist will be kept as the original Rev 0.`)) return;
+      const store = quantityStore(); store.units = store.units || {};
+      const key = quantityUnitKey(quantityCurrentUnit); const state = quantityUnitState(quantityCurrentUnit);
+      // Keep the original/current drawing, but remove quantities and marks created
+      // during testing so the unit starts clean again.
+      state.items = quantityDefaultItems();
+      state.markers = [];
+      const original = quantityRevisionSnapshot(state, 'Original saved plan and takeoff', 0);
+      state.revisions = [original];
+      state.history = [{ id: Date.now() + Math.random(), at: original.savedAt, actor: original.actor, action: 'Revision saved', details: `Rev 0: original plan, takeoff checklist, and installed marks saved (${original.savedAt})` }];
+      quantityRevisionCursor = null;
+      store.units[key] = state; quantitySave(store); quantityRenderUnit();
+      quantitySuccessToast('✅ Test history cleared · Rev 0 kept');
+    }
+    function quantityLoadRevision(index, ask = true) {
+      if (!quantityCurrentUnit) return;
+      const store = quantityStore(); store.units = store.units || {};
+      const key = quantityUnitKey(quantityCurrentUnit); const state = quantityUnitState(quantityCurrentUnit);
+      const revision = state.revisions[Number(index)]; if (!revision) return;
+      const dateText = new Date(revision.savedAt).toLocaleString('en-US');
+      if (ask && !confirm(`Load the saved revision from ${dateText}? The current checklist and drawing view will be replaced.`)) return;
+      const savedDrawing = revision.drawingRef && state.revisionDrawings?.[revision.drawingRef]
+        ? state.revisionDrawings[revision.drawingRef]
+        : revision.drawing;
+      state.drawing = quantityClone(savedDrawing || null);
+      state.drawingHistory = quantityClone(revision.drawingHistory || []);
+      state.items = quantityClone(revision.items || quantityDefaultItems());
+      state.markers = quantityClone(revision.markers || []);
+      quantityRevisionCursor = Number(index);
+      state.lastSavedRevisionId = revision.id;
+      if (ask) quantityAddHistory(state, 'Revision loaded', `Restored saved plan and takeoff revision from ${dateText}`);
+      store.units[key] = state; quantitySave(store); quantityRenderUnit();
+      if (ask && typeof toast === 'function') toast('Saved revision loaded');
+    }
+    function quantitySuccessToast(message, ms) {
+      let box = document.getElementById('quantitySuccessToastBox');
+      if (!box) { box = document.createElement('div'); box.id = 'quantitySuccessToastBox'; box.setAttribute('role', 'status'); box.setAttribute('aria-live', 'polite'); box.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483647;display:flex;flex-direction:column;align-items:center;gap:8px;max-width:calc(100vw - 32px);pointer-events:none;'; document.body.appendChild(box); }
+      const toastMessage = document.createElement('div');
+      toastMessage.style.cssText = 'background:#15803D;color:#fff;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:0 4px 14px rgba(0,0,0,.3);';
+      toastMessage.textContent = message; box.appendChild(toastMessage);
+      setTimeout(() => toastMessage.remove(), ms || 5000);
+    }
+    function quantityNavigateRevision(direction) {
+      if (!quantityCurrentUnit) return;
+      const state = quantityUnitState(quantityCurrentUnit); const revisions = state.revisions;
+      if (!revisions.length) return;
+      // Revisions are newest first: left moves backward in time, right moves forward.
+      const next = quantityRevisionCursor == null
+        ? (direction < 0 ? 0 : null)
+        : quantityRevisionCursor + (direction < 0 ? 1 : -1);
+      if (next == null || next < 0 || next >= revisions.length) return;
+      quantityLoadRevision(next, false);
+    }
+    function quantityIsAdmin() {
+      try { return window.userRole === 'admin' || window.userRole === 'pm' || (typeof window.authIsActive === 'function' && !window.authIsActive()); }
+      catch (_) { return true; }
+    }
+    function quantityVisibleUnits() {
+      const building = document.getElementById('quantityBuildingSelect')?.value || '';
+      const floor = document.getElementById('quantityFloorSelect')?.value || '';
+      const term = (document.getElementById('quantityUnitSearch')?.value || '').trim().toLowerCase();
+      return (Array.isArray(data) ? data : []).filter(unit => (!building || String(unit.building) === building) && (!floor || String(unit.floor) === floor) && (!term || `${unit.apt} ${unit.building} ${unit.floor}`.toLowerCase().includes(term)));
+    }
+    function quantityHandleUnitSearch() {
+      const input = document.getElementById('quantityUnitSearch'); const term = String(input?.value || '').trim().toLowerCase();
+      if (!term) { renderQuantityControl(); return; }
+      const building = document.getElementById('quantityBuildingSelect')?.value || '';
+      const candidates = (Array.isArray(data) ? data : []).filter(unit => (!building || String(unit.building) === building) && `${unit.apt} ${unit.building} ${unit.floor}`.toLowerCase().includes(term));
+      const exact = candidates.find(unit => String(unit.apt).toLowerCase() === term);
+      const floors = [...new Set(candidates.map(unit => String(unit.floor || '')))].filter(Boolean);
+      // Automatically change floor only when the search identifies one unit or
+      // one floor unambiguously; broad searches remain on the current floor.
+      if (exact || floors.length === 1) {
+        const floorSelect = document.getElementById('quantityFloorSelect');
+        const targetFloor = String((exact || candidates[0]).floor || '');
+        if (floorSelect && [...floorSelect.options].some(option => option.value === targetFloor)) floorSelect.value = targetFloor;
+      }
+      renderQuantityControl();
+    }
+    function quantityPreviewDrawing(title, drawing) {
+      if (!drawing?.dataUrl) { if (typeof toast === 'function') toast('No drawing file is available to preview'); return; }
+      let modal = document.getElementById('quantityPreviewModal');
+      if (!modal) {
+        modal = document.createElement('div'); modal.id = 'quantityPreviewModal'; modal.className = 'quantity-modal-overlay'; modal.style.zIndex = '10060';
+        document.body.appendChild(modal);
+      }
+      const titleText = officialFinalEscape(title || 'Drawing');
+      const content = drawing.type === 'application/pdf' ? '<canvas id="quantityPreviewCanvas" style="max-width:100%;max-height:78vh;background:white;border-radius:6px;"></canvas>' : `<img src="${drawing.dataUrl}" alt="${titleText}" style="max-width:100%;max-height:78vh;object-fit:contain;background:white;border-radius:6px;">`;
+      modal.innerHTML = `<div style="width:min(96vw,1100px);max-height:90vh;background:white;border-radius:10px;box-shadow:0 20px 60px rgba(15,23,42,.35);padding:14px;display:flex;flex-direction:column;gap:10px;"><div style="display:flex;justify-content:space-between;align-items:center;"><strong>${titleText}</strong><button type="button" class="btn btn-secondary" onclick="quantityClosePreview()">✕</button></div><div style="text-align:center;overflow:auto;">${content}</div><div style="font-size:11px;color:#64748B;">${drawing.updatedAt ? `Last update: ${officialFinalEscape(new Date(drawing.updatedAt).toLocaleString('en-US'))}` : (drawing.version ? `Version ${drawing.version}` : '')}</div></div>`;
+      modal.style.display = 'flex';
+      if (drawing.type === 'application/pdf') requestAnimationFrame(() => quantityRenderPdf(document.getElementById('quantityPreviewCanvas'), drawing.dataUrl));
+    }
+    function quantityClosePreview() { const modal = document.getElementById('quantityPreviewModal'); if (modal) modal.style.display = 'none'; }
+    function quantityUnitStatus(unit) {
+      const state = quantityUnitState(unit);
+      const complete = state.items.every((item, index) => {
+        const takeoff = Number(item.takeoff || 0);
+        const installed = state.markers.filter(marker => marker.itemIndex === index).length;
+        return takeoff === installed;
+      });
+      return complete ? 'pass' : 'fail';
+    }
+    function quantityRefreshUnitListStatuses() {
+      const units = quantityVisibleUnits();
+      document.querySelectorAll('#quantityUnitList > button').forEach((button, index) => {
+        const status = quantityUnitStatus(units[index]);
+        button.classList.remove('quantity-unit-pass', 'quantity-unit-fail');
+        button.classList.add(`quantity-unit-${status}`);
+        const result = button.querySelector('.quantity-unit-result');
+        if (result) result.textContent = status === 'pass' ? 'PASS' : 'FAIL';
+      });
+    }
+    function quantityReadFile(file, callback) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => callback(String(reader.result || ''), file.name, file.type);
+      reader.readAsDataURL(file);
+    }
+    async function quantityRenderPdf(canvas, dataUrl) {
+      if (!canvas || !dataUrl || !window.pdfjsLib) return;
+      try {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const pdf = await window.pdfjsLib.getDocument({ data: atob(dataUrl.split(',')[1] || '') }).promise;
+        const page = await pdf.getPage(1);
+        // Let PDF.js honor the page rotation embedded in the source plan.
+        // Some architectural sheets store a landscape sheet as a rotated page.
+        const baseViewport = page.getViewport({ scale: 1 });
+        const board = canvas.closest('.quantity-plan-media') || canvas.parentElement;
+        const maxWidth = Math.max(320, (board?.clientWidth || 800) - 2);
+        const maxHeight = Math.max(320, (board?.clientHeight || 560) - 2);
+        const scale = Math.min(maxWidth / baseViewport.width, maxHeight / baseViewport.height);
+        const viewport = page.getViewport({ scale });
+        const ratio = window.devicePixelRatio || 1;
+        canvas.width = Math.ceil(viewport.width * ratio);
+        canvas.height = Math.ceil(viewport.height * ratio);
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        const context = canvas.getContext('2d', { alpha: false });
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        await page.render({ canvasContext: context, viewport }).promise;
+      } catch (error) {
+        console.warn('PDF plan render failed:', error);
+        canvas.replaceWith(Object.assign(document.createElement('div'), { className: 'quantity-plan-empty', innerHTML: '<div>Unable to render this PDF plan. Please upload it again or use an image export.</div>' }));
+      }
+    }
+    function quantityDefaultContourShapes(planKey) {
+      if (planKey === 'Building 1::Floor 2') {
+        return {
+          // B1/F2 — normalized to the uploaded A021 sheet.
+          '1202': [[10.5,23.8],[25.0,23.8],[25.0,40.3],[10.5,40.3]],
+          '1204': [[25.0,23.8],[44.2,23.8],[44.2,40.3],[28.2,40.3],[28.2,29.0],[25.0,29.0]],
+          '1206': [[44.2,23.8],[53.8,23.8],[53.8,40.3],[44.2,40.3]],
+          '1208': [[53.8,23.8],[68.2,23.8],[68.2,40.3],[53.8,40.3]],
+          '1210': [[68.2,23.8],[82.4,23.8],[82.4,40.3],[68.2,40.3]],
+          '1201': [[10.5,43.8],[18.2,43.8],[18.2,46.4],[26.9,46.4],[26.9,64.1],[10.5,64.1]],
+          '1203': [[30.7,43.8],[40.2,43.8],[40.2,64.1],[30.7,64.1]],
+          '1205': [[40.2,43.8],[49.7,43.8],[49.7,64.1],[40.2,64.1]],
+          '1207': [[49.7,43.8],[63.9,43.8],[63.9,64.1],[49.7,64.1]],
+          '1209': [[68.2,44.4],[82.4,44.4],[82.4,64.1],[68.2,64.1]]
+        };
+      }
+      if (planKey === 'Building 1::Floor 3') {
+        return {
+          // B1/F3 — normalized to the uploaded A021 sheet.
+          '1302': [[9.8,23.8],[24.5,23.8],[24.5,40.7],[9.8,40.7]],
+          '1304': [[24.5,23.8],[44.0,23.8],[44.0,40.7],[28.0,40.7],[28.0,29.0],[24.5,29.0]],
+          '1306': [[44.0,23.2],[53.7,23.2],[53.7,40.7],[44.0,40.7]],
+          '1308': [[53.7,23.8],[68.3,23.8],[68.3,40.7],[53.7,40.7]],
+          '1310': [[68.3,23.8],[82.8,23.8],[82.8,40.7],[68.3,40.7]],
+          '1301': [[9.8,44.2],[18.2,44.2],[18.2,46.8],[26.3,46.8],[26.3,64.7],[9.8,64.7]],
+          '1303': [[30.3,44.2],[40.0,44.2],[40.0,64.7],[30.3,64.7]],
+          '1305': [[40.0,44.2],[49.6,44.2],[49.6,64.7],[40.0,64.7]],
+          '1307': [[49.6,44.2],[63.8,44.2],[63.8,64.7],[49.6,64.7]],
+          '1309': [[68.3,44.7],[82.8,44.7],[82.8,64.7],[68.3,64.7]]
+        };
+      }
+      if (planKey !== 'Building 1::Floor 1') return {};
+      return {
+        // Coordinates follow the visible wall lines on the supplied B1/F1 sheet.
+        // Keep each polygon inside its unit so adjacent clicks never select the
+        // neighboring apartment.
+        '1102': [[7.3,25.7],[22.9,25.7],[22.9,43.7],[7.3,43.7]],
+        '1104': [[22.9,25.7],[33.5,25.7],[33.5,43.7],[22.9,43.7]],
+        '1106': [[43.8,25.2],[54.0,25.2],[54.0,43.7],[43.8,43.7]],
+        '1108': [[54.0,25.2],[69.7,25.2],[69.7,43.7],[54.0,43.7]],
+        '1101': [[7.3,47.2],[25.0,47.2],[25.0,69.5],[7.3,69.5]],
+        '1103': [[29.3,47.2],[39.5,47.2],[39.5,68.5],[29.3,68.5]],
+        '1105': [[39.5,47.2],[50.0,47.2],[50.0,68.5],[39.5,68.5]],
+        '1107': [[50.0,47.2],[65.5,47.2],[65.5,68.5],[50.0,68.5]],
+        '1109': [[69.7,47.2],[85.5,47.2],[85.5,68.5],[69.7,68.5]]
+      };
+    }
+    function quantityContourShapes(planKey) {
+      const store = quantityStore();
+      return { ...quantityDefaultContourShapes(planKey), ...(store.contours?.[planKey] || {}) };
+    }
+    function quantityPlanContourSvg(planKey, units) {
+      // Coordinates are normalized from 0 to 100 so a custom template stays
+      // aligned when the PDF scales on desktop, iPad, or phone.
+      const shapes = quantityContourShapes(planKey);
+      const items = units.map((unit, index) => {
+        const apt = String(unit.apt || ''); const points = shapes[apt];
+        if (!points) return '';
+        const pointText = points.map(([x,y]) => `${x},${y}`).join(' ');
+        const center = points.reduce((sum, [x,y]) => [sum[0] + x / points.length, sum[1] + y / points.length], [0,0]);
+        return `<polygon class="quantity-plan-contour" points="${pointText}" tabindex="0" role="button" aria-label="Unit ${officialFinalEscape(apt)}" onclick="quantityOpenUnit(${index})" onkeydown="if(event.key==='Enter'||event.key===' ')quantityOpenUnit(${index})"></polygon><text class="quantity-plan-contour-label" x="${center[0]}" y="${center[1]}">${officialFinalEscape(apt)}</text>`;
+      }).join('');
+      return `<svg class="quantity-plan-contours" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Clickable unit contours">${items}</svg>`;
+    }
+    function quantityPlanUnmappedUnits(planKey, units) {
+      const mapped = new Set(Object.keys(quantityContourShapes(planKey)));
+      return units.map(unit => String(unit.apt || '')).filter(apt => apt && !mapped.has(apt));
+    }
+    function quantityCloseContourReview() {
+      const modal = document.getElementById('quantityContourReviewModal');
+      if (modal) modal.style.display = 'none';
+    }
+    function quantityCloseContourEditor() {
+      const modal = document.getElementById('quantityContourEditorModal');
+      if (modal) modal.style.display = 'none';
+      quantityContourEditor = null;
+    }
+    function quantityRenderContourEditor() {
+      const editor = quantityContourEditor; if (!editor) return;
+      const points = editor.points || [];
+      const polygon = points.map(point => point.join(',')).join(' ');
+      const vertices = points.map((point, index) => `<circle cx="${point[0]}" cy="${point[1]}" r="1.5" fill="#16A34A" stroke="#fff" stroke-width=".5" tabindex="0" aria-label="Point ${index + 1}" onpointerdown="quantityStartContourPointDrag(event,${index})"></circle><text x="${point[0]}" y="${point[1]}" dx="2" dy="-2" font-size="2.2" fill="#166534">${index + 1}</text>`).join('');
+      const inputs = points.map((point, index) => `<label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#475569;">Point ${index + 1}<input type="number" min="0" max="100" step="0.1" value="${point[0]}" onchange="quantitySetContourPoint(${index},0,this.value)" style="width:72px;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"><input type="number" min="0" max="100" step="0.1" value="${point[1]}" onchange="quantitySetContourPoint(${index},1,this.value)" style="width:72px;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"></label>`).join('');
+      const plan = quantityStore().sitePlans?.[editor.planKey] || null;
+      const planMarkup = plan?.dataUrl ? (plan.type === 'application/pdf' ? `<canvas id="quantityContourEditorPdf" class="quantity-contour-editor-media" data-pdf="${officialFinalEscape(plan.dataUrl)}" aria-label="Base floor plan"></canvas>` : `<img class="quantity-contour-editor-media" src="${plan.dataUrl}" alt="Base floor plan">`) : '<div class="quantity-contour-editor-empty">No base floor plan uploaded</div>';
+      const unitOptions = quantityVisibleUnits().map(unit => { const apt = String(unit.apt || ''); return `<option value="${officialFinalEscape(apt)}" ${apt === editor.apt ? 'selected' : ''}>Unit ${officialFinalEscape(apt)}</option>`; }).join('');
+      document.getElementById('quantityContourEditorContent').innerHTML = `<div class="quantity-help">${editor.isNew ? 'New contour' : `Editing contour for <strong>Unit ${officialFinalEscape(editor.apt)}</strong>`}. Adjust the points directly on the base plan, then assign the unit.</div><div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><label style="font-size:12px;color:#475569;font-weight:600;">Assigned unit <select id="quantityContourEditorUnit" style="padding:6px;border:1px solid #CBD5E1;border-radius:6px;"><option value="">Select unit</option>${unitOptions}</select></label><button type="button" class="btn btn-secondary" onclick="quantityUndoContourEditor()">Undo</button><span style="font-size:11px;color:#64748B;">Snap grid: 2.5%</span></div><div style="display:grid;grid-template-columns:minmax(320px,1fr) minmax(190px,.7fr);gap:14px;align-items:start;"><div class="quantity-contour-editor-board">${planMarkup}<svg viewBox="0 0 100 100" preserveAspectRatio="none" class="quantity-contour-editor-overlay"><defs><pattern id="quantityContourGrid" width="2.5" height="2.5" patternUnits="userSpaceOnUse"><path d="M 2.5 0 L 0 0 0 2.5" fill="none" stroke="rgba(37,99,235,.22)" stroke-width=".12"></path></pattern></defs><rect width="100" height="100" fill="url(#quantityContourGrid)"></rect><polygon points="${polygon}" fill="rgba(34,197,94,.24)" stroke="#16A34A" stroke-width=".8"></polygon>${vertices}</svg></div><div><strong style="display:block;margin-bottom:8px;color:#1E3A8A;">Boundary points</strong><div style="display:grid;gap:7px;">${inputs}</div><small style="display:block;margin-top:10px;color:#64748B;">Drag the green points on the plan or edit X/Y values. ` + (editor.isNew ? 'Assign a unit before saving.' : '') + `</small></div></div>`;
+      if (plan?.type === 'application/pdf') requestAnimationFrame(() => quantityRenderPdf(document.getElementById('quantityContourEditorPdf'), plan.dataUrl));
+    }
+    function quantityOpenContourEditor(apt) {
+      if (!quantityIsAdmin()) return;
+      const planKey = quantityPlanKey(); const points = quantityContourShapes(planKey)[String(apt)];
+      if (!Array.isArray(points) || points.length < 3) return;
+      quantityContourEditor = { planKey, apt: String(apt), isNew: false, points: points.map(point => [Number(point[0]), Number(point[1])]), undoStack: [] };
+      quantityRenderContourEditor();
+      document.getElementById('quantityContourEditorModal').style.display = 'flex';
+    }
+    function quantityOpenNewContourEditor() {
+      if (!quantityIsAdmin()) return;
+      const planKey = quantityPlanKey();
+      quantityContourEditor = { planKey, apt: '', isNew: true, points: [[30,30],[45,30],[45,45],[30,45]], undoStack: [] };
+      quantityRenderContourEditor();
+      document.getElementById('quantityContourEditorModal').style.display = 'flex';
+    }
+    function quantityUndoContourEditor() {
+      if (!quantityContourEditor?.undoStack?.length) return;
+      quantityContourEditor.points = quantityContourEditor.undoStack.pop();
+      quantityRenderContourEditor();
+    }
+    function quantitySetContourPoint(index, axis, value) {
+      if (!quantityContourEditor?.points[index]) return;
+      quantityContourEditor.undoStack = quantityContourEditor.undoStack || [];
+      quantityContourEditor.undoStack.push(quantityContourEditor.points.map(point => [...point]));
+      quantityContourEditor.points[index][axis] = Math.max(0, Math.min(100, Number(value) || 0));
+      quantityRenderContourEditor();
+    }
+    function quantityStartContourPointDrag(event, index) {
+      event.preventDefault(); event.stopPropagation();
+      const target = event.currentTarget.closest('.quantity-contour-editor-board');
+      if (!target || !quantityContourEditor?.points[index]) return;
+      const handle = event.currentTarget; const label = handle.nextElementSibling; const svg = handle.closest('svg'); const polygon = svg?.querySelector('polygon');
+      quantityContourEditor.undoStack = quantityContourEditor.undoStack || [];
+      quantityContourEditor.undoStack.push(quantityContourEditor.points.map(point => [...point]));
+      const startX = event.clientX; const startY = event.clientY; let dragging = false;
+      try { handle.setPointerCapture(event.pointerId); } catch (_) {}
+      handle.setAttribute('r', '0'); handle.setAttribute('stroke', 'none'); if (label) { label.textContent = '✚'; label.setAttribute('font-size', '4'); }
+      const move = moveEvent => {
+        if (!dragging && Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 4) return;
+        dragging = true;
+        const rect = target.getBoundingClientRect();
+        const snap = value => Math.max(0, Math.min(100, Math.round(value / 2.5) * 2.5));
+        const x = snap(((moveEvent.clientX - rect.left) / rect.width) * 100);
+        const y = snap(((moveEvent.clientY - rect.top) / rect.height) * 100);
+        quantityContourEditor.points[index] = [x, y];
+        handle.setAttribute('cx', String(x)); handle.setAttribute('cy', String(y));
+        if (label) { label.setAttribute('x', String(x)); label.setAttribute('y', String(y)); }
+        if (polygon) polygon.setAttribute('points', quantityContourEditor.points.map(point => point.join(',')).join(' '));
+      };
+      const stop = () => { if (!dragging) quantityContourEditor.undoStack.pop(); if (label) { label.textContent = String(index + 1); label.setAttribute('font-size', '2.2'); } handle.setAttribute('r', '1.5'); handle.setAttribute('stroke', '#fff'); document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', stop); document.removeEventListener('pointercancel', stop); quantityRenderContourEditor(); };
+      document.addEventListener('pointermove', move); document.addEventListener('pointerup', stop);
+      document.addEventListener('pointercancel', stop);
+    }
+    function quantitySaveContourEditor() {
+      if (!quantityContourEditor || !quantityIsAdmin()) return;
+      const store = quantityStore(); store.contours = store.contours || {}; const current = quantityContourShapes(quantityContourEditor.planKey);
+      const apt = String(document.getElementById('quantityContourEditorUnit')?.value || quantityContourEditor.apt || '').trim();
+      if (!apt) { alert('Select a unit before saving this contour.'); return; }
+      if (quantityContourEditor.apt && quantityContourEditor.apt !== apt) delete current[quantityContourEditor.apt];
+      current[apt] = quantityContourEditor.points.map(point => [Number(point[0].toFixed(2)), Number(point[1].toFixed(2))]);
+      store.contours[quantityContourEditor.planKey] = current;
+      if (!quantitySave(store)) return;
+      quantityCloseContourEditor(); quantityCloseContourReview(); renderQuantityControl(); quantitySuccessToast(`✅ Contour saved for Unit ${apt}`);
+    }
+    function quantityOpenContourReview() {
+      if (!quantityIsAdmin()) return;
+      const planKey = quantityPlanKey(); const units = quantityVisibleUnits(); const shapes = quantityContourShapes(planKey);
+      const unitNumbers = units.map(unit => String(unit.apt || '')).filter(Boolean);
+      const rows = Object.entries(shapes).map(([apt, points], index) => {
+        const options = unitNumbers.map(unit => `<option value="${officialFinalEscape(unit)}" ${unit === apt ? 'selected' : ''}>Unit ${officialFinalEscape(unit)}</option>`).join('');
+        return `<tr><td style="font-weight:700;">${index + 1}</td><td>Detected contour ${index + 1}<small style="display:block;color:#64748B;">${points.length} boundary points</small></td><td><select class="quantity-contour-assignment" data-contour-index="${index}" data-original-unit="${officialFinalEscape(apt)}" style="min-width:150px;padding:6px;border:1px solid #CBD5E1;border-radius:6px;"><option value="">Unassigned</option>${options}</select></td><td><span class="insp-badge ${unitNumbers.includes(apt) ? 'insp-badge-pass' : 'insp-badge-fail'}">${unitNumbers.includes(apt) ? 'Suggested match' : 'Review needed'}</span> <button type="button" class="btn btn-secondary" style="font-size:10px;padding:4px 6px;margin-left:4px;" onclick="quantityOpenContourEditor('${officialFinalEscape(apt)}')">View / edit</button></td></tr>`;
+      }).join('');
+      const unmapped = quantityPlanUnmappedUnits(planKey, units);
+      const empty = !rows ? '<div class="quantity-help">No contour suggestions are available for this Building/Floor. Upload a contour template first.</div>' : `<div class="quantity-help" style="margin-bottom:10px;">The suggested assignment uses the detected contour labels. Change any unit number before confirming.</div><div style="overflow:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr><th style="text-align:left;padding:8px;border-bottom:1px solid #E2E8F0;">#</th><th style="text-align:left;padding:8px;border-bottom:1px solid #E2E8F0;">Detected area</th><th style="text-align:left;padding:8px;border-bottom:1px solid #E2E8F0;">Assigned unit</th><th style="text-align:left;padding:8px;border-bottom:1px solid #E2E8F0;">Status</th></tr></thead><tbody>${rows}</tbody></table></div>${unmapped.length ? `<div class="quantity-help" style="margin-top:10px;color:#92400E;">Units still without a contour: ${unmapped.map(apt => `<strong>${officialFinalEscape(apt)}</strong>`).join(', ')}</div>` : ''}`;
+      document.getElementById('quantityContourReviewContent').innerHTML = empty;
+      document.getElementById('quantityContourReviewModal').style.display = 'flex';
+    }
+    function quantitySaveContourReview() {
+      if (!quantityIsAdmin()) return;
+      const planKey = quantityPlanKey(); const shapes = quantityContourShapes(planKey); const assignments = [...document.querySelectorAll('#quantityContourReviewContent .quantity-contour-assignment')];
+      const next = {}; const duplicate = new Set();
+      assignments.forEach(select => { const unit = String(select.value || '').trim(); const original = select.dataset.originalUnit; const points = shapes[original]; if (unit && points) { if (duplicate.has(unit)) return; duplicate.add(unit); next[unit] = points; } });
+      const store = quantityStore(); store.contours = store.contours || {}; store.contours[planKey] = next; if (!quantitySave(store)) return;
+      quantityCloseContourReview(); renderQuantityControl(); quantitySuccessToast(`✅ Contours confirmed for ${planKey}`);
+    }
+    function quantityDownloadContourTemplate() {
+      if (!quantityIsAdmin()) return;
+      const planKey = quantityPlanKey(); const units = quantityVisibleUnits();
+      const payload = { planKey, coordinateSystem: 'normalized 0-100', units: Object.fromEntries(units.map(unit => [String(unit.apt), quantityContourShapes(planKey)[String(unit.apt)] || []])) };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `contours-${planKey.replace(/[^a-z0-9]+/gi, '-')}.json`; link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 500);
+      if (typeof toast === 'function') toast('Contour template downloaded');
+    }
+    function quantityLoadContourTemplate(input) {
+      if (!quantityIsAdmin()) return;
+      const file = input?.files?.[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const payload = JSON.parse(String(reader.result || '{}')); const planKey = quantityPlanKey();
+          if (payload.planKey && payload.planKey !== planKey) throw new Error(`This template is for ${payload.planKey}, not ${planKey}`);
+          const source = payload.units || payload.contours; const valid = {};
+          Object.entries(source || {}).forEach(([apt, points]) => {
+            if (!Array.isArray(points) || points.length < 3 || points.some(point => !Array.isArray(point) || point.length < 2 || Number(point[0]) < 0 || Number(point[0]) > 100 || Number(point[1]) < 0 || Number(point[1]) > 100)) return;
+            valid[String(apt)] = points.map(point => [Number(point[0]), Number(point[1])]);
+          });
+          if (!Object.keys(valid).length) throw new Error('No valid unit contours found');
+          if (!confirm(`Replace the contour template for ${planKey} with ${Object.keys(valid).length} unit contours?`)) return;
+          const store = quantityStore(); store.contours = store.contours || {}; store.contours[planKey] = valid; quantitySave(store); renderQuantityControl();
+          if (typeof toast === 'function') toast(`Contour template saved for ${planKey}`);
+        } catch (error) { alert(`Unable to load contour template: ${error.message}`); }
+        if (input) input.value = '';
+      };
+      reader.readAsText(file);
+    }
+    function quantityHandleFloorPlan(input) {
+      if (!quantityIsAdmin()) return;
+      const file = input?.files?.[0]; if (!file) return;
+      quantityReadFile(file, (dataUrl, name, type) => {
+        const store = quantityStore(); store.sitePlans = store.sitePlans || {};
+        store.sitePlans[quantityPlanKey()] = { name, type, dataUrl: (type.startsWith('image/') || type === 'application/pdf') ? dataUrl : '' };
+        quantitySave(store); renderQuantityControl();
+        if (typeof toast === 'function') toast('Floor plan saved locally');
+      });
+    }
+    function quantityClearFloorPlan() {
+      if (!quantityIsAdmin()) return;
+      if (!confirm('Clear the saved floor plan from this local preview?')) return;
+      const store = quantityStore(); store.sitePlans = store.sitePlans || {}; delete store.sitePlans[quantityPlanKey()]; delete store.floorPlan; quantitySave(store); renderQuantityControl();
+    }
+    function quantityHandleUnitPlan(input) {
+      const file = input?.files?.[0]; if (!file || !quantityCurrentUnit) return;
+      quantityReadFile(file, (dataUrl, name, type) => {
+        const store = quantityStore(); store.units = store.units || {};
+        const state = quantityUnitState(quantityCurrentUnit); state.drawingHistory = Array.isArray(state.drawingHistory) ? state.drawingHistory : [];
+        quantityRevisionCursor = null;
+        const previousDrawing = state.drawing?.name || 'none';
+        if (state.drawing?.dataUrl || state.markers.length || state.items.some(item => Number(item.takeoff || 0) > 0)) {
+          state.revisions.unshift(quantityRevisionSnapshot(state, 'Automatic snapshot before drawing update'));
+          state.revisions = state.revisions.slice(0, 30);
+        }
+        if (state.drawing?.dataUrl) state.drawingHistory.unshift({ ...state.drawing, archivedAt: new Date().toISOString() });
+        state.drawingHistory = state.drawingHistory.slice(0, 20);
+        // A new drawing/RFI keeps the editable takeoff quantities, while the
+        // installed marks/count start at zero. The automatic snapshot above
+        // preserves the previous takeoff and marks in the prior revision.
+        state.markers = [];
+        state.lastSavedRevisionId = null;
+        state.drawing = { name, type, dataUrl: (type.startsWith('image/') || type === 'application/pdf') ? dataUrl : '', revision: (state.drawing?.revision || 0) + 1, updatedAt: new Date().toISOString() };
+        quantityAddHistory(state, 'Drawing updated / RFI', `${previousDrawing} → ${name}; takeoff preserved and installed count reset for the new drawing`);
+        store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+        if (typeof toast === 'function') toast('Unit drawing saved locally');
+      });
+    }
+    function quantityUseTemplate() {
+      if (!quantityCurrentUnit || !quantityIsAdmin()) return;
+      const template = quantityTemplateFor(quantityCurrentUnit); if (!template) return;
+      const store = quantityStore(); store.units = store.units || {}; const state = quantityUnitState(quantityCurrentUnit);
+      quantityRevisionCursor = null;
+      state.drawingHistory = Array.isArray(state.drawingHistory) ? state.drawingHistory : [];
+      if (state.drawing?.dataUrl || state.markers.length || state.items.some(item => Number(item.takeoff || 0) > 0)) {
+        state.revisions.unshift(quantityRevisionSnapshot(state, 'Automatic snapshot before returning to template'));
+        state.revisions = state.revisions.slice(0, 30);
+      }
+      if (state.drawing?.dataUrl) state.drawingHistory.unshift({ ...state.drawing, archivedAt: new Date().toISOString() });
+      state.drawingHistory = state.drawingHistory.slice(0, 20); state.drawing = null;
+      quantityAddHistory(state, 'Returned to unit type template', `Using ${quantityUnitType(quantityCurrentUnit)} template`);
+      store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+      if (typeof toast === 'function') toast('Unit is using its type template again');
+    }
+    function quantityOpenUnit(index) {
+      const unit = quantityVisibleUnits()[index]; if (!unit) return;
+      quantityCurrentUnit = unit; quantityActiveItem = -1;
+      const savedState = quantityUnitState(unit);
+      quantityRevisionCursor = savedState.lastSavedRevisionId && savedState.revisions[0]?.id === savedState.lastSavedRevisionId ? 0 : null;
+      quantityDrawingZoom = 1; quantityDrawingPanX = 0; quantityDrawingPanY = 0; quantityDrawingHand = false;
+      quantityRenderUnit();
+      const modal = document.getElementById('quantityUnitModal'); if (modal) modal.style.display = 'flex';
+    }
+    function quantityCloseUnit() {
+      const modal = document.getElementById('quantityUnitModal'); if (modal) modal.style.display = 'none';
+      quantityCurrentUnit = null; quantityActiveItem = -1;
+    }
+    function quantitySelectItem(index) {
+      // Clicking the active checklist item again deselects it, so drawing clicks
+      // cannot accidentally continue adding marks to the previous item.
+      quantityActiveItem = quantityActiveItem === index ? -1 : index;
+      quantityRenderUnit();
+    }
+    function quantityAddRfiNote() {
+      if (!quantityCurrentUnit || !quantityIsAdmin()) return;
+      const input = document.querySelector('#quantityUnitContent .quantity-rfi-input');
+      const note = String(input?.value || '').trim();
+      if (!note) { if (typeof toast === 'function') toast('Enter an RFI or change note first'); return; }
+      const store = quantityStore(); store.units = store.units || {};
+      const state = quantityUnitState(quantityCurrentUnit); quantityAddHistory(state, 'RFI / Admin note', note);
+      store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+    }
+    function quantityRenderHistoryPanel() {
+      const panel = document.querySelector('#quantityUnitContent .quantity-history');
+      if (!panel || !quantityCurrentUnit) return;
+      const state = quantityUnitState(quantityCurrentUnit);
+      const entries = state.history.length ? state.history.map(entry => `<div class="quantity-history-entry"><div><strong>${officialFinalEscape(entry.action)}</strong><div>${officialFinalEscape(entry.details)}</div></div><small>${officialFinalEscape(entry.actor)} · ${new Date(entry.at).toLocaleString()}</small></div>`).join('') : '<div class="quantity-help">No changes recorded for this drawing yet.</div>';
+      const list = panel.querySelector('.quantity-history-list'); if (list) list.innerHTML = entries;
+    }
+    function quantityEnsureHistoryPanel() {
+      const content = document.getElementById('quantityUnitContent'); if (!content || !quantityCurrentUnit) return;
+      let panel = content.querySelector('.quantity-history');
+      if (!panel) {
+        panel = document.createElement('div'); panel.className = 'quantity-history';
+        panel.innerHTML = `<div class="quantity-card-header"><strong>Drawing Change History</strong><span>RFI and admin updates</span></div>${quantityIsAdmin() ? '<div class="quantity-rfi-row"><input class="quantity-rfi-input" type="text" placeholder="Add RFI or change note..."><button type="button" class="btn btn-secondary" onclick="quantityAddRfiNote()">Add Note</button></div>' : ''}<div class="quantity-history-list"></div>`;
+        content.appendChild(panel);
+      }
+      quantityRenderHistoryPanel();
+    }
+    function quantityEnsureDrawingTools() {
+      const board = document.querySelector('#quantityUnitContent .quantity-drawing-board');
+      if (!board) return;
+      if (!board.dataset.quantityGesturesBound) {
+        board.dataset.quantityGesturesBound = '1';
+        board.addEventListener('wheel', quantityDrawingWheel, { passive: false });
+        board.addEventListener('touchstart', quantityDrawingTouchStart, { passive: false });
+        board.addEventListener('touchmove', quantityDrawingTouchMove, { passive: false });
+        board.addEventListener('touchend', quantityDrawingTouchEnd, { passive: false });
+        board.addEventListener('touchcancel', quantityDrawingTouchEnd, { passive: false });
+      }
+      let stage = board.querySelector('.quantity-drawing-stage');
+      if (!stage) {
+        stage = document.createElement('div'); stage.className = 'quantity-drawing-stage';
+        while (board.firstChild) stage.appendChild(board.firstChild);
+        board.appendChild(stage);
+      }
+      const header = board.parentElement?.querySelector('.quantity-card-header');
+      const controls = header?.querySelector('span');
+      if (!controls || controls.querySelector('.quantity-drawing-zoom-label')) return;
+      controls.classList.add('quantity-drawing-controls');
+      const makeButton = (text, title, handler, active) => { const button = document.createElement('button'); button.type = 'button'; button.textContent = text; button.title = title; button.setAttribute('aria-label', title); button.onclick = handler; if (active) button.classList.add('active'); return button; };
+      const zoomOut = makeButton('−', 'Zoom out', () => quantityAdjustDrawingZoom(-.25));
+      const label = document.createElement('span'); label.className = 'quantity-drawing-zoom-label'; label.textContent = '100%';
+      const zoomIn = makeButton('+', 'Zoom in', () => quantityAdjustDrawingZoom(.25));
+      const reset = makeButton('↺', 'Reset view', quantityResetDrawingView);
+      const hand = makeButton('✋', 'Pan with hand', quantityToggleDrawingHand, quantityDrawingHand);
+      const clear = controls.querySelector('button[onclick*="quantityClearMarkers"]');
+      const zoomGroup = document.createElement('span');
+      zoomGroup.className = 'quantity-drawing-tools';
+      [zoomOut, label, zoomIn, reset, hand].forEach(control => zoomGroup.appendChild(control));
+      if (clear) controls.insertBefore(zoomGroup, clear); else controls.appendChild(zoomGroup);
+    }
+    function quantityApplyDrawingView() {
+      quantityEnsureDrawingTools();
+      const stage = document.querySelector('#quantityUnitContent .quantity-drawing-stage');
+      const board = document.querySelector('#quantityUnitContent .quantity-drawing-board');
+      const label = document.querySelector('#quantityUnitContent .quantity-drawing-zoom-label');
+      if (stage) stage.style.transform = `translate(${quantityDrawingPanX}px, ${quantityDrawingPanY}px) scale(${quantityDrawingZoom})`;
+      if (board) board.classList.toggle('hand-mode', quantityDrawingHand);
+      if (label) label.textContent = `${Math.round(quantityDrawingZoom * 100)}%`;
+      const hand = document.querySelector('#quantityUnitContent .quantity-drawing-tools button[aria-label="Pan with hand"]');
+      if (hand) hand.classList.toggle('active', quantityDrawingHand);
+      quantityEnsureHistoryPanel();
+    }
+    function quantityAdjustDrawingZoom(delta) {
+      quantityDrawingZoom = Math.max(.5, Math.min(3, quantityDrawingZoom + delta));
+      quantityApplyDrawingView();
+    }
+    function quantityResetDrawingView() {
+      quantityDrawingZoom = 1; quantityDrawingPanX = 0; quantityDrawingPanY = 0;
+      quantityApplyDrawingView();
+    }
+    function quantityToggleDrawingHand() {
+      quantityDrawingHand = !quantityDrawingHand;
+      quantityApplyDrawingView();
+    }
+    function quantityDrawingPointerDown(event) {
+      if (!quantityDrawingHand) return;
+      event.preventDefault();
+      quantityDrawingDrag = { x: event.clientX, y: event.clientY, moved: false };
+      document.querySelector('#quantityUnitContent .quantity-drawing-board')?.classList.add('is-dragging');
+    }
+    function quantityDrawingPointerMove(event) {
+      if (!quantityDrawingDrag) return;
+      const dx = event.clientX - quantityDrawingDrag.x; const dy = event.clientY - quantityDrawingDrag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 2) quantityDrawingDrag.moved = true;
+      quantityDrawingPanX += dx; quantityDrawingPanY += dy;
+      quantityDrawingDrag.x = event.clientX; quantityDrawingDrag.y = event.clientY;
+      quantityApplyDrawingView();
+    }
+    function quantityDrawingPointerUp() {
+      if (!quantityDrawingDrag) return;
+      quantityDrawingSuppressClick = quantityDrawingDrag.moved;
+      quantityDrawingDrag = null;
+      document.querySelector('#quantityUnitContent .quantity-drawing-board')?.classList.remove('is-dragging');
+    }
+    function quantityDrawingClick(event) {
+      if (quantityDrawingGestureActive || (quantityDrawingHand && quantityDrawingSuppressClick)) { quantityDrawingSuppressClick = false; return; }
+      quantityPlaceMarker(event);
+    }
+    function quantityDrawingWheel(event) {
+      event.preventDefault();
+      quantityDrawingZoom = Math.max(.5, Math.min(3, quantityDrawingZoom + (event.deltaY < 0 ? .1 : -.1)));
+      quantityApplyDrawingView();
+    }
+    function quantityTouchDistance(touches) {
+      const dx = touches[0].clientX - touches[1].clientX; const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    function quantityDrawingTouchStart(event) {
+      if (event.touches.length !== 2) return;
+      event.preventDefault(); quantityDrawingGestureActive = true;
+      quantityDrawingTouchStartDistance = quantityTouchDistance(event.touches); quantityDrawingTouchStartZoom = quantityDrawingZoom;
+    }
+    function quantityDrawingTouchMove(event) {
+      if (event.touches.length !== 2 || !quantityDrawingTouchStartDistance) return;
+      event.preventDefault();
+      quantityDrawingZoom = Math.max(.5, Math.min(3, quantityDrawingTouchStartZoom * (quantityTouchDistance(event.touches) / quantityDrawingTouchStartDistance)));
+      quantityApplyDrawingView();
+    }
+    function quantityDrawingTouchEnd(event) {
+      if (event.touches.length < 2) {
+        quantityDrawingTouchStartDistance = 0;
+        setTimeout(() => { quantityDrawingGestureActive = false; }, 120);
+      }
+    }
+    function quantitySetTakeoff(index, value) {
+      if (!quantityCurrentUnit || !quantityIsAdmin()) return;
+      const store = quantityStore(); store.units = store.units || {};
+      const state = quantityUnitState(quantityCurrentUnit); const previous = Number(state.items[index]?.takeoff || 0); const next = Math.max(0, Number(value) || 0);
+      if (previous === next) return;
+      quantityRevisionCursor = null;
+      state.items[index].takeoff = next; state.checklistMode = 'custom'; quantityAddHistory(state, 'Takeoff updated', `${state.items[index].description}: ${previous} → ${next}`);
+      store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+    }
+    function quantityPlaceMarker(event) {
+      if (!quantityCurrentUnit || quantityActiveItem < 0) { alert('Select a checklist item first.'); return; }
+      const store = quantityStore(); store.units = store.units || {};
+      const state = quantityUnitState(quantityCurrentUnit);
+      quantityRevisionCursor = null;
+      const item = state.items[quantityActiveItem];
+      const installed = state.markers.filter(marker => marker.itemIndex === quantityActiveItem).length;
+      if (Number(item.takeoff || 0) <= 0) { alert('Set a Takeoff Qty before marking installed items.'); return; }
+      if (installed >= Number(item.takeoff || 0)) { alert('Installed quantity cannot exceed Takeoff Qty.'); return; }
+      const board = document.querySelector('#quantityUnitContent .quantity-drawing-board');
+      const rect = board?.getBoundingClientRect() || event.currentTarget.getBoundingClientRect();
+      state.markers.push({ id: Date.now() + Math.random(), itemIndex: quantityActiveItem, x: ((event.clientX - rect.left) / rect.width) * 100, y: ((event.clientY - rect.top) / rect.height) * 100 });
+      quantityAddHistory(state, 'Installed mark added', `${item.description} marked on drawing`);
+      store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+    }
+    function quantityRemoveMarker(id, event) {
+      event?.stopPropagation(); if (!quantityCurrentUnit) return;
+      const store = quantityStore(); store.units = store.units || {};
+      const state = quantityUnitState(quantityCurrentUnit); const removed = state.markers.find(marker => String(marker.id) === String(id));
+      quantityRevisionCursor = null;
+      // A marker from another checklist item must not be removed when placing
+      // a nearby marker. Only the currently selected item can remove its mark.
+      if (removed && quantityActiveItem >= 0 && removed.itemIndex !== quantityActiveItem) {
+        quantityPlaceMarker(event);
+        return;
+      }
+      state.markers = state.markers.filter(marker => String(marker.id) !== String(id));
+      if (removed) quantityAddHistory(state, 'Installed mark removed', `${state.items[removed.itemIndex]?.description || 'Item'} mark removed from drawing`);
+      store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+    }
+    function quantityClearMarkers() {
+      if (!quantityCurrentUnit) return;
+      const store = quantityStore(); store.units = store.units || {};
+      const key = quantityUnitKey(quantityCurrentUnit); const state = quantityUnitState(quantityCurrentUnit);
+      if (!state.markers.length) { if (typeof toast === 'function') toast('No installed marks to clear'); return; }
+      if (!confirm(`Clear all installed marks for Unit ${quantityCurrentUnit.apt}? Takeoff quantities and drawings will remain.`)) return;
+      quantityRevisionCursor = null;
+      state.markers = []; quantityAddHistory(state, 'Installed marks cleared', 'All drawing marks were removed');
+      store.units[key] = state; quantitySave(store); quantityRenderUnit();
+      if (typeof toast === 'function') toast('All installed marks cleared');
+    }
+    function quantityRenderUnit() {
+      if (!quantityCurrentUnit) return;
+      const state = quantityUnitState(quantityCurrentUnit); const unitType = quantityUnitType(quantityCurrentUnit); const drawing = quantityEffectiveDrawing(quantityCurrentUnit, state);
+      const installedFor = index => state.markers.filter(marker => marker.itemIndex === index).length;
+      const rows = state.items.map((item, index) => {
+        const installed = installedFor(index); const remaining = Number(item.takeoff || 0) - installed;
+        const status = remaining === 0 ? 'PASS' : 'FAIL';
+        const itemNumber = String(index + 1);
+        return `<tr class="${quantityActiveItem === index ? 'active' : ''}"><td class="quantity-item-number">${itemNumber}</td><td>${officialFinalEscape(item.description || 'Item')}</td><td>${quantityIsAdmin() ? `<input type="number" min="0" value="${Number(item.takeoff || 0)}" onchange="quantitySetTakeoff(${index},this.value)">` : Number(item.takeoff || 0)}</td><td>${installed}</td><td>${remaining}</td><td><span class="insp-badge ${status === 'PASS' ? 'insp-badge-pass' : 'insp-badge-fail'}">${status}</span></td><td><button class="quantity-select-item ${quantityActiveItem === index ? 'active' : ''}" onclick="quantitySelectItem(${index})">${quantityActiveItem === index ? 'Selected' : 'Select'}</button></td></tr>`;
+      }).join('');
+      const markers = state.markers.map(marker => `<button class="quantity-marker" style="left:${marker.x}%;top:${marker.y}%;" title="Remove mark ${marker.itemIndex + 1}" onclick="quantityRemoveMarker('${marker.id}',event)">${marker.itemIndex + 1}</button>`).join('');
+      const drawingHtml = drawing?.dataUrl ? (drawing.type === 'application/pdf' ? `<canvas class="quantity-pdf-canvas" data-pdf="${officialFinalEscape(drawing.dataUrl)}" aria-label="Unit drawing"></canvas>` : `<img src="${drawing.dataUrl}" alt="Unit drawing">`) : `<div class="quantity-drawing-empty">No unit drawing uploaded yet.<br>Select an item, then use this drawing area when a plan is uploaded.</div>`;
+      const drawingHitArea = drawing?.dataUrl ? '<div class="quantity-drawing-hitarea" onpointerdown="quantityDrawingPointerDown(event)" onpointermove="quantityDrawingPointerMove(event)" onpointerup="quantityDrawingPointerUp()" onpointercancel="quantityDrawingPointerUp()" onclick="quantityDrawingClick(event)"></div>' : '';
+      document.getElementById('quantityUnitTitle').textContent = `Unit ${quantityCurrentUnit.apt} — Quantity Control`;
+      document.getElementById('quantityUnitSubtitle').textContent = `${quantityCurrentUnit.building} • ${quantityCurrentUnit.floor}${drawing?.name ? ` • ${drawing.name}` : ''}`;
+      const typeOptions = Object.keys(quantityStore().templates || {}).sort().map(type => `<option value="${officialFinalEscape(type)}"></option>`).join('');
+      const typeControl = quantityIsAdmin() ? `<label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#475569;">Type <input list="quantityUnitTypeOptions" value="${officialFinalEscape(unitType)}" placeholder="C1" onchange="quantitySetUnitType(this.value)" style="width:65px;padding:4px 5px;border:1px solid #CBD5E1;border-radius:5px;text-transform:uppercase;"><datalist id="quantityUnitTypeOptions">${typeOptions}</datalist></label>` : (unitType ? `<span style="font-size:11px;color:#475569;">Type ${officialFinalEscape(unitType)}</span>` : '');
+      const drawingSource = drawing?.source === 'template' ? `Template ${officialFinalEscape(unitType)} · v${drawing.version || 1}` : (drawing?.source === 'unit' ? 'Unit-specific / RFI drawing' : 'No drawing');
+      // The revision stamp is the single source of truth for the displayed date.
+      const drawingUpdateStamp = '';
+      const templateButton = quantityIsAdmin() && state.drawing?.dataUrl && quantityTemplateFor(quantityCurrentUnit) ? `<button class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityUseTemplate()">Use Type Template</button>` : '';
+      const undoRevisionButton = quantityIsAdmin() && state.revisions.some(revision => revision.isManual) ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityUndoLastRevision()">Undo</button>` : '';
+      const activeRevision = quantityRevisionCursor != null ? state.revisions[quantityRevisionCursor] : null;
+      const activeRevisionDate = activeRevision ? `${activeRevision.revisionNumber != null ? `Rev ${activeRevision.revisionNumber} · ` : ''}${new Date(activeRevision.savedAt).toLocaleString('en-US', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}` : 'Current working version';
+      const olderDisabled = !state.revisions.length || (quantityRevisionCursor != null && quantityRevisionCursor >= state.revisions.length - 1);
+      const newerDisabled = quantityRevisionCursor == null || quantityRevisionCursor <= 0;
+      const revisionNavLabel = activeRevision ? `Rev ${activeRevision.revisionNumber != null ? activeRevision.revisionNumber : ''}`.trim() : 'Current working version';
+      const revisionNav = `<div class="quantity-revision-nav" style="position:absolute;left:50%;bottom:8px;transform:translateX(-50%);display:flex;align-items:center;justify-content:center;gap:8px;padding:4px 7px;background:rgba(255,255,255,.94);border:1px solid #CBD5E1;border-radius:7px;z-index:5;"><button type="button" class="btn btn-secondary" aria-label="Older plan revision" title="Older plan revision" ${olderDisabled ? 'disabled' : ''} onclick="quantityNavigateRevision(-1)" style="font-size:18px;line-height:1;padding:2px 9px;">‹</button><strong style="min-width:54px;text-align:center;font-size:11px;">${officialFinalEscape(revisionNavLabel)}</strong><button type="button" class="btn btn-secondary" aria-label="Newer plan revision" title="Newer plan revision" ${newerDisabled ? 'disabled' : ''} onclick="quantityNavigateRevision(1)" style="font-size:18px;line-height:1;padding:2px 9px;">›</button></div>`;
+      const revisionStamp = `<div class="quantity-plan-revision-stamp" style="position:absolute;right:10px;top:10px;z-index:4;background:rgba(255,255,255,.92);border:1px solid #CBD5E1;border-radius:5px;padding:4px 7px;font-size:11px;color:#334155;pointer-events:none;">${officialFinalEscape(activeRevisionDate)}</div>`;
+      document.getElementById('quantityUnitContent').innerHTML = `<div class="quantity-checklist"><div class="quantity-card-header"><strong>Takeoff Checklist</strong><span>Click Select, then click the drawing</span></div><table><thead><tr><th>#</th><th>Description</th><th>Takeoff</th><th>Installed</th><th>Remaining</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div><div class="quantity-card-header" style="border:1px solid #E2E8F0;border-bottom:0;border-radius:8px 8px 0 0;"><strong>Unit Drawing</strong><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${typeControl}${templateButton}${quantityIsAdmin() ? `<label class="btn btn-secondary" style="font-size:11px;padding:5px 8px;cursor:pointer;">Upload Drawing / RFI<input type="file" accept="image/*,.pdf" onchange="quantityHandleUnitPlan(this)" style="display:none"></label>` : ''}<button type="button" class="insp-btn insp-btn-success" style="font-size:11px;padding:5px 8px;" onclick="quantitySaveRevision()">Save Revision</button>${undoRevisionButton}<button class="btn btn-danger" style="font-size:11px;padding:5px 8px;" onclick="quantityClearMarkers()">Clear All Marks</button>${quantityIsAdmin() ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityResetRevisionHistory()">Reset test history</button>` : ''}</span></div><div class="quantity-drawing-board">${drawingHtml}${drawingHitArea}${drawingUpdateStamp}${revisionStamp}${markers}${revisionNav}</div><div class="quantity-help"><strong>${drawingSource}</strong><br>${quantityActiveItem >= 0 ? `Active item: <strong>${String(quantityActiveItem + 1).padStart(2, '0')} — ${officialFinalEscape(state.items[quantityActiveItem]?.description || '')}</strong>. Click the corresponding symbol location to add an installed mark. Click a numbered green mark to remove it.` : 'Select an item to start marking its corresponding symbol on the drawing.'}</div></div>`;
+      const checklistHint = document.querySelector('#quantityUnitContent .quantity-checklist .quantity-card-header span');
+      if (checklistHint && quantityIsAdmin()) checklistHint.innerHTML = `Click Select, then click the drawing <button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityOpenUnitChecklist()">Edit unit checklist</button>`;
+      requestAnimationFrame(quantityApplyDrawingView);
+      if (drawing?.type === 'application/pdf') requestAnimationFrame(() => quantityRenderPdf(document.querySelector('#quantityUnitContent .quantity-pdf-canvas'), drawing.dataUrl));
+      quantityRefreshUnitListStatuses();
+    }
+    function renderQuantityControl() {
+      const select = document.getElementById('quantityFloorSelect'); const buildingSelect = document.getElementById('quantityBuildingSelect'); if (!select || !buildingSelect) return;
+      const allUnits = Array.isArray(data) ? data : [];
+      const buildings = [...new Set(allUnits.map(unit => String(unit.building || '')))].filter(Boolean);
+      const previousBuilding = buildingSelect.value; buildingSelect.innerHTML = buildings.map(building => `<option value="${officialFinalEscape(building)}">${officialFinalEscape(building)}</option>`).join('');
+      if (buildings.includes(previousBuilding)) buildingSelect.value = previousBuilding;
+      const floors = [...new Set(allUnits.filter(unit => !buildingSelect.value || String(unit.building) === buildingSelect.value).map(unit => String(unit.floor || '')))].filter(Boolean);
+      const previous = select.value; select.innerHTML = floors.map(floor => `<option value="${officialFinalEscape(floor)}">${officialFinalEscape(floor)}</option>`).join('');
+      if (floors.includes(previous)) select.value = previous;
+      const units = quantityVisibleUnits(); const store = quantityStore(); const plan = store.floorPlan;
+      const planKey = quantityPlanKey();
+      // Migrate the original single-plan value once, using the initial project
+      // combination. After that, never show a plan on a different Building/Floor.
+      if (plan && (!store.sitePlans || Object.keys(store.sitePlans).length === 0) && planKey === 'Building 1::Floor 1') {
+        store.sitePlans = { [planKey]: plan };
+        quantitySave(store);
+      }
+      const selectedPlan = store.sitePlans?.[planKey] || null;
+      const unmappedPlanUnits = selectedPlan?.type === 'application/pdf' ? quantityPlanUnmappedUnits(planKey, units) : [];
+      const floorPlanInput = document.getElementById('quantityFloorPlanInput');
+      const floorPlanUpload = floorPlanInput?.closest('label');
+      const clearPlanButton = document.querySelector('#quantityTab .quantity-actions button[onclick*="quantityClearFloorPlan"]');
+      const isAdmin = quantityIsAdmin();
+      if (floorPlanInput) floorPlanInput.disabled = !isAdmin;
+      if (floorPlanUpload) floorPlanUpload.classList.toggle('admin-only-disabled', !isAdmin);
+      if (clearPlanButton) { clearPlanButton.disabled = !isAdmin; clearPlanButton.title = isAdmin ? 'Clear this floor plan' : 'Only administrators can clear floor plans'; }
+      const board = document.getElementById('quantityFloorPlanBoard');
+      document.getElementById('quantityFloorPlanName').textContent = selectedPlan?.name || 'No plan uploaded for this Building / Floor';
+      document.getElementById('quantityUnitCount').textContent = `${units.length} unit${units.length === 1 ? '' : 's'}`;
+      document.getElementById('quantityAdminHint').textContent = quantityIsAdmin() ? 'Admin mode: you can upload plans and edit takeoff quantities.' : 'Viewer mode: read-only plan and checklist.';
+      const hasContourMap = selectedPlan?.type === 'application/pdf' && Object.keys(quantityContourShapes(planKey)).length > 0;
+      const planImage = selectedPlan?.dataUrl ? (selectedPlan.type === 'application/pdf' ? `<div class="quantity-plan-media"><canvas class="quantity-pdf-canvas" data-pdf="${officialFinalEscape(selectedPlan.dataUrl)}" aria-label="Floor plan"></canvas>${hasContourMap ? quantityPlanContourSvg(planKey, units) : ''}</div>` : `<img src="${selectedPlan.dataUrl}" alt="Floor plan">`) : `<div class="quantity-plan-empty"><div><strong>No site plan uploaded for ${officialFinalEscape(buildingSelect.value || 'this building')} / ${officialFinalEscape(select.value || 'this floor')}</strong><br>Upload the site plan for this Building/Floor combination to begin.</div></div>`;
+      const pins = hasContourMap ? '' : units.map((unit, index) => { const col = index % 5; const row = Math.floor(index / 5); return `<button class="quantity-unit-pin ${String(unit.floor).toLowerCase().includes('underground') ? 'special' : ''}" style="left:${12 + col * 19}%;top:${14 + (row % 5) * 17}%;" onclick="quantityOpenUnit(${index})">${officialFinalEscape(unit.apt)}</button>`; }).join('');
+      board.innerHTML = `${planImage}${pins}`;
+      if (selectedPlan?.type === 'application/pdf') requestAnimationFrame(() => quantityRenderPdf(board.querySelector('.quantity-pdf-canvas'), selectedPlan.dataUrl));
+      const planNotice = document.getElementById('quantityPlanNotice');
+      if (planNotice) planNotice.innerHTML = unmappedPlanUnits.length ? `<span style="color:#92400E;">⚠️ Not shown on this uploaded sheet: ${unmappedPlanUnits.map(apt => `<strong>${officialFinalEscape(apt)}</strong>`).join(', ')}. Open these units from the list below or upload the sheet that contains their contours.</span>` : '';
+      document.getElementById('quantityUnitList').innerHTML = units.length ? units.map((unit, index) => `<button onclick="quantityOpenUnit(${index})"><strong>Unit ${officialFinalEscape(unit.apt)}</strong><br><small>${officialFinalEscape(unit.building)} • ${officialFinalEscape(unit.floor)}</small></button>`).join('') : '<div style="padding:12px;color:#64748B;font-size:12px;">No units match this floor or search.</div>';
+      document.querySelectorAll('#quantityUnitList > button').forEach((button, index) => {
+        const status = quantityUnitStatus(units[index]);
+        button.classList.add(`quantity-unit-${status}`);
+        const result = document.createElement('span');
+        result.className = 'quantity-unit-result';
+        result.textContent = status === 'pass' ? 'PASS' : 'FAIL';
+        button.appendChild(result);
+      });
+    }
+
     function switchMainTab(tab, btn) {
       document.getElementById('dashboardTab').style.display = tab === 'dashboard' ? 'block' : 'none';
       document.getElementById('punchTab').style.display = tab === 'punch' ? 'block' : 'none';
       document.getElementById('reportTab').style.display = tab === 'report' ? 'block' : 'none';
       document.getElementById('inspectionsTab').style.display = tab === 'inspections' ? 'block' : 'none';
+      document.getElementById('quantityTab').style.display = tab === 'quantity' ? 'block' : 'none';
 
       if (tab === 'punch') {
         renderPunchlist();
         updateMetrics();
         updateCharts();
-      }
-
-      if (tab === 'inspections') {
+      } else if (tab === 'inspections') {
         const panel = document.getElementById('inspectionsTab');
         if (panel) {
           panel.style.display = 'block';
@@ -2501,6 +3854,21 @@ Object.assign(APP_TRANSLATIONS.en, {
         }
         if (typeof inspShowTab === 'function') inspShowTab('new');
         if (typeof inspGoStep === 'function') inspGoStep(1);
+      } else if (tab === 'quantity') {
+        renderQuantityControl();
+        const appContent = document.getElementById('appContent');
+        const quantityTab = document.getElementById('quantityTab');
+        const mainTabNav = document.getElementById('mainTabNav');
+        if (appContent && quantityTab && mainTabNav && quantityTab.parentElement !== appContent) {
+          appContent.insertBefore(quantityTab, mainTabNav.nextElementSibling);
+        }
+        if (appContent && mainTabNav) {
+          requestAnimationFrame(() => appContent.scrollTo({
+            top: Math.max(0, mainTabNav.offsetTop - 8),
+            left: 0,
+            behavior: 'auto'
+          }));
+        }
       }
 
       document.querySelectorAll('.tab-main').forEach(button => {
@@ -2537,7 +3905,13 @@ Object.assign(APP_TRANSLATIONS.en, {
     // Note: Clubhouse and Parking are standalone buildings (not sub-units of Building 2)
     const FLOORS = ['Floor 1', 'Floor 2', 'Floor 3', 'Underground'];
     function normalizeFloorName(floor) { return floor === 'Ground' ? 'Underground' : floor; }
-    const STATUSES = ['Completed', 'In Progress', 'At Risk', 'Behind'];
+    // Dashboard status groups are intentionally broader than the internal
+    // system statuses used by inspection workflows.
+    const STATUSES = ['Completed', 'In Progress', 'Not Started'];
+    function dashboardStatus(system) {
+      const progress = Math.max(0, Math.min(100, Number(system?.progress) || 0));
+      return progress >= 100 ? 'Completed' : progress > 0 ? 'In Progress' : 'Not Started';
+    }
 
     let data = [];
     let punchlist = [];
@@ -3840,7 +5214,7 @@ Object.assign(APP_TRANSLATIONS.en, {
 
     async function promptSetupPassword() {
       if (window.authIsActive && window.authIsActive()) {
-        if (window.userRole === 'admin') openProjectSetup(); else alert('Admins only.');
+        if (window.userRole === 'admin' || window.userRole === 'pm') openProjectSetup(); else alert('Admins or PMs only.');
         return;
       }
       const password = await askPassword('Enter admin password to access Project Setup');
@@ -3904,6 +5278,7 @@ async function openProjectSetup() {
 showAppModal('projectSetupModal');
       // Render inspection types per building config
       setTimeout(() => renderInspBuildingConfig(), 100);
+      setTimeout(() => { renderSetupDrawingModels(); renderSetupFloorPlans(); }, 120);
 
       // Pre-fill connection fields from current config
       document.getElementById('setupSupabaseUrl').value = SUPABASE_URL;
@@ -3923,6 +5298,8 @@ showAppModal('projectSetupModal');
           addSetupBuilding({ name: 'Parking', type: 'special' });
         }
         renderInspBuildingConfig();
+        renderSetupDrawingModels();
+        renderSetupFloorPlans();
         document.getElementById('setupProjectName').value = getProjectName();
         document.getElementById('setupProjectAddress').value = getProjectAddress();
         return;
@@ -4006,6 +5383,8 @@ showAppModal('projectSetupModal');
           addSetupBuilding({ name: 'Building 1', floors: 3, unitsPerFloor: 12, prefix: '1', type: 'residential' });
         }
         renderInspBuildingConfig();
+        renderSetupDrawingModels();
+        renderSetupFloorPlans();
 
       } catch (err) {
         console.error('openProjectSetup error:', err);
@@ -4615,7 +5994,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
           // Debe tener al menos un sistema con un estado filtrado
           const hasMatchingStatus = Object.entries(u.systems).some(([sysName, sys]) => {
-            return filters.systems.has(sysName) && filters.statuses.has(sys.status);
+            return filters.systems.has(sysName) && filters.statuses.has(dashboardStatus(sys));
           });
           if (!hasMatchingStatus) return false;
 
@@ -4754,7 +6133,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       if (!filters.floors.has(unit.floor)) return false;
 
       // Status filter - unit must have at least one system with selected status
-      const unitStatuses = Object.values(unit.systems).map(s => s.status);
+      const unitStatuses = Object.values(unit.systems).map(dashboardStatus);
       const hasMatchingStatus = unitStatuses.some(status => filters.statuses.has(status));
       if (!hasMatchingStatus) return false;
 
@@ -4913,6 +6292,114 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     let currentDetailsUnit = null;
     let currentEventUnit = null;
 
+    function officialFinalKey(unit) {
+      return [unit?.apt, unit?.building, unit?.floor].map(v => String(v || '').trim()).join('::');
+    }
+    function getOfficialFinalStore() {
+      try { return JSON.parse(localStorage.getItem('official_final_inspections') || '{}') || {}; }
+      catch (_) { return {}; }
+    }
+    function saveOfficialFinalStore(store) {
+      localStorage.setItem('official_final_inspections', JSON.stringify(store));
+    }
+    function officialFinalEntry(unit) {
+      const store = getOfficialFinalStore();
+      return store[officialFinalKey(unit)] || { draft: null, current: null, history: [] };
+    }
+    function officialFinalEscape(value) {
+      return String(value == null ? '' : value).replace(/[&<>"']/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[char]));
+    }
+    window.esc = window.esc || officialFinalEscape;
+    function officialFinalFormData() {
+      const photosInput = document.getElementById('officialFinalPhotos');
+      const reportInput = document.getElementById('officialFinalReport');
+      return {
+        inspector: document.getElementById('officialFinalInspector')?.value.trim() || '',
+        company: document.getElementById('officialFinalCompany')?.value.trim() || '',
+        date: document.getElementById('officialFinalDate')?.value || '',
+        result: document.getElementById('officialFinalResult')?.value || 'Not Scheduled',
+        comments: document.getElementById('officialFinalComments')?.value.trim() || '',
+        certificate: document.getElementById('officialFinalCertificate')?.value.trim() || '',
+        photoNames: Array.from(photosInput?.files || []).map(f => f.name),
+        reportName: reportInput?.files?.[0]?.name || ''
+      };
+    }
+    function renderOfficialFinalTab() {
+      const unit = currentDetailsUnit;
+      if (!unit) return;
+      const entry = officialFinalEntry(unit);
+      const value = entry.draft || entry.current || {};
+      const latest = entry.current;
+      const history = Array.isArray(entry.history) ? entry.history : [];
+      const statusColor = latest?.result === 'Passed' ? '#15803D' : latest?.result === 'Failed' ? '#B91C1C' : '#64748B';
+      const historyHtml = history.length ? history.slice().reverse().map(item => `<div style="padding:10px 0;border-bottom:1px solid #E5E7EB;"><strong>${item.result}</strong> · ${item.date || 'No date'} · ${item.inspector || 'No inspector'}<br><small>${item.submittedAt ? new Date(item.submittedAt).toLocaleString('en-US') : ''}${item.comments ? ` · ${esc(item.comments)}` : ''}</small></div>`).join('') : '<div style="color:#64748B;padding:10px 0;">No official final inspection history.</div>';
+      document.getElementById('detailsContent').innerHTML = `
+        <div class="insp-card">
+          <div class="insp-card-header"><h3>Official Final Inspection</h3><span style="color:${statusColor};font-weight:700;">${latest?.result || 'Not Scheduled'}</span></div>
+          ${latest ? `<div style="padding:0 16px 12px;color:#475569;font-size:13px;">Submitted by ${esc(latest.inspector || '—')} · ${latest.company ? esc(latest.company) + ' · ' : ''}${latest.date || 'No date'}</div>` : ''}
+          <form onsubmit="saveOfficialFinalDraft(event)" style="padding:16px;display:grid;gap:12px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+              <label>Official inspector<input id="officialFinalInspector" class="form-input" value="${officialFinalEscape(value.inspector || '')}" required></label>
+              <label>Company / agency<input id="officialFinalCompany" class="form-input" value="${officialFinalEscape(value.company || '')}"></label>
+              <label>Inspection date<input id="officialFinalDate" class="form-input" type="date" value="${officialFinalEscape(value.date || '')}" required></label>
+              <label>Result<select id="officialFinalResult" class="form-select"><option>Not Scheduled</option><option ${value.result === 'Passed' ? 'selected' : ''}>Passed</option><option ${value.result === 'Failed' ? 'selected' : ''}>Failed</option></select></label>
+              <label>Certificate / reference number<input id="officialFinalCertificate" class="form-input" value="${officialFinalEscape(value.certificate || '')}"></label>
+            </div>
+            <label>Comments / deficiencies<textarea id="officialFinalComments" class="form-input" rows="3">${officialFinalEscape(value.comments || '')}</textarea></label>
+            <label>Photos<input id="officialFinalPhotos" class="form-input" type="file" accept="image/*" multiple></label>
+            <label>Official report<input id="officialFinalReport" class="form-input" type="file" accept=".pdf,.doc,.docx,image/*"></label>
+            <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;"><button type="button" class="btn btn-secondary" onclick="switchDetailsTab('official_final')">Cancel</button><button type="submit" class="btn btn-secondary">Save Draft</button><button type="button" class="btn btn-primary" onclick="submitOfficialFinal()">Submit</button></div>
+          </form>
+          <div style="padding:0 16px 16px;"><h4 style="margin:8px 0;">Official Final History</h4>${historyHtml}</div>
+        </div>`;
+    }
+    function saveOfficialFinalDraft(event) {
+      event?.preventDefault();
+      if (!currentDetailsUnit) return;
+      const store = getOfficialFinalStore();
+      const key = officialFinalKey(currentDetailsUnit);
+      const entry = store[key] || { draft: null, current: null, history: [] };
+      entry.draft = { ...officialFinalFormData(), savedAt: new Date().toISOString() };
+      store[key] = entry;
+      saveOfficialFinalStore(store);
+      renderOfficialFinalTab();
+      if (typeof toast === 'function') toast('Official final inspection draft saved');
+    }
+    async function submitOfficialFinal() {
+      if (!currentDetailsUnit) return;
+      const form = officialFinalFormData();
+      if (!form.inspector || !form.date || !['Passed', 'Failed'].includes(form.result)) {
+        if (typeof toast === 'function') toast('Select an inspector, date, and Passed or Failed result');
+        return;
+      }
+      const store = getOfficialFinalStore();
+      const key = officialFinalKey(currentDetailsUnit);
+      const entry = store[key] || { draft: null, current: null, history: [] };
+      const record = { ...form, id: `official-${Date.now()}`, submittedAt: new Date().toISOString(), unit: currentDetailsUnit.apt, building: currentDetailsUnit.building, floor: currentDetailsUnit.floor };
+      entry.current = record;
+      entry.history = [...(entry.history || []), record];
+      entry.draft = null;
+      store[key] = entry;
+      saveOfficialFinalStore(store);
+      if (form.result === 'Failed') {
+        const existing = (punchlist || []).find(p => p.source === 'official_final' && p.location === currentDetailsUnit.apt && p.status !== 'Closed');
+        if (!existing) {
+          punchlist.push({ id: Date.now(), building: currentDetailsUnit.building, location: currentDetailsUnit.apt, description: `Official Final Inspection Failed${form.comments ? ` — ${form.comments}` : ''}`, priority: 'High', assignee: form.inspector, photoCount: 0, photos: [], status: 'Open', createdAt: new Date().toISOString(), reviewedAt: null, closedAt: null, source: 'official_final', officialFinalId: record.id });
+          if (typeof savePunchlist === 'function') await savePunchlist();
+        }
+      } else {
+        (punchlist || []).filter(p => p.source === 'official_final' && p.location === currentDetailsUnit.apt && p.status !== 'Closed').forEach(p => { p.status = 'Closed'; p.closedAt = new Date().toISOString(); });
+        if (typeof savePunchlist === 'function') await savePunchlist();
+      }
+      renderOfficialFinalTab();
+      if (typeof renderPunchlist === 'function') renderPunchlist();
+      if (typeof updateMetrics === 'function') updateMetrics();
+      if (typeof updateCharts === 'function') updateCharts();
+      if (typeof toast === 'function') toast(`Official final inspection ${form.result.toLowerCase()} and saved`);
+    }
+
     function openDetailsModal(apt, building, floor, evt) {
       evt.stopPropagation();
       const unit = data.find(u => u.apt === apt && u.building === building && u.floor === floor);
@@ -5002,8 +6489,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         html += '</div><div id="eventContent">';
         html += generateEventsForSystem(unit, firstSys);
         html += '</div>';
-      }
-      if (tab === 'inspections') {
+      } else if (tab === 'official_final') {
+        renderOfficialFinalTab();
+        document.querySelectorAll('.tab-button').forEach((btn, idx) => btn.classList.toggle('active', idx === 4));
+        return;
+      } else if (tab === 'inspections') {
         const records = inspGetInspections().filter(r => r.apt === currentDetailsUnit.apt);
         const latest = new Map(); records.forEach(r => latest.set(r.typeId, r));
         const rows = INSP_INSPECTION_TYPES.map(type => {
@@ -5303,7 +6793,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
     let pendingEventPhotos = [];
     function eventPhotoSelected(input) {
-      Array.from(input.files || []).forEach(f => pendingEventPhotos.push(f));
+      validatePhotoFiles(input.files).forEach(f => pendingEventPhotos.push(f));
       input.value = '';
       renderPendingPhotos();
     }
@@ -5337,7 +6827,15 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
     // ===== PHOTO COMPRESSION UTILITY =====
     // Compresses images to medium quality before storage to reduce database bloat
-    async function compressImage(file, quality = 0.6) {
+    function photoStampText(userName, date = new Date()) {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+      }).formatToParts(date).reduce((out, part) => { out[part.type] = part.value; return out; }, {});
+      return `${parts.month}/${parts.day}/${parts.year} ${parts.hour}:${parts.minute}:${parts.second} ${parts.dayPeriod} ET · ${String(userName || 'Current User').trim() || 'Current User'}`;
+    }
+
+    async function compressImage(file, quality = 0.6, stampText = '') {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -5350,6 +6848,19 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             canvas.width = Math.round(img.width * scale);
             canvas.height = Math.round(img.height * scale);
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            if (stampText) {
+              const fontSize = Math.max(14, Math.round(canvas.width / 70));
+              const padding = Math.max(8, Math.round(fontSize * 0.55));
+              ctx.font = `600 ${fontSize}px Arial, sans-serif`;
+              const textWidth = ctx.measureText(stampText).width;
+              const boxWidth = Math.min(canvas.width - 8, textWidth + padding * 2);
+              const boxHeight = fontSize + padding * 2;
+              ctx.fillStyle = 'rgba(0,0,0,.72)';
+              ctx.fillRect(4, canvas.height - boxHeight - 4, boxWidth, boxHeight);
+              ctx.fillStyle = '#fff';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(stampText, 4 + padding, canvas.height - boxHeight / 2 - 4);
+            }
             const compressed = canvas.toDataURL('image/jpeg', quality);
             resolve(compressed);
           };
@@ -5364,6 +6875,42 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     // Read and compress photos as base64
     // ===== Photo storage (Supabase Storage bucket; falls back to embedded image if unavailable) =====
     const STORAGE_BUCKET = 'identus-files';
+    const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
+    const ALLOWED_PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+    function validatePhotoFiles(files) {
+      const accepted = [];
+      const rejected = [];
+      Array.from(files || []).forEach(file => {
+        const type = String(file.type || '').toLowerCase();
+        if (!ALLOWED_PHOTO_TYPES.has(type)) rejected.push(`${file.name}: unsupported image type`);
+        else if (Number(file.size || 0) > MAX_PHOTO_BYTES) rejected.push(`${file.name}: exceeds 12 MB`);
+        else accepted.push(file);
+      });
+      if (rejected.length && typeof toast === 'function') toast(`Photo rejected: ${rejected[0]}`);
+      return accepted;
+    }
+    async function allowRemoteAction(action, limit = 60) {
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:' || !sbClient) return true;
+      try {
+        const { data, error } = await sbClient.functions.invoke('rate-limit-check', {
+          body: { action, limit, windowSeconds: 60 }
+        });
+        if (error) {
+          console.warn('Rate-limit Edge Function unavailable:', error.message);
+          toast('Security check unavailable. Please try again.');
+          return false;
+        }
+        if (data?.allowed !== true) {
+          if (typeof toast === 'function') toast('Too many requests. Please wait a minute and try again.');
+          return false;
+        }
+        return true;
+      } catch (error) {
+        console.warn('Rate-limit Edge Function failed:', error.message);
+        if (typeof toast === 'function') toast('Security check unavailable. Please try again.');
+        return false;
+      }
+    }
     let storageOk = true;
     async function uploadToStorage(dataUrl, path, contentType) {
       if (!storageOk || !sbClient || window.location.protocol === 'file:' || LOCAL_PROJECT_MODE) return dataUrl;
@@ -5374,8 +6921,9 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         return sbClient.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
       } catch (e) { console.warn('Storage error', e); storageOk = false; return dataUrl; }
     }
-    async function readAndCompressPhotos(files, quality = 0.6) {
-      const base64s = await Promise.all(files.map(f => compressImage(f, quality)));
+    async function readAndCompressPhotos(files, quality = 0.6, userName = '') {
+      const photoStamp = photoStampText(userName);
+      const base64s = await Promise.all(files.map(f => compressImage(f, quality, photoStamp)));
       const stamp = Date.now();
       return Promise.all(base64s.map((b, i) => uploadToStorage(b, `photos/${PROJECT_ID}/${stamp}_${i}_${Math.random().toString(36).slice(2, 7)}.jpg`, 'image/jpeg')));
     }
@@ -5421,6 +6969,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     async function saveEvent(event) {
       event.preventDefault();
       if (!currentEventUnit) return;
+      if (!await allowRemoteAction('event_write', 60)) return;
 
       const system = document.getElementById('eventSystem').value;
       const progress = parseInt(document.getElementById('eventProgress').value);
@@ -5432,7 +6981,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
 
       // Read and compress photos to medium quality (0.6) before storage
-      const photoBase64 = photoFiles.length > 0 ? await readAndCompressPhotos(photoFiles, 0.6) : [];
+      const photoBase64 = photoFiles.length > 0 ? await readAndCompressPhotos(photoFiles, 0.6, userBy) : [];
 
       // Find and update the unit in memory
       const unit = data.find(u => u.apt === currentEventUnit.apt && u.building === currentEventUnit.building && u.floor === currentEventUnit.floor);
@@ -5793,7 +7342,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
     let pendingQuickPhotos = [];
     function quickPhotoSelected(input) {
-      Array.from(input.files || []).forEach(f => pendingQuickPhotos.push(f));
+      validatePhotoFiles(input.files).forEach(f => pendingQuickPhotos.push(f));
       input.value = '';
       renderQuickPhotos();
     }
@@ -5821,6 +7370,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
     async function saveQuickUnit(event) {
       event.preventDefault();
+      if (!await allowRemoteAction('quick_add_write', 60)) return;
       const apt = document.getElementById('quickUnit').value;
       const floor = document.getElementById('quickFloor').value;
       const system = document.getElementById('quickSystem').value;
@@ -5834,7 +7384,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       if (_qu && !_qu.systems[system]) { alert(system + ' is not applicable to this unit.'); return; }
       const qFiles = pendingQuickPhotos.slice();
       const qBy = await ensureUserName();
-      const qImages = qFiles.length > 0 ? await readAndCompressPhotos(qFiles, 0.6) : [];
+      const qImages = qFiles.length > 0 ? await readAndCompressPhotos(qFiles, 0.6, qBy) : [];
       const qEvent = { timestamp: new Date().toISOString(), notes: `Quick add - ${progress}% complete`, photos: qFiles.length, images: qImages, by: qBy, progress: progress, status: progress === 100 ? 'Completed' : progress >= 21 ? 'In Progress' : progress >= 1 ? 'At Risk' : 'Behind' };
 
       // Check if unit already exists (match by apt only if building is empty, or by both)
@@ -5904,14 +7454,14 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       if (typeof syncInspectionFailuresToPunchlist === 'function') syncInspectionFailuresToPunchlist();
       const filtered = data.filter(shouldShowUnit);
       const total = filtered.length;
-      const completed = filtered.filter(u => Object.values(u.systems).every(s => s.status === 'Completed')).length;
-      const behind = filtered.filter(u => Object.values(u.systems).some(s => s.status === 'Behind')).length;
-      const inProgress = total - completed - behind;
+      const completed = filtered.filter(u => Object.values(u.systems).length > 0 && Object.values(u.systems).every(s => dashboardStatus(s) === 'Completed')).length;
+      const notStarted = filtered.filter(u => Object.values(u.systems).length > 0 && Object.values(u.systems).every(s => dashboardStatus(s) === 'Not Started')).length;
+      const inProgress = total - completed - notStarted;
 
       document.getElementById('totalUnits').textContent = total;
       document.getElementById('completedUnits').textContent = completed;
       document.getElementById('inProgressUnits').textContent = inProgress;
-      document.getElementById('behindUnits').textContent = behind;
+      document.getElementById('behindUnits').textContent = notStarted;
 
       // Update punch list metrics
       const visiblePunchlist = getPunchlistForCurrentStatusFilter();
@@ -5947,19 +7497,20 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       let filtered = data.filter(shouldShowUnit);
       console.log('updateCharts: filtered units =', filtered.length, 'total units =', data.length);
 
-      const statusCounts = { Completed: 0, 'In Progress': 0, 'At Risk': 0, Behind: 0 };
-      const statusPriority = { 'Behind': 0, 'At Risk': 1, 'In Progress': 2, 'Completed': 3 };
+      const statusCounts = { Completed: 0, 'In Progress': 0, 'Not Started': 0 };
       filtered.forEach(unit => {
-        // Determine unit status = worst system status
-        let worstStatus = 'Completed';
-        Object.entries(unit.systems).forEach(([sysName, sys]) => {
-          if (filters.systems.has(sysName)) {
-            if (statusPriority[sys.status] < statusPriority[worstStatus]) {
-              worstStatus = sys.status;
-            }
-          }
-        });
-        statusCounts[worstStatus]++;
+        // Status Distribution is based on the selected systems' actual progress.
+        // 100% = Completed, 1–99% = In Progress, 0% = Not Started.
+        const selectedProgress = Array.from(filters.systems)
+          .map(sysName => unit.systems[sysName])
+          .filter(Boolean)
+          .map(sys => Math.max(0, Math.min(100, Number(sys.progress) || 0)));
+        const unitProgress = selectedProgress.length
+          ? selectedProgress.reduce((sum, progress) => sum + progress, 0) / selectedProgress.length
+          : 0;
+        if (unitProgress >= 100) statusCounts.Completed++;
+        else if (unitProgress > 0) statusCounts['In Progress']++;
+        else statusCounts['Not Started']++;
       });
       console.log('statusCounts =', statusCounts);
 
@@ -5971,10 +7522,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       charts.status = new Chart(statusCtx, {
         type: 'doughnut',
         data: {
-          labels: ['Completed (100%)', 'In Progress (21–99%)', 'At Risk (1–20%)', 'Behind (0%)'],
+          labels: ['Completed (100%)', 'In Progress (1–99%)', 'Not Started (0%)'],
           datasets: [{
             data: statusValues,
-            backgroundColor: ['#2E7D32', '#1565C0', '#F57C00', '#C62828'],
+            backgroundColor: ['#2E7D32', '#1565C0', '#C62828'],
             borderColor: '#FFFFFF',
             borderWidth: 3,
             borderRadius: 0,
@@ -6252,10 +7803,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       // Building Status Chart
       const buildingStatus = {};
       filtered.forEach(unit => {
-        if (!buildingStatus[unit.building]) buildingStatus[unit.building] = { Completed: 0, 'In Progress': 0, 'At Risk': 0, Behind: 0 };
+        if (!buildingStatus[unit.building]) buildingStatus[unit.building] = { Completed: 0, 'In Progress': 0, 'Not Started': 0 };
         Object.entries(unit.systems).forEach(([sysName, sys]) => {
           if (filters.systems.has(sysName)) {
-            buildingStatus[unit.building][sys.status]++;
+            buildingStatus[unit.building][dashboardStatus(sys)]++;
           }
         });
       });
@@ -6266,9 +7817,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const buildingLabels = Object.keys(buildingStatus).sort();
       const buildingDatasets = [
         { label: 'Completed (100%)', data: buildingLabels.map(b => buildingStatus[b].Completed), backgroundColor: '#2E7D32' },
-        { label: 'In Progress (21–99%)', data: buildingLabels.map(b => buildingStatus[b]['In Progress']), backgroundColor: '#1565C0' },
-        { label: 'At Risk (1–20%)', data: buildingLabels.map(b => buildingStatus[b]['At Risk']), backgroundColor: '#F57C00' },
-        { label: 'Behind (0%)', data: buildingLabels.map(b => buildingStatus[b].Behind), backgroundColor: '#C62828' }
+        { label: 'In Progress (1–99%)', data: buildingLabels.map(b => buildingStatus[b]['In Progress']), backgroundColor: '#1565C0' },
+        { label: 'Not Started (0%)', data: buildingLabels.map(b => buildingStatus[b]['Not Started']), backgroundColor: '#C62828' }
       ];
 
       charts.building = new Chart(buildingCtx, {
@@ -6289,10 +7839,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       // Floor Status Chart
       const floorStatus = {};
       filtered.forEach(unit => {
-        if (!floorStatus[unit.floor]) floorStatus[unit.floor] = { Completed: 0, 'In Progress': 0, 'At Risk': 0, Behind: 0 };
+        if (!floorStatus[unit.floor]) floorStatus[unit.floor] = { Completed: 0, 'In Progress': 0, 'Not Started': 0 };
         Object.entries(unit.systems).forEach(([sysName, sys]) => {
           if (filters.systems.has(sysName)) {
-            floorStatus[unit.floor][sys.status]++;
+            floorStatus[unit.floor][dashboardStatus(sys)]++;
           }
         });
       });
@@ -6303,9 +7853,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const floorLabels = Object.keys(floorStatus).sort();
       const floorDatasets = [
         { label: 'Completed (100%)', data: floorLabels.map(f => floorStatus[f].Completed), backgroundColor: '#2E7D32' },
-        { label: 'In Progress (21–99%)', data: floorLabels.map(f => floorStatus[f]['In Progress']), backgroundColor: '#1565C0' },
-        { label: 'At Risk (1–20%)', data: floorLabels.map(f => floorStatus[f]['At Risk']), backgroundColor: '#F57C00' },
-        { label: 'Behind (0%)', data: floorLabels.map(f => floorStatus[f].Behind), backgroundColor: '#C62828' }
+        { label: 'In Progress (1–99%)', data: floorLabels.map(f => floorStatus[f]['In Progress']), backgroundColor: '#1565C0' },
+        { label: 'Not Started (0%)', data: floorLabels.map(f => floorStatus[f]['Not Started']), backgroundColor: '#C62828' }
       ];
 
       charts.floor = new Chart(floorCtx, {
@@ -6524,6 +8073,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     // ===== Daily automatic backup (goes to the Storage bucket; embedded photos are left out to keep it small) =====
     async function autoBackupDaily() {
       try {
+        if (window.authIsActive && window.authIsActive() && window.userRole !== 'admin') return;
         const today = new Date().toISOString().split('T')[0];
         if (localStorage.getItem('cfg_last_auto_backup') === today) return;
         if (!sbClient || !data || data.length === 0) return;
@@ -6591,6 +8141,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     }
 
     function backupData() {
+      if (window.authIsActive && window.authIsActive() && window.userRole !== 'admin') { alert('Only administrators can create backups.'); return; }
       const inspectionDrafts = {};
       Object.keys(localStorage).filter(key => key.startsWith('inspection_draft_')).forEach(key => {
         inspectionDrafts[key] = localStorage.getItem(key);
@@ -6604,6 +8155,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         localProjectData: JSON.parse(localStorage.getItem('local_project_data') || 'null'),
         inspectionData: JSON.parse(localStorage.getItem('inspections_data') || '[]'),
         inspectionConfig: JSON.parse(localStorage.getItem('insp_building_config') || 'null'),
+        officialFinalInspections: JSON.parse(localStorage.getItem('official_final_inspections') || '{}'),
+        quantityControl: JSON.parse(localStorage.getItem('quantity_control_v1') || '{}'),
         inspectionDrafts,
         deletedPunchIds: JSON.parse(localStorage.getItem('local_deleted_punch_ids') || '[]'),
         auditLog: JSON.parse(localStorage.getItem('local_audit_log') || '[]')
@@ -6618,6 +8171,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     }
 
     async function restoreData(input) {
+      if (window.authIsActive && window.authIsActive() && window.userRole !== 'admin') { alert('Only administrators can restore backups.'); if (input) input.value = ''; return; }
       if (!input.files.length) return;
       const file = input.files[0];
       const reader = new FileReader();
@@ -6636,6 +8190,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           if (backup.localProjectData) localStorage.setItem('local_project_data', JSON.stringify(backup.localProjectData));
           if (Array.isArray(backup.inspectionData)) localStorage.setItem('inspections_data', JSON.stringify(backup.inspectionData));
           if (backup.inspectionConfig) localStorage.setItem('insp_building_config', JSON.stringify(backup.inspectionConfig));
+          if (backup.officialFinalInspections && typeof backup.officialFinalInspections === 'object') localStorage.setItem('official_final_inspections', JSON.stringify(backup.officialFinalInspections));
+          if (backup.quantityControl && typeof backup.quantityControl === 'object') localStorage.setItem('quantity_control_v1', JSON.stringify(backup.quantityControl));
           if (backup.inspectionDrafts && typeof backup.inspectionDrafts === 'object') Object.entries(backup.inspectionDrafts).forEach(([key, value]) => localStorage.setItem(key, value));
           if (Array.isArray(backup.deletedPunchIds)) localStorage.setItem('local_deleted_punch_ids', JSON.stringify(backup.deletedPunchIds));
           if (Array.isArray(backup.auditLog)) localStorage.setItem('local_audit_log', JSON.stringify(backup.auditLog));
@@ -6707,7 +8263,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
     let pendingEvidencePhotos = [];
     function evidencePhotoSelected(input) {
-      Array.from(input.files || []).forEach(f => pendingEvidencePhotos.push(f));
+      validatePhotoFiles(input.files).forEach(f => pendingEvidencePhotos.push(f));
       input.value = '';
       renderEvidencePhotos();
     }
@@ -6735,6 +8291,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
     async function saveCreateEvent(event) {
       event.preventDefault();
+      if (!await allowRemoteAction('punch_write', 60)) return;
 
       const files = pendingEvidencePhotos.slice();
 
@@ -6742,7 +8299,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const editIdx = isEditing ? window.editingEventIndex : -1;
 
       // Read and compress photos to medium quality (0.6) before storage
-      const newPhotos = files.length > 0 ? await readAndCompressPhotos(files, 0.6) : [];
+      const eventPhotoBy = await ensureUserName();
+      const newPhotos = files.length > 0 ? await readAndCompressPhotos(files, 0.6, eventPhotoBy) : [];
 
       let punchItem = null;
       { const _v = document.getElementById('eventLocation').value.trim().replace(/^unit\s*/i, ''); const _u = data.find(x => String(x.apt) === _v); if (_u) { document.getElementById('eventLocation').value = _u.apt; document.getElementById('eventBuilding').value = _u.building; } }
@@ -7870,11 +9428,9 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const chip = (attr, active, label) => `<button type="button" ${attr} style="padding:6px 12px;border-radius:16px;${on(active)}font-size:12px;font-weight:600;cursor:pointer;">${label}</button>`;
         const sysOpts = SYSTEMS.map(sn => `<option value="${esc(sn)}" ${qf.sys === sn ? 'selected' : ''}>${esc(systemDisplayName(sn))} (${cnt(u => u.systems && u.systems[sn] && (u.systems[sn].progress || 0) < 100)})</option>`).join('');
         box.innerHTML =
-          chip('data-p="new"', qf.phase === 'new', `⚪ Not started (${cnt(u => phaseOf(u) === 'new')})`) +
-          chip('data-p="work"', qf.phase === 'work', `🔧 In work (${cnt(u => phaseOf(u) === 'work')})`) +
-          chip('data-p="done"', qf.phase === 'done', `✅ Done (${cnt(u => phaseOf(u) === 'done')})`) +
-          chip('data-k="behind"', qf.behind, `🔴 Behind (${cnt(u => hasStatus(u, 'Behind'))})`) +
-          chip('data-k="risk"', qf.risk, `🟠 At Risk (${cnt(u => hasStatus(u, 'At Risk'))})`) +
+          chip('data-p="done"', qf.phase === 'done', `Completed (100%) (${cnt(u => phaseOf(u) === 'done')})`) +
+          chip('data-p="work"', qf.phase === 'work', `In Progress (1–99%) (${cnt(u => phaseOf(u) === 'work')})`) +
+          chip('data-p="new"', qf.phase === 'new', `Not Started (0%) (${cnt(u => phaseOf(u) === 'new')})`) +
           chip('data-k="nophoto"', qf.nophoto, `📷 Done without photo (${cnt(noPhotoDone)})`) +
           `<select id="qfSys" style="padding:5px;border:1px solid ${qf.sys ? '#0B5394' : '#D1D5DB'};border-radius:6px;font-size:12px;"><option value="">Pending in system…</option>${sysOpts}</select>` +
           `<button type="button" id="qfClear" style="padding:6px 10px;border:none;background:none;color:#6B7280;font-size:12px;cursor:pointer;">✖ Clear</button>` +
@@ -8167,7 +9723,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           const { data: { session } } = await sbClient.auth.getSession();
           if (!session) await showLogin(msg);
           const p = await loadProfile();
-          if (p) { window.userRole = p.role; window.userName = p.name || ''; break; }
+          if (p) { window.userRole = p.role === 'supervisor' ? 'pm' : p.role; window.userName = p.name || ''; break; }
           await sbClient.auth.signOut(); msg = 'This account has no access. Contact your administrator.';
         }
         if (window.userName) localStorage.setItem('cfg_user_name', window.userName);
@@ -8181,7 +9737,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const st = document.createElement('style');
         const hideViewer = ['[onclick*="restoreInput"]', '[onclick*="clearAllData"]', '[onclick*="promptSetupPassword"]', '[onclick*="openAddUnitModal"]', '[onclick*="openQuickAddModal"]', '[onclick*="openAddEventModal"]', '[onclick*="openCreateEventModal"]', '[onclick*="deleteUnitPhoto"]', '[onclick*="deletePunchPhoto"]', '[onclick*="undoLastEvent"]', '.btn-edit', '.btn-delete'];
         const hideInspector = ['[onclick*="restoreInput"]', '[onclick*="clearAllData"]', '[onclick*="promptSetupPassword"]', '[onclick*="openAddUnitModal"]', '.btn-delete'];
-        st.textContent = `body.role-viewer :is(${hideViewer.join(',')}){display:none!important}body.role-inspector :is(${hideInspector.join(',')}){display:none!important}body.role-supervisor :is(${hideInspector.join(',')}){display:none!important}`;
+        const hidePm = ['[onclick*="restoreInput"]', '[onclick*="clearAllData"]', '[onclick*="backupData"]'];
+        st.textContent = `body.role-viewer :is(${hideViewer.join(',')}){display:none!important}body.role-inspector :is(${hideInspector.join(',')}){display:none!important}body.role-pm :is(${hidePm.join(',')}){display:none!important}`;
         document.head.appendChild(st);
       }
 
@@ -8244,10 +9801,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             <input id="uName" placeholder="Full name" style="flex:1;min-width:140px;padding:9px;border:1px solid #D1D5DB;border-radius:6px;">
             <input id="uEmail" type="email" placeholder="Email" style="flex:1;min-width:180px;padding:9px;border:1px solid #D1D5DB;border-radius:6px;">
             <input id="uPass" type="text" placeholder="Temporary password (8+ chars)" style="flex:1;min-width:180px;padding:9px;border:1px solid #D1D5DB;border-radius:6px;">
-            <select id="uRole" style="padding:9px;border:1px solid #D1D5DB;border-radius:6px;"><option value="inspector">Inspector</option><option value="supervisor">Supervisor</option><option value="viewer">Viewer (read only)</option><option value="admin">Admin</option></select>
+            <select id="uRole" style="padding:9px;border:1px solid #D1D5DB;border-radius:6px;"><option value="inspector">Inspector</option><option value="pm">PM</option><option value="viewer">Viewer (read only)</option><option value="admin">Admin</option></select>
             <button id="uAdd" style="padding:9px 16px;border:none;background:#1E40AF;color:#fff;border-radius:6px;font-weight:600;cursor:pointer;">Add</button>
           </div>
-            <p style="font-size:11px;color:#6B7280;margin-top:10px;">Admin: everything. Supervisor: review and close issues. Inspector: log inspections, events, and photos. Viewer: read only.</p></div>`;
+            <p style="font-size:11px;color:#6B7280;margin-top:10px;">Admin: everything. PM: manage project follow-up, RFI drawings, and reports. Inspector: log inspections, events, and photos. Viewer: read only.</p></div>`;
         document.body.appendChild(ov);
         const msg = (t, ok) => { const m = $('uMsg'); m.style.color = ok ? '#047857' : '#B91C1C'; m.textContent = t; };
         $('uClose').onclick = () => ov.remove();
@@ -8255,7 +9812,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           try {
             const { users, me } = await adminCall('list');
             $('uList').innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;"><tr style="background:#F3F4F6;text-align:left;"><th style="padding:7px;">Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr>${users.map(u => `<tr style="border-bottom:1px solid #E5E7EB;"><td style="padding:7px;">${esc(u.name)}</td><td>${esc(u.email)}</td>
-        <td><select data-role="${u.id}" ${u.id === me ? 'disabled' : ''} style="padding:4px;">${['admin', 'supervisor', 'inspector', 'viewer'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`).join('')}${u.role ? '' : '<option selected>none</option>'}</select></td>
+        <td><select data-role="${u.id}" ${u.id === me ? 'disabled' : ''} style="padding:4px;">${['admin', 'pm', 'inspector', 'viewer'].map(r => `<option value="${r}" ${u.role === r || (r === 'pm' && u.role === 'supervisor') ? 'selected' : ''}>${r}</option>`).join('')}${u.role ? '' : '<option selected>none</option>'}</select></td>
               <td>${u.disabled ? '<span style="color:#B91C1C;">Disabled</span>' : 'Active'}</td>
               <td style="white-space:nowrap;"><button data-pw="${u.id}" style="padding:4px 8px;font-size:12px;cursor:pointer;">Reset password</button> ${u.id === me ? '' : `<button data-act="${u.id}" data-on="${u.disabled ? 1 : 0}" style="padding:4px 8px;font-size:12px;cursor:pointer;">${u.disabled ? 'Enable' : 'Disable'}</button> <button data-del="${u.id}" data-name="${esc(u.name)}" style="padding:4px 8px;font-size:12px;cursor:pointer;background:#EF4444;color:#fff;border:none;border-radius:4px;">Delete</button>`}</td></tr>`).join('')}</table>`;
             $('uList').querySelectorAll('select[data-role]').forEach(s => s.onchange = async () => { try { await adminCall('setRole', { id: s.dataset.role, role: s.value }); msg('Role updated', true); } catch (e) { msg(e.message); refresh(); } });
@@ -8555,6 +10112,8 @@ let inspChecklistItems = [];
 let inspCurrentFailIdx = null;
 let inspTempPhotos = [];
 let inspTempComment = '';
+let inspTempPassIdx = null;
+let inspPriorItemsForReinspection = null;
 let inspRemoteRecords = [];
 let inspRemoteConfig = null;
 let inspRemoteReady = false;
@@ -9557,6 +11116,7 @@ function inspSelectType(typeId) {
   const draftKey = `inspection_draft_${inspCurrentUnit.apt}_${typeId}`;
   // Check if prior inspection exists for this unit + type
   const prior = inspGetLastInspection(inspCurrentUnit.apt, typeId);
+  inspPriorItemsForReinspection = prior ? (prior.items || []).map(item => ({ status: item.status, photos: item.photos || [] })) : null;
   if (prior) {
     // Always show the retake choice when an inspection already exists.
     // A saved draft is still available to Resume, but must not suppress this dialog.
@@ -10139,6 +11699,10 @@ function inspSetStatus(idx, status) {
     inspOpenFailModal(idx);
     return;
   }
+  if (status === 'PASS' && inspCurrentUnit && inspCurrentType && inspGetLastInspection(inspCurrentUnit.apt, inspCurrentType.id)) {
+    inspOpenPassPhotoModal(idx);
+    return;
+  }
   inspChecklistItems[idx].status = status;
   if (status === 'PASS' || status === 'NA') {
     inspChecklistItems[idx].comment = '';
@@ -10152,8 +11716,20 @@ function inspUpdateRowUI(idx) {
   const row = document.getElementById(`insp-row-${idx}`);
   if (!row) return;
   const s = inspChecklistItems[idx].status;
+  const photos = Array.isArray(inspChecklistItems[idx].photos) ? inspChecklistItems[idx].photos : [];
+  if (!photos.length) row.querySelector('.insp-photo-icon')?.remove();
+  else if (!row.querySelector('.insp-photo-icon')) {
+    const photoButton = document.createElement('button');
+    photoButton.type = 'button';
+    photoButton.className = 'insp-photo-icon';
+    photoButton.title = 'View photos';
+    photoButton.textContent = `📷 ${photos.length}`;
+    photoButton.onclick = () => inspOpenChecklistItemPhotos(idx);
+    row.querySelector('.insp-item-desc')?.appendChild(photoButton);
+  } else {
+    row.querySelector('.insp-photo-icon').textContent = `📷 ${photos.length}`;
+  }
   if (s !== 'FAIL') {
-    row.querySelector('.insp-photo-icon')?.remove();
     row.querySelector('.insp-fail-note')?.remove();
     row.querySelector('.insp-fail-photos')?.remove();
   }
@@ -10216,6 +11792,7 @@ function inspMarkAll(status) {
 // FAIL MODAL
 function inspOpenFailModal(idx) {
   inspCurrentFailIdx = idx;
+  inspTempPassIdx = null;
   inspTempPhotos = [...(inspChecklistItems[idx].photos || [])];
   inspTempComment = inspChecklistItems[idx].comment || '';
 
@@ -10230,6 +11807,14 @@ function inspOpenFailModal(idx) {
   if (modal && modal.parentElement !== document.body) document.body.appendChild(modal);
 
   if (itemEl) itemEl.textContent = inspCurrentType.items[idx];
+  const title = modal?.querySelector('h4');
+  const icon = modal?.querySelector('.insp-fail-icon');
+  const photoLabel = modal?.querySelector('.insp-photo-zone')?.previousElementSibling;
+  const action = modal?.querySelector('.insp-btn-danger');
+  if (title) title.textContent = 'Record Failure';
+  if (icon) icon.textContent = '❌';
+  if (photoLabel) photoLabel.innerHTML = 'Evidence Photos <span style="color:#dc2626">*</span>';
+  if (action) { action.textContent = 'Confirm Failure →'; action.onclick = inspConfirmFail; }
   if (commentEl) commentEl.value = inspTempComment;
   if (previewsEl) previewsEl.innerHTML = '';
 
@@ -10270,6 +11855,7 @@ function inspCancelFail() {
   const modal = document.getElementById('insp-fail-modal');
   if (modal) { modal.classList.add('insp-closing'); setTimeout(() => { modal.classList.add('hidden'); modal.style.display = 'none'; modal.classList.remove('insp-closing'); }, 480); }
   inspCurrentFailIdx = null;
+  inspTempPassIdx = null;
 }
 
 function inspConfirmFail() {
@@ -10281,6 +11867,10 @@ function inspConfirmFail() {
       commentEl.placeholder = '⚠️ A comment is required for a FAILURE';
       commentEl.focus();
     }
+    return;
+  }
+  if (!inspTempPhotos.length) {
+    inspShowToast('A photo is required when marking an item as FAIL.', 'error');
     return;
   }
 
@@ -10295,17 +11885,95 @@ function inspConfirmFail() {
   inspCurrentFailIdx = null;
 }
 
+function inspOpenPassPhotoModal(idx) {
+  inspCurrentFailIdx = null;
+  inspTempPassIdx = idx;
+  inspTempPhotos = [];
+  inspTempComment = '';
+  const modal = document.getElementById('insp-fail-modal');
+  const itemEl = document.getElementById('insp-fail-modal-item');
+  const commentEl = document.getElementById('insp-fail-comment');
+  const previewsEl = document.getElementById('insp-photo-previews');
+  const title = modal?.querySelector('h4');
+  const icon = modal?.querySelector('.insp-fail-icon');
+  const photoLabel = modal?.querySelector('.insp-photo-zone')?.previousElementSibling;
+  const action = modal?.querySelector('.insp-btn-danger');
+  if (itemEl) itemEl.textContent = inspCurrentType?.items?.[idx] || 'Selected item';
+  if (title) title.textContent = 'Confirm Correction';
+  if (icon) icon.textContent = '✅';
+  if (photoLabel) photoLabel.innerHTML = 'Correction Photo <span style="color:#dc2626">*</span>';
+  if (commentEl) { commentEl.value = ''; commentEl.placeholder = 'Optional correction note...'; }
+  if (previewsEl) previewsEl.innerHTML = '';
+  const punchPreview = document.getElementById('insp-punch-preview');
+  if (punchPreview) punchPreview.style.display = 'none';
+  if (action) { action.textContent = 'Confirm PASS →'; action.onclick = inspConfirmPassPhoto; }
+  if (modal) {
+    document.body.appendChild(modal);
+    modal.classList.remove('hidden');
+    modal.style.setProperty('position', 'fixed', 'important');
+    modal.style.setProperty('inset', '0', 'important');
+    modal.style.setProperty('display', 'flex', 'important');
+    modal.style.setProperty('z-index', '2147483000', 'important');
+    modal.style.setProperty('pointer-events', 'auto', 'important');
+  }
+}
+
+function inspConfirmPassPhoto() {
+  if (inspTempPassIdx === null || !inspTempPhotos.length) {
+    inspShowToast('A new photo is required to confirm a correction.', 'error');
+    return;
+  }
+  const comment = document.getElementById('insp-fail-comment')?.value.trim() || '';
+  inspChecklistItems[inspTempPassIdx].status = 'PASS';
+  inspChecklistItems[inspTempPassIdx].comment = comment;
+  inspChecklistItems[inspTempPassIdx].photos = [...inspTempPhotos];
+  const modal = document.getElementById('insp-fail-modal');
+  if (modal) { modal.classList.add('insp-closing'); setTimeout(() => { modal.classList.add('hidden'); modal.style.display = 'none'; modal.classList.remove('insp-closing'); }, 480); }
+  inspUpdateRowUI(inspTempPassIdx);
+  inspUpdateProgress();
+  inspTempPassIdx = null;
+}
+
 function inspHandlePhotos(input) {
-  const files = Array.from(input.files);
-  files.forEach(file => {
+  const files = typeof validatePhotoFiles === 'function' ? validatePhotoFiles(input.files || []) : Array.from(input.files || []);
+  const inspector = inspGetCurrentInspector();
+  Promise.all(files.map(file => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = e => {
-      inspTempPhotos.push(e.target.result);
-      inspAddPhotoThumb(e.target.result, inspTempPhotos.length - 1);
+      stampPhotoDataUrl(e.target.result, inspector).then(resolve).catch(reject);
     };
+    reader.onerror = reject;
     reader.readAsDataURL(file);
-  });
+  }))).then(stamped => {
+    stamped.forEach(data => { inspTempPhotos.push(data); inspAddPhotoThumb(data, inspTempPhotos.length - 1); });
+  }).catch(error => inspShowToast(`Could not prepare photo: ${error.message || 'file error'}`, 'error'));
   input.value = '';
+}
+
+function stampPhotoDataUrl(dataUrl, inspector) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const text = photoStampText(inspector);
+      const fontSize = Math.max(14, Math.round(canvas.width / 70));
+      const padding = Math.max(8, Math.round(fontSize * .55));
+      ctx.font = `600 ${fontSize}px Arial, sans-serif`;
+      const boxHeight = fontSize + padding * 2;
+      ctx.fillStyle = 'rgba(0,0,0,.72)';
+      ctx.fillRect(4, canvas.height - boxHeight - 4, canvas.width - 8, boxHeight);
+      ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle';
+      ctx.fillText(text, 4 + padding, canvas.height - boxHeight / 2 - 4);
+      resolve(canvas.toDataURL('image/jpeg', .82));
+    };
+    img.onerror = () => reject(new Error('Failed to read image'));
+    img.src = dataUrl;
+  });
 }
 
 function inspAddPhotoThumb(data, idx) {
@@ -10396,6 +12064,23 @@ async function inspSubmitInspection() {
   const passItems = inspChecklistItems.filter(i => i.status === 'PASS');
   const failItems = inspChecklistItems.filter(i => i.status === 'FAIL');
   const naItems = inspChecklistItems.filter(i => i.status === 'NA');
+
+  const missingFailureEvidence = inspChecklistItems.findIndex(item => item.status === 'FAIL' && (!String(item.comment || '').trim() || !Array.isArray(item.photos) || item.photos.length === 0));
+  if (missingFailureEvidence >= 0) {
+    inspShowToast('Every FAIL requires a comment and at least one photo.', 'error');
+    inspOpenFailModal(missingFailureEvidence);
+    return;
+  }
+  const missingCorrectionEvidence = inspChecklistItems.findIndex((item, index) => {
+    const previousItem = inspPriorItemsForReinspection?.[index];
+    return previousItem?.status === 'FAIL' && item.status === 'PASS' && (!Array.isArray(item.photos) || item.photos.length === 0);
+  });
+  if (missingCorrectionEvidence >= 0) {
+    inspShowToast('A corrected FAIL requires a new photo before PASS.', 'error');
+    inspOpenPassPhotoModal(missingCorrectionEvidence);
+    return;
+  }
+  if (typeof allowRemoteAction === 'function' && !await allowRemoteAction('inspection_submit', 30)) return;
 
     const previous = inspGetLastInspection(inspCurrentUnit.apt, inspCurrentType.id);
     const now = new Date().toISOString();
@@ -10570,7 +12255,7 @@ if (document.body) document.body._inspGlobalNavObserver = { disconnect() {}, obs
 
 function isInspectionAdmin() {
   // Local mode has no authentication, so it acts as the admin test environment.
-  return window.userRole === 'admin' || (typeof LOCAL_PROJECT_MODE !== 'undefined' && (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') && (!window.authIsActive || !window.authIsActive()));
+  return window.userRole === 'admin' || window.userRole === 'pm' || (typeof LOCAL_PROJECT_MODE !== 'undefined' && (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') && (!window.authIsActive || !window.authIsActive()));
 }
 
 async function inspResetCurrentInspection(options = {}) {
@@ -10957,6 +12642,7 @@ function inspNewInspection() {
   inspCurrentUnit = null;
   inspCurrentType = null;
   inspChecklistItems = [];
+  inspPriorItemsForReinspection = null;
   const searchEl = document.getElementById('insp-unit-search');
   const resultsEl = document.getElementById('insp-search-results');
   const hintEl = document.getElementById('insp-search-hint');
