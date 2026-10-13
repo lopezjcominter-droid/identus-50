@@ -2802,6 +2802,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     let quantityRemoteReady = false;
     let quantityRemoteLoading = null;
     let quantityRemoteSaveTimer = null;
+    let quantityRemoteSavePromise = Promise.resolve(true);
 
     function quantityUnitKey(unit) {
       return [unit?.apt, unit?.building, unit?.floor].map(v => String(v || '').trim()).join('::');
@@ -2818,8 +2819,18 @@ Object.assign(APP_TRANSLATIONS.en, {
       }
       quantityRemoteStore = store || {};
       clearTimeout(quantityRemoteSaveTimer);
-      quantityRemoteSaveTimer = setTimeout(() => quantityPersistRemoteStore(quantityRemoteStore), 350);
+      quantityRemoteSavePromise = new Promise(resolve => {
+        quantityRemoteSaveTimer = setTimeout(() => resolve(quantityPersistRemoteStore(quantityRemoteStore)), 350);
+      });
       return true;
+    }
+    async function quantityFlushRemoteSave() {
+      if (!quantityUsesLocalStorage()) return await quantityRemoteSavePromise;
+      return true;
+    }
+    async function quantityRemoteWrite(path, headers, rows) {
+      const response = await proxyFetch(`${SUPABASE_URL}/rest/v1/${path}`, { method: 'POST', headers, body: JSON.stringify(rows) });
+      if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
     }
     async function quantityAuthHeaders() {
       const accessToken = window.getAccessToken ? await window.getAccessToken() : null;
@@ -2832,14 +2843,15 @@ Object.assign(APP_TRANSLATIONS.en, {
         const headers = await quantityAuthHeaders();
         const projectId = PROJECT_ID;
         const templates = Object.entries(store.templates || {}).map(([unit_type, value]) => ({ project_id: projectId, unit_type, name: value.name || unit_type, mime_type: value.type || value.mime_type || null, storage_path: value.dataUrl || value.storage_path || null, checklist: value.checklist || [], version: value.version || 1, updated_at: new Date().toISOString() }));
-        if (templates.length) await proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_templates?on_conflict=project_id,unit_type`, { method: 'POST', headers, body: JSON.stringify(templates) });
+        if (templates.length) await quantityRemoteWrite('quantity_templates?on_conflict=project_id,unit_type', headers, templates);
         const planRows = Object.entries(store.sitePlans || {}).map(([key, value]) => { const [building, floor] = key.split('::'); const b = (Array.isArray(data) ? data : []).find(u => String(u.building) === building); return b?.building_id ? { project_id: projectId, building_id: b.building_id, floor, name: value.name || 'Floor plan', mime_type: value.type || null, storage_path: value.dataUrl || value.storage_path || null, version: value.version || 1, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
-        if (planRows.length) await proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_floor_plans?on_conflict=project_id,building_id,floor`, { method: 'POST', headers, body: JSON.stringify(planRows) });
+        if (planRows.length) await quantityRemoteWrite('quantity_floor_plans?on_conflict=project_id,building_id,floor', headers, planRows);
         const unitRows = Object.entries(store.units || {}).map(([key, state]) => { const [apt, building, floor] = key.split('::'); const u = (Array.isArray(data) ? data : []).find(x => quantityUnitKey(x) === key); return u?.id ? { project_id: projectId, unit_id: u.id, unit_type: store.unitTypes?.[key] || null, checklist: state.items || [], checklist_mode: state.checklistMode || 'template', drawing_name: state.drawing?.name || null, drawing_mime_type: state.drawing?.type || null, drawing_storage_path: state.drawing?.dataUrl || null, drawing_revision: state.drawing?.revision || 0, current_revision: state.lastSavedRevisionId || null, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
-        if (unitRows.length) await proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_unit_states?on_conflict=project_id,unit_id`, { method: 'POST', headers, body: JSON.stringify(unitRows) });
+        if (unitRows.length) await quantityRemoteWrite('quantity_unit_states?on_conflict=project_id,unit_id', headers, unitRows);
         const revisions = []; Object.entries(store.units || {}).forEach(([key, state]) => { const u = (Array.isArray(data) ? data : []).find(x => quantityUnitKey(x) === key); if (!u?.id) return; (state.revisions || []).forEach(rev => revisions.push({ project_id: projectId, unit_id: u.id, revision_number: Number(rev.number || rev.revision || 0), reason: rev.reason || 'Manual save', actor_name: rev.actor || null, drawing_name: rev.drawing?.name || null, drawing_mime_type: rev.drawing?.type || null, drawing_storage_path: rev.drawing?.dataUrl || null, checklist: rev.items || [], marks: rev.markers || [], created_at: rev.savedAt || rev.createdAt || new Date().toISOString() })); });
-        if (revisions.length) await proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_revisions?on_conflict=project_id,unit_id,revision_number`, { method: 'POST', headers, body: JSON.stringify(revisions) });
-      } catch (error) { console.error('Quantity Control Supabase save failed', error); quantitySuccessToast('❌ Quantity Control could not be saved to Supabase.'); }
+        if (revisions.length) await quantityRemoteWrite('quantity_revisions?on_conflict=project_id,unit_id,revision_number', headers, revisions);
+        return true;
+      } catch (error) { console.error('Quantity Control Supabase save failed', error); quantitySuccessToast('❌ Quantity Control could not be saved to Supabase.'); return false; }
     }
     async function quantityHydrateRemote() {
       if (quantityUsesLocalStorage() || quantityRemoteLoading) return quantityRemoteLoading;
@@ -3081,7 +3093,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const modal = document.getElementById('quantityChecklistTemplateModal'); if (modal) modal.style.display = 'none';
       quantityChecklistTemplateType = ''; quantityChecklistTemplateMode = 'template';
     }
-    function quantitySaveChecklistTemplate() {
+    async function quantitySaveChecklistTemplate() {
       if (!quantityIsAdmin() || !quantityChecklistTemplateType) return;
       const rows = [...document.querySelectorAll('#quantityTemplateChecklistRows .quantity-template-line')];
       const checklist = rows.map(row => ({ description: String(row.querySelector('.quantity-template-description')?.value || '').trim(), takeoff: Math.max(0, Number(row.querySelector('.quantity-template-takeoff')?.value || 0)) })).filter(item => item.description);
@@ -3089,7 +3101,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const store = quantityStore();
       if (quantityChecklistTemplateMode === 'unit') {
         const state = quantityUnitState(quantityCurrentUnit); state.items = quantityClone(checklist); state.checklistMode = 'custom'; state.markers = []; quantityAddHistory(state, 'Custom checklist updated', 'Unit-specific checklist saved; installed marks reset');
-        store.units = store.units || {}; store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityCloseChecklistTemplate(); quantityRenderUnit(); quantitySuccessToast(`✅ Unit ${quantityCurrentUnit.apt} checklist saved`); return;
+        store.units = store.units || {}; store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); const saved = await quantityFlushRemoteSave(); if (!saved) return; quantityCloseChecklistTemplate(); quantityRenderUnit(); quantitySuccessToast(`✅ Unit ${quantityCurrentUnit.apt} checklist saved`); return;
       }
       const template = store.templates?.[quantityChecklistTemplateType]; if (!template) return;
       const assigned = (Array.isArray(data) ? data : []).filter(unit => quantityUnitType(unit) === quantityChecklistTemplateType && !(store.units?.[quantityUnitKey(unit)]?.checklistMode === 'custom'));
@@ -3105,7 +3117,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         quantityAddHistory(state, 'Checklist model updated', `${quantityChecklistTemplateType} standard checklist applied; installed marks reset`);
         store.units[quantityUnitKey(unit)] = state;
       });
-      quantitySave(store); quantityCloseChecklistTemplate(); renderSetupDrawingModels();
+      quantitySave(store); const saved = await quantityFlushRemoteSave(); if (!saved) return; quantityCloseChecklistTemplate(); renderSetupDrawingModels();
       if (quantityCurrentUnit && quantityUnitType(quantityCurrentUnit) === quantityChecklistTemplateType) quantityRenderUnit();
       quantitySuccessToast(`✅ ${quantityChecklistTemplateType} checklist saved${assigned.length ? ` · applied to ${assigned.length} units` : ''}`);
     }
