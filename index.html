@@ -1807,7 +1807,7 @@
           <label style="font-size:12px;color:#475569;font-weight:600;">Floor
             <select id="quantityFloorSelect" class="form-select" onchange="renderQuantityControl()" style="margin-left:6px;min-width:145px;"></select>
           </label>
-          <input id="quantityUnitSearch" type="search" placeholder="Search unit..." oninput="quantityHandleUnitSearch()" autocomplete="off" style="padding:8px 10px;border:1px solid #CBD5E1;border-radius:6px;max-width:220px;">
+          <input id="quantityUnitSearch" type="search" placeholder="Search unit..." oninput="if(window.isCredentialSearchValue && window.isCredentialSearchValue(this.value)){this.value='';} quantityHandleUnitSearch()" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="search" enterkeyhint="search" readonly onpointerdown="this.removeAttribute('readonly')" onkeydown="this.removeAttribute('readonly')" data-form-type="other" data-lpignore="true" data-1p-ignore="true" style="padding:8px 10px;border:1px solid #CBD5E1;border-radius:6px;max-width:220px;">
           <span id="quantityAdminHint" style="font-size:12px;color:#64748B;"></span>
         </div>
         <div class="quantity-template-tools" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;padding:10px 12px;border:1px solid #DBEAFE;border-radius:8px;background:#EFF6FF;">
@@ -2265,6 +2265,7 @@
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <input id="setupDrawingModelType" type="text" placeholder="Model: C1" style="width:105px;padding:7px 9px;border:1px solid #BFDBFE;border-radius:6px;text-transform:uppercase;">
               <label class="btn btn-secondary" style="font-size:11px;padding:6px 9px;cursor:pointer;">📎 Upload model<input id="setupDrawingModelInput" type="file" accept="image/*,.pdf" onchange="saveSetupDrawingModel(this)" style="display:none"></label>
+              <button type="button" class="btn btn-secondary" style="font-size:11px;padding:6px 9px;" onclick="quantityOpenChecklistTemplateFromInput()">Checklist</button>
               <span id="setupDrawingModelMessage" style="font-size:11px;color:#15803D;"></span>
             </div>
             <div id="setupDrawingModelsList" style="display:flex;flex-direction:column;gap:6px;"></div>
@@ -2783,7 +2784,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       }, 500);
     }
 
-    // ===== Quantity Control (local preview) =====
+    // ===== Quantity Control =====
     let quantityCurrentUnit = null;
     let quantityActiveItem = -1;
     let quantityRevisionCursor = null;
@@ -2797,16 +2798,67 @@ Object.assign(APP_TRANSLATIONS.en, {
     let quantityDrawingTouchStartZoom = 1;
     let quantityDrawingGestureActive = false;
     let quantityContourEditor = null;
+    let quantityRemoteStore = {};
+    let quantityRemoteReady = false;
+    let quantityRemoteLoading = null;
+    let quantityRemoteSaveTimer = null;
 
     function quantityUnitKey(unit) {
       return [unit?.apt, unit?.building, unit?.floor].map(v => String(v || '').trim()).join('::');
     }
+    function quantityUsesLocalStorage() { return LOCAL_PROJECT_MODE || window.location.protocol === 'file:'; }
     function quantityStore() {
+      if (!quantityUsesLocalStorage()) return quantityRemoteStore;
       try { return JSON.parse(localStorage.getItem('quantity_control_v1') || '{}') || {}; } catch (_) { return {}; }
     }
     function quantitySave(store) {
-      try { localStorage.setItem('quantity_control_v1', JSON.stringify(store)); return true; }
-      catch (error) { console.error('Quantity Control save failed', error); quantitySuccessToast('❌ Could not save Quantity Control data. The drawing may be too large.'); return false; }
+      if (quantityUsesLocalStorage()) {
+        try { localStorage.setItem('quantity_control_v1', JSON.stringify(store)); return true; }
+        catch (error) { console.error('Quantity Control save failed', error); quantitySuccessToast('❌ Could not save Quantity Control data. The drawing may be too large.'); return false; }
+      }
+      quantityRemoteStore = store || {};
+      clearTimeout(quantityRemoteSaveTimer);
+      quantityRemoteSaveTimer = setTimeout(() => quantityPersistRemoteStore(quantityRemoteStore), 350);
+      return true;
+    }
+    async function quantityAuthHeaders() {
+      const accessToken = window.getAccessToken ? await window.getAccessToken() : null;
+      if (!accessToken) throw new Error('Your session has expired. Sign in again to save Quantity Control data.');
+      return { apikey: SUPABASE_KEY, Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' };
+    }
+    async function quantityPersistRemoteStore(store) {
+      if (quantityUsesLocalStorage() || !sbClient || !quantityRemoteReady) return;
+      try {
+        const headers = await quantityAuthHeaders();
+        const projectId = PROJECT_ID;
+        const templates = Object.entries(store.templates || {}).map(([unit_type, value]) => ({ project_id: projectId, unit_type, name: value.name || unit_type, mime_type: value.type || value.mime_type || null, storage_path: value.dataUrl || value.storage_path || null, checklist: value.checklist || [], version: value.version || 1, updated_at: new Date().toISOString() }));
+        if (templates.length) await proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_templates?on_conflict=project_id,unit_type`, { method: 'POST', headers, body: JSON.stringify(templates) });
+        const planRows = Object.entries(store.sitePlans || {}).map(([key, value]) => { const [building, floor] = key.split('::'); const b = (Array.isArray(data) ? data : []).find(u => String(u.building) === building); return b?.building_id ? { project_id: projectId, building_id: b.building_id, floor, name: value.name || 'Floor plan', mime_type: value.type || null, storage_path: value.dataUrl || value.storage_path || null, version: value.version || 1, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
+        if (planRows.length) await proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_floor_plans?on_conflict=project_id,building_id,floor`, { method: 'POST', headers, body: JSON.stringify(planRows) });
+        const unitRows = Object.entries(store.units || {}).map(([key, state]) => { const [apt, building, floor] = key.split('::'); const u = (Array.isArray(data) ? data : []).find(x => quantityUnitKey(x) === key); return u?.id ? { project_id: projectId, unit_id: u.id, unit_type: store.unitTypes?.[key] || null, checklist: state.items || [], checklist_mode: state.checklistMode || 'template', drawing_name: state.drawing?.name || null, drawing_mime_type: state.drawing?.type || null, drawing_storage_path: state.drawing?.dataUrl || null, drawing_revision: state.drawing?.revision || 0, current_revision: state.lastSavedRevisionId || null, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
+        if (unitRows.length) await proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_unit_states?on_conflict=project_id,unit_id`, { method: 'POST', headers, body: JSON.stringify(unitRows) });
+        const revisions = []; Object.entries(store.units || {}).forEach(([key, state]) => { const u = (Array.isArray(data) ? data : []).find(x => quantityUnitKey(x) === key); if (!u?.id) return; (state.revisions || []).forEach(rev => revisions.push({ project_id: projectId, unit_id: u.id, revision_number: Number(rev.number || rev.revision || 0), reason: rev.reason || 'Manual save', actor_name: rev.actor || null, drawing_name: rev.drawing?.name || null, drawing_mime_type: rev.drawing?.type || null, drawing_storage_path: rev.drawing?.dataUrl || null, checklist: rev.items || [], marks: rev.markers || [], created_at: rev.savedAt || rev.createdAt || new Date().toISOString() })); });
+        if (revisions.length) await proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_revisions?on_conflict=project_id,unit_id,revision_number`, { method: 'POST', headers, body: JSON.stringify(revisions) });
+      } catch (error) { console.error('Quantity Control Supabase save failed', error); quantitySuccessToast('❌ Quantity Control could not be saved to Supabase.'); }
+    }
+    async function quantityHydrateRemote() {
+      if (quantityUsesLocalStorage() || quantityRemoteLoading) return quantityRemoteLoading;
+      quantityRemoteLoading = (async () => {
+        try {
+          const headers = await quantityAuthHeaders(); const q = async path => { const r = await proxyFetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers }); return r.ok ? r.json() : []; };
+          const [templates, plans, states, marks, revisions] = await Promise.all([q(`quantity_templates?project_id=eq.${PROJECT_ID}&is_active=eq.true`), q(`quantity_floor_plans?project_id=eq.${PROJECT_ID}&is_active=eq.true`), q(`quantity_unit_states?project_id=eq.${PROJECT_ID}`), q(`quantity_installed_marks?project_id=eq.${PROJECT_ID}`), q(`quantity_revisions?project_id=eq.${PROJECT_ID}&order=revision_number.desc`)]);
+          const store = { templates: {}, sitePlans: {}, unitTypes: {}, units: {} };
+          (templates || []).forEach(row => { store.templates[row.unit_type] = { name: row.name, type: row.mime_type, dataUrl: row.storage_path || '', checklist: row.checklist || [], version: row.version, updatedAt: row.updated_at }; });
+          (plans || []).forEach(row => { const b = (Array.isArray(data) ? data : []).find(u => String(u.building_id) === String(row.building_id)); if (b) store.sitePlans[`${b.building}::${row.floor}`] = { name: row.name, type: row.mime_type, dataUrl: row.storage_path || '', version: row.version, updatedAt: row.updated_at }; });
+          (states || []).forEach(row => { const u = (Array.isArray(data) ? data : []).find(x => String(x.id) === String(row.unit_id)); if (!u) return; const key = quantityUnitKey(u); store.unitTypes[key] = row.unit_type || ''; store.units[key] = { items: row.checklist || [], checklistMode: row.checklist_mode || 'template', markers: [], drawing: row.drawing_name ? { name: row.drawing_name, type: row.drawing_mime_type, dataUrl: row.drawing_storage_path || '', revision: row.drawing_revision || 0 } : null, revisions: [] }; });
+          (marks || []).forEach(row => { const u = (Array.isArray(data) ? data : []).find(x => String(x.id) === String(row.unit_id)); if (!u) return; const key = quantityUnitKey(u); store.units[key] = store.units[key] || { items: quantityDefaultItems(), markers: [], revisions: [] }; store.units[key].markers.push({ id: row.id, itemIndex: row.item_index, x: Number(row.x), y: Number(row.y) }); });
+          (revisions || []).forEach(row => { const u = (Array.isArray(data) ? data : []).find(x => String(x.id) === String(row.unit_id)); if (!u) return; const key = quantityUnitKey(u); store.units[key] = store.units[key] || { items: quantityDefaultItems(), markers: [], revisions: [] }; store.units[key].revisions.push({ id: row.id, number: row.revision_number, reason: row.reason, actor: row.actor_name, items: row.checklist || [], markers: row.marks || [], savedAt: row.created_at, drawing: row.drawing_name ? { name: row.drawing_name, type: row.drawing_mime_type, dataUrl: row.drawing_storage_path || '' } : null }); });
+          quantityRemoteStore = store; quantityRemoteReady = true; renderQuantityControl();
+          if (document.getElementById('setupDrawingModelsList')) renderSetupDrawingModels();
+          if (document.getElementById('setupFloorPlansList')) renderSetupFloorPlans();
+        } catch (error) { console.error('Quantity Control Supabase load failed', error); quantityRemoteStore = {}; quantityRemoteReady = true; }
+      })();
+      return quantityRemoteLoading;
     }
     function quantityUnitType(unit) {
       const store = quantityStore(); store.unitTypes = store.unitTypes || {};
@@ -2940,16 +2992,26 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (!quantityIsAdmin()) return;
       quantityChecklistTemplateType = String(type || '').trim().toUpperCase();
       quantityChecklistTemplateMode = 'template';
-      const template = quantityStore().templates?.[quantityChecklistTemplateType];
+      if (!quantityChecklistTemplateType) { quantitySuccessToast('Enter a model name first.'); return; }
+      const store = quantityStore(); store.templates = store.templates || {};
+      if (!store.templates[quantityChecklistTemplateType]) {
+        store.templates[quantityChecklistTemplateType] = { name: quantityChecklistTemplateType, type: '', dataUrl: '', checklist: quantityDefaultItems(), version: 1, updatedAt: new Date().toISOString() };
+        quantitySave(store);
+      }
+      const template = store.templates[quantityChecklistTemplateType];
       const modal = document.getElementById('quantityChecklistTemplateModal');
       const content = document.getElementById('quantityChecklistTemplateContent');
-      if (!template || !modal || !content) return;
+      if (!modal || !content) return;
       document.getElementById('quantityChecklistTemplateTitle').textContent = `${quantityChecklistTemplateType} Takeoff Checklist`;
       document.getElementById('quantityChecklistTemplateSubtitle').textContent = 'These standard lines and quantities will be used by assigned units.';
       content.innerHTML = `<div style="font-size:12px;color:#475569;margin-bottom:10px;">Add or edit the standard checklist for this model. Saving can update every assigned unit, while units with a custom checklist remain unchanged.</div><div id="quantityTemplateChecklistRows" style="display:flex;flex-direction:column;gap:8px;"></div><div style="font-size:11px;color:#64748B;margin-top:10px;">Installed marks are reset for units receiving the changed checklist; previous revisions remain in history.</div>`;
       const rows = Array.isArray(template.checklist) && template.checklist.length ? template.checklist : quantityDefaultItems();
       quantityRenderChecklistTemplateRows(rows);
       modal.style.display = 'flex';
+    }
+    function quantityOpenChecklistTemplateFromInput() {
+      const type = String(document.getElementById('setupDrawingModelType')?.value || '').trim().toUpperCase();
+      quantityOpenChecklistTemplate(type);
     }
     function quantityOpenUnitChecklist() {
       if (!quantityIsAdmin() || !quantityCurrentUnit) return;
@@ -3900,6 +3962,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (typeof inspGoStep === 'function') inspGoStep(1);
       } else if (tab === 'quantity') {
         renderQuantityControl();
+        if (!quantityUsesLocalStorage() && !quantityRemoteReady) quantityHydrateRemote();
         const appContent = document.getElementById('appContent');
         const quantityTab = document.getElementById('quantityTab');
         const mainTabNav = document.getElementById('mainTabNav');
@@ -4349,6 +4412,10 @@ Object.assign(APP_TRANSLATIONS.en, {
         } catch (error) {
           console.warn('Project data is still loading; continuing with the visible shell.', error);
         }
+
+        // Quantity Control is production data. Hydrate it from Supabase after
+        // the project units are available; browser storage is only for local preview.
+        if (!quantityUsesLocalStorage()) await withTimeout(quantityHydrateRemote(), 12000, 'Quantity Control');
 
         renderLoadedShell();
         // Punch List and Inspection History are not needed to draw Dashboard.
