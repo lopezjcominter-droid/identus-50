@@ -1682,7 +1682,7 @@
           <div class="insp-card-body">
             <div class="insp-search-box">
               <span class="insp-search-icon">🔍</span>
-              <input type="text" id="insp-unit-search" placeholder="Search unit (e.g. 1101, CH-001, Building 2)..." oninput="inspSearchUnits(this.value)" autocomplete="off">
+              <input type="search" id="insp-unit-search" placeholder="Search unit (e.g. 1101, CH-001, Building 2)..." oninput="if(window.isCredentialSearchValue && window.isCredentialSearchValue(this.value)){this.value='';} inspSearchUnits(this.value)" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="search" enterkeyhint="search" readonly onpointerdown="this.removeAttribute('readonly')" onkeydown="this.removeAttribute('readonly')">
             </div>
             <div id="insp-search-results" style="display:none"></div>
             <div class="insp-empty" id="insp-search-hint">
