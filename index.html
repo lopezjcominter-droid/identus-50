@@ -9952,8 +9952,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       window.getAccessToken = async () => { try { const { data } = await sbClient.auth.getSession(); return (data && data.session && data.session.access_token) || null; } catch (e) { return null; } };
 
       function normalizeRole(role) {
-        const value = String(role || '').toLowerCase();
-        if (value === 'supervisor' || value === 'project_manager' || value === 'project manager') return 'pm';
+        const value = String(role || '').trim().toLowerCase().replace(/[_-]+/g, ' ');
+        if (value === 'supervisor' || value === 'project manager' || value === 'projectmanager' || value === 'project lead' || value === 'pm') return 'pm';
+        if (value === 'administrator') return 'admin';
+        if (value === 'qa inspector' || value === 'inspection') return 'inspector';
+        if (value === 'read only' || value === 'readonly') return 'viewer';
         return ['admin', 'pm', 'inspector', 'viewer'].includes(value) ? value : 'viewer';
       }
 
