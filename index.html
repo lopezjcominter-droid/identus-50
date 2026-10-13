@@ -3053,6 +3053,9 @@ Object.assign(APP_TRANSLATIONS.en, {
     function quantityCaptureTemplateUpdate(type, store) {
       const model = store.templates?.[type]; if (!model) return;
       store.templateUpdateHistory = store.templateUpdateHistory || {};
+      store.templateUpdateHistory[type] = Array.isArray(store.templateUpdateHistory[type])
+        ? store.templateUpdateHistory[type]
+        : [];
       const snapshot = { at: new Date().toISOString(), template: quantityClone(model), units: {} };
       (Array.isArray(data) ? data : []).filter(unit => String(store.unitTypes?.[quantityUnitKey(unit)] || '').toUpperCase() === type).forEach(unit => {
         const key = quantityUnitKey(unit); const state = store.units?.[key];
