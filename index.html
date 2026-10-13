@@ -542,6 +542,21 @@
       -webkit-overflow-scrolling: touch;
       overscroll-behavior: contain;
     }
+    /* Setup libraries must remain visible while the modal body is rendered. */
+    #projectSetupModal #setupDrawingModelsDetails,
+    #projectSetupModal #setupFloorPlansDetails {
+      display: block !important;
+      visibility: visible !important;
+      flex: 0 0 auto;
+      min-height: 44px;
+    }
+    #projectSetupModal #setupDrawingModelsDetails > summary,
+    #projectSetupModal #setupFloorPlansDetails > summary {
+      display: flex !important;
+      visibility: visible !important;
+      min-height: 44px;
+      background: #EFF6FF;
+    }
 
     .modal.show {
       display: flex;
@@ -1396,8 +1411,15 @@
       </div>
 
       <div style="margin: 0 0 20px; padding: 10px 12px; background: #F3F4F6; border-radius: 8px;">
-        <div id="projectNameLabel" style="font-size: 14px; font-weight: 700; color: #111827;"></div>
-        <div id="projectAddressLabel" style="font-size: 11px; color: #6B7280; margin-top: 2px;"></div>
+        <div style="display:flex;align-items:flex-start;gap:8px;min-width:0;">
+          <div style="min-width:0;flex:1;">
+            <div id="projectNameLabel" style="font-size: 14px; font-weight: 700; color: #111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+            <div id="projectAddressLabel" style="font-size: 11px; color: #6B7280; margin-top: 2px;"></div>
+          </div>
+          <select id="projectSelector" aria-label="Select project" onchange="selectHeaderProject(this.value)" style="width:28px;min-width:28px;height:24px;padding:0 2px;border:1px solid #CBD5E1;border-radius:5px;background:#fff;color:#1E40AF;font-size:13px;cursor:pointer;margin-left:auto;" title="Select project">
+            <option value="">▾</option>
+          </select>
+        </div>
         <div id="userLabel" style="font-size: 11px; color: #6B7280; margin-top: 6px;"></div>
       </div>
 
@@ -2193,7 +2215,9 @@
               <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:4px;">PROJECT ID (UUID)</label>
               <input id="setupProjectId" type="text" style="width:100%;padding:7px;border:1px solid #D1D5DB;border-radius:5px;font-size:12px;font-family:monospace;" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
             </div>
-            <div style="font-size:11px;color:#9CA3AF;">These values are saved in your browser's local storage and applied immediately when you click Apply.</div>
+            <div style="font-size:11px;color:#9CA3AF;">These values are saved in your browser's local storage and applied when you confirm the project switch.</div>
+            <button type="button" onclick="switchProjectFromSetup()" style="align-self:flex-start;padding:8px 12px;border:1px solid #1E40AF;background:#EFF6FF;color:#1E40AF;border-radius:6px;cursor:pointer;font-weight:600;">↔ Open / Switch Project</button>
+            <div style="font-size:11px;color:#64748B;">Use this to open another project that uses the same Identus structure. It does not delete the current project.</div>
           </div>
         </details>
 
@@ -2207,7 +2231,20 @@
           <input id="setupProjectAddress" type="text" style="width:100%;padding:8px;border:1px solid #D1D5DB;border-radius:6px;font-size:14px;" placeholder="e.g. 123 Main St, Miami, FL 33130">
         </div>
 
-        <div>
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;">
+          <select id="setupNewProjectTemplate" style="padding:8px;border:1px solid #CBD5E1;border-radius:6px;font-size:11px;" title="Choose the starting configuration">
+            <option value="copy">Copy current setup</option>
+            <option value="blank">Start blank</option>
+          </select>
+          <select id="setupNewProjectMode" style="padding:8px;border:1px solid #CBD5E1;border-radius:6px;font-size:11px;" title="Choose the floor configuration mode">
+            <option value="uniform">Uniform floors</option>
+            <option value="custom">Custom floor configuration</option>
+          </select>
+          <span style="font-size:11px;color:#64748B;">Create a separate project without changing this one.</span>
+          <button type="button" onclick="createNewProjectFromSetup()" style="padding:9px 13px;border:1px solid #1D4ED8;background:#1D4ED8;color:white;border-radius:6px;cursor:pointer;font-weight:600;">＋ Create New Project</button>
+        </div>
+
+        <div id="setupBuildingsSection">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
             <label style="font-size:13px;font-weight:600;">Buildings & Special Units</label>
             <div style="display:flex;gap:6px;">
@@ -2219,7 +2256,7 @@
         </div>
 
         <!-- Reusable unit drawing model library -->
-        <details id="setupDrawingModelsDetails" style="border:1px solid #BFDBFE;border-radius:8px;overflow:hidden;background:#F8FBFF;">
+        <details id="setupDrawingModelsDetails" open style="border:1px solid #BFDBFE;border-radius:8px;overflow:hidden;background:#F8FBFF;">
           <summary style="padding:12px 14px;font-size:13px;font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;">
             📐 Unit Drawing Models <span style="font-size:11px;font-weight:400;color:#475569;">Upload once, assign many units</span>
           </summary>
@@ -2247,7 +2284,7 @@
         </details>
 
         <!-- Reusable floor/site plan library -->
-        <details id="setupFloorPlansDetails" style="border:1px solid #BFDBFE;border-radius:8px;overflow:hidden;background:#F8FBFF;margin-top:10px;">
+        <details id="setupFloorPlansDetails" open style="border:1px solid #BFDBFE;border-radius:8px;overflow:hidden;background:#F8FBFF;margin-top:10px;">
           <summary style="padding:12px 14px;font-size:13px;font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;">
             🗺️ Floor / Site Plan Library <span style="font-size:11px;font-weight:400;color:#475569;">Upload by building and floor</span>
           </summary>
@@ -2674,6 +2711,8 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (el) el.textContent = n;
       const ad = document.getElementById('projectAddressLabel');
       if (ad) { const a = getProjectAddress(); ad.textContent = a ? '📍 ' + a : ''; }
+      const headerSelect = document.getElementById('projectSelector');
+      if (headerSelect && PROJECT_ID) headerSelect.value = PROJECT_ID;
       document.title = 'Identus 50 – ' + n;
     }
     async function loadSharedProject() {
@@ -2703,7 +2742,12 @@ Object.assign(APP_TRANSLATIONS.en, {
         }
       } catch (e) { console.warn('saveSharedProject', e); }
     }
-    window.addEventListener('DOMContentLoaded', () => { applyProjectName(); loadSharedProject(); });
+    window.addEventListener('DOMContentLoaded', () => {
+      applyProjectName();
+      loadSharedProject();
+      loadSetupProjectSelector();
+      setTimeout(loadSetupProjectSelector, 1200);
+    });
     let PROJECT_ID = localStorage.getItem('cfg_project_id') || 'a71f40ad-aa85-4686-9757-a3c13fd262a0';
     const proxyFetch = (u, o) => fetch(u, o);
 
@@ -4330,6 +4374,24 @@ Object.assign(APP_TRANSLATIONS.en, {
       }
     }
 
+    function localProjectStorageKey(base) { return `${base}_${PROJECT_ID}`; }
+    function readLocalProjectJson(base, fallback = null) {
+      try {
+        const scoped = localStorage.getItem(localProjectStorageKey(base));
+        if (scoped != null) return JSON.parse(scoped);
+        const legacy = localStorage.getItem(base);
+        return legacy != null ? JSON.parse(legacy) : fallback;
+      } catch (_) { return fallback; }
+    }
+    function writeLocalProjectJson(base, value) {
+      const serialized = JSON.stringify(value);
+      localStorage.setItem(localProjectStorageKey(base), serialized);
+      localStorage.setItem(base, serialized);
+    }
+    function writeLocalProjectJsonForId(base, projectId, value) {
+      localStorage.setItem(`${base}_${projectId}`, JSON.stringify(value));
+    }
+
     function buildLocalProjectData(residentialConfigs, specialConfigs) {
       const configs = (residentialConfigs || []).concat(specialConfigs || []);
       const buildings = configs.map((cfg, index) => ({ id: `local-building-${index + 1}`, name: cfg.name }));
@@ -4355,7 +4417,20 @@ Object.assign(APP_TRANSLATIONS.en, {
           units.push({ id: `local-unit-${units.length + 1}`, apt, building: cfg.name, building_id: building.id, floor, systems: unitSystems });
         };
         if (cfg.type === 'special' || !('floors' in cfg)) addUnit(cfg.name, 'Underground');
-        else {
+        else if (Array.isArray(cfg.floorConfigs) && cfg.floorConfigs.length) {
+          cfg.floorConfigs.forEach(floorCfg => {
+            const floor = Math.max(1, parseInt(floorCfg.floor) || 1);
+            const count = Math.max(1, parseInt(floorCfg.unitsPerFloor) || 1);
+            const prefix = String(floorCfg.prefix || cfg.prefix || index + 1);
+            for (let u = 1; u <= count; u++) {
+              const apt = `${prefix}${floor}${String(u).padStart(2, '0')}`;
+              addUnit(apt, `Floor ${floor}`);
+              units[units.length - 1].unit_type = String(floorCfg.model || '').trim();
+            }
+          });
+          // Every residential building also has one Underground unit.
+          addUnit(`${cfg.prefix || index + 1}U`, 'Underground');
+        } else {
           for (let f = 1; f <= (cfg.floors || 3); f++) for (let u = 1; u <= (cfg.unitsPerFloor || 10); u++) addUnit(`${cfg.prefix || index + 1}${f}${String(u).padStart(2, '0')}`, `Floor ${f}`);
           // Every residential building also has one Underground unit.
           addUnit(`${cfg.prefix || index + 1}U`, 'Underground');
@@ -4370,8 +4445,8 @@ Object.assign(APP_TRANSLATIONS.en, {
       filters.floors = new Set(units.map(unit => unit.floor).filter(Boolean));
       filters.statuses = new Set(STATUSES);
       filters.systems = new Set(SYSTEMS);
-      localStorage.setItem('local_project_setup', JSON.stringify({ residentialConfigs, specialConfigs, savedAt: new Date().toISOString() }));
-      localStorage.setItem('local_project_data', JSON.stringify({ buildings, units }));
+      writeLocalProjectJson('local_project_setup', { residentialConfigs, specialConfigs, savedAt: new Date().toISOString() });
+      writeLocalProjectJson('local_project_data', { buildings, units });
       if (document.getElementById('buildingFilters')) setupFilterUI();
       if (document.getElementById('unitsContainer')) { renderUnits(); updateMetrics(); updateCharts(); }
     }
@@ -4398,14 +4473,14 @@ Object.assign(APP_TRANSLATIONS.en, {
         }
       });
       window.data = data;
-      localStorage.setItem('local_project_data', JSON.stringify({ buildings: sbBuildings, units: data }));
+      writeLocalProjectJson('local_project_data', { buildings: sbBuildings, units: data });
     }
 
     async function loadData() {
       try {
         if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
-          const saved = JSON.parse(localStorage.getItem('local_project_setup') || 'null');
-          const savedData = JSON.parse(localStorage.getItem('local_project_data') || 'null');
+          const saved = readLocalProjectJson('local_project_setup');
+          const savedData = readLocalProjectJson('local_project_data');
           const hasSavedUnits = Array.isArray(savedData?.units) && savedData.units.length > 0;
           if (hasSavedUnits) data = savedData.units.map(unit => ({ ...unit, floor: normalizeFloorName(unit.floor) }));
           const hasSavedSetup = saved && ((saved.residentialConfigs || []).length || (saved.specialConfigs || []).length);
@@ -5276,6 +5351,17 @@ async function openProjectSetup() {
       const setupList = document.getElementById('setupBuildingsList');
       setupList.innerHTML = '<div style="padding:12px;text-align:center;color:#6B7280;font-size:13px;">⏳ Loading from Supabase...</div>';
 showAppModal('projectSetupModal');
+      // Keep drawing/RFI libraries visible near the top of Setup. They used to
+      // sit below the full buildings list, making them appear to disappear.
+      const setupBody = document.querySelector('#projectSetupModal .modal-content > div[style*="padding:20px"]');
+      const setupBuildingsSection = document.getElementById('setupBuildingsSection');
+      const setupLibraries = [
+        document.getElementById('setupDrawingModelsDetails'),
+        document.getElementById('setupFloorPlansDetails')
+      ].filter(Boolean);
+      if (setupBody && setupBuildingsSection) {
+        setupLibraries.forEach(section => setupBody.insertBefore(section, setupBuildingsSection));
+      }
       // Render inspection types per building config
       setTimeout(() => renderInspBuildingConfig(), 100);
       setTimeout(() => { renderSetupDrawingModels(); renderSetupFloorPlans(); }, 120);
@@ -5284,13 +5370,14 @@ showAppModal('projectSetupModal');
       document.getElementById('setupSupabaseUrl').value = SUPABASE_URL;
       document.getElementById('setupSupabaseKey').value = SUPABASE_KEY;
       document.getElementById('setupProjectId').value = PROJECT_ID;
+      loadSetupProjectSelector();
       renderLocalNotificationSettings();
 
       if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
         setupList.innerHTML = '';
-        const saved = JSON.parse(localStorage.getItem('local_project_setup') || 'null');
+        const saved = readLocalProjectJson('local_project_setup');
         if (saved) {
-           (saved.residentialConfigs || []).forEach(cfg => addSetupBuilding({ ...cfg, type: 'residential', activeSystems: Array.isArray(cfg.systems) ? cfg.systems : null }));
+           (saved.residentialConfigs || []).forEach(cfg => addSetupBuilding({ ...cfg, type: 'residential', activeSystems: Array.isArray(cfg.systems) ? cfg.systems : null, floorConfigs: Array.isArray(cfg.floorConfigs) ? cfg.floorConfigs : null }));
            (saved.specialConfigs || []).forEach(cfg => addSetupBuilding({ ...cfg, type: 'special', activeSystems: Array.isArray(cfg.systems) ? cfg.systems : null }));
         } else {
           BUILDINGS.slice(0, 3).forEach((name, i) => addSetupBuilding({ name, floors: 3, unitsPerFloor: name === 'Building 1' ? 12 : 10, prefix: String(i + 1), type: 'residential' }));
@@ -5397,6 +5484,128 @@ showAppModal('projectSetupModal');
 
 function closeProjectSetup() {
 animateModalClose('projectSetupModal', () => { document.getElementById('projectSetupModal').style.display = 'none'; });
+    }
+
+    async function switchProjectFromSetup() {
+      const url = (document.getElementById('setupSupabaseUrl')?.value || '').trim().replace(/\/$/, '');
+      const key = (document.getElementById('setupSupabaseKey')?.value || '').trim();
+      const projectId = (document.getElementById('setupProjectId')?.value || '').trim();
+      if (!/^https:\/\/[^\s]+\.supabase\.co$/i.test(url)) { alert('Enter a valid Supabase URL.'); return; }
+      if (!key || !/^[a-z0-9-]{20,}$/i.test(projectId)) { alert('Enter the Supabase anon key and project ID.'); return; }
+      const ok = await showProjectSetupConfirm(0, 0);
+      if (!ok) return;
+      localStorage.setItem('cfg_supabase_url', url);
+      localStorage.setItem('cfg_supabase_key', key);
+      localStorage.setItem('cfg_project_id', projectId);
+      addLocalAudit('Project connection switched', { projectId });
+      location.reload();
+    }
+
+    let setupProjectCatalog = [];
+    async function loadSetupProjectSelector() {
+      const selects = ['projectSelector', 'setupProjectSelector']
+        .map(id => document.getElementById(id)).filter(Boolean);
+      if (!selects.length) return;
+      let projects = [];
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
+        try { projects = JSON.parse(localStorage.getItem('local_project_catalog') || '[]'); } catch (_) { projects = []; }
+      } else if (sbClient) {
+        try {
+          const { data } = await sbClient.from('projects').select('id,name,address').order('name', { ascending: true });
+          projects = Array.isArray(data) ? data : [];
+        } catch (_) { projects = []; }
+      }
+      if (!projects.some(p => p.id === PROJECT_ID)) projects.unshift({ id: PROJECT_ID, name: getProjectName(), address: getProjectAddress() });
+      setupProjectCatalog = projects.filter(p => p && p.id);
+      const options = setupProjectCatalog.map(p => {
+        const label = String(p.name || p.id).replace(/[&<>\"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+        const headerLabel = p.id === PROJECT_ID ? '▾' : label;
+        return `<option value="${String(p.id).replace(/&/g,'&amp;').replace(/\"/g,'&quot;')}" data-project-name="${label}">${headerLabel}${p.id === PROJECT_ID ? '' : ''}</option>`;
+      }).join('');
+      selects.forEach(select => {
+        select.innerHTML = options;
+        select.value = PROJECT_ID;
+      });
+      const help = document.getElementById('setupProjectSelectorHelp');
+      if (help) help.textContent = setupProjectCatalog.length > 1 ? 'Select the project to open, then confirm with “Open / Switch Project”. The current project is never deleted.' : 'Only the current project is available in this account. Add another project to Supabase, then press Refresh.';
+    }
+    function selectProjectFromCatalog(projectId) {
+      const project = setupProjectCatalog.find(p => p.id === projectId);
+      if (!project) return;
+      const idInput = document.getElementById('setupProjectId');
+      const nameInput = document.getElementById('setupProjectName');
+      const addressInput = document.getElementById('setupProjectAddress');
+      if (idInput) idInput.value = project.id;
+      if (nameInput && project.name) nameInput.value = project.name;
+      if (addressInput && project.address != null) addressInput.value = project.address;
+      ['projectSelector', 'setupProjectSelector'].forEach(id => {
+        const select = document.getElementById(id);
+        if (select) select.value = project.id;
+      });
+    }
+    function selectSetupProject(projectId) { selectProjectFromCatalog(projectId); }
+    function selectHeaderProject(projectId) {
+      if (!projectId) return;
+      selectProjectFromCatalog(projectId);
+      if (projectId === PROJECT_ID) return;
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
+        const project = setupProjectCatalog.find(p => p.id === projectId);
+        localStorage.setItem('cfg_project_id', projectId);
+        if (project?.name) localStorage.setItem('cfg_project_name', project.name);
+        if (project?.address != null) localStorage.setItem('cfg_project_address', project.address);
+        location.reload();
+        return;
+      }
+      openProjectSetup();
+    }
+    async function createNewProjectFromSetup() {
+      const name = (document.getElementById('setupProjectName')?.value || '').trim();
+      const address = (document.getElementById('setupProjectAddress')?.value || '').trim();
+      if (name.length < 2) { alert('Enter a project name first.'); document.getElementById('setupProjectName')?.focus(); return; }
+      const ok = confirm(`Create the new project “${name}”?\n\nThe current project will not be changed. The new project will start with its own setup configuration.`);
+      if (!ok) return;
+      const id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'local-' + Date.now();
+        const templateMode = document.getElementById('setupNewProjectTemplate')?.value || 'copy';
+        const floorMode = document.getElementById('setupNewProjectMode')?.value || 'uniform';
+        const project = { id, name, address };
+      try {
+        if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
+          let catalog = [];
+          try { catalog = JSON.parse(localStorage.getItem('local_project_catalog') || '[]'); } catch (_) {}
+          catalog = catalog.filter(p => p && p.id);
+          catalog.push({ ...project, setup_mode: floorMode, setup_template: templateMode });
+          localStorage.setItem('local_project_catalog', JSON.stringify(catalog));
+          const currentSetup = readLocalProjectJson('local_project_setup', { residentialConfigs: [], specialConfigs: [] });
+          const newSetup = templateMode === 'copy'
+            ? JSON.parse(JSON.stringify(currentSetup))
+            : { residentialConfigs: [], specialConfigs: [], savedAt: new Date().toISOString() };
+          newSetup.projectMode = floorMode;
+          if (floorMode === 'custom') {
+            const source = newSetup.residentialConfigs?.[0] || { systems: [...SYSTEMS], unitsPerFloor: 10, prefix: '1' };
+            newSetup.residentialConfigs = [{
+              name: 'Building 1', type: 'residential', floors: 9,
+              unitsPerFloor: source.unitsPerFloor || 10, prefix: '1',
+              systems: Array.isArray(source.systems) ? source.systems : [...SYSTEMS],
+              floorConfigs: Array.from({ length: 9 }, (_, i) => ({
+                floor: i + 1, unitsPerFloor: source.unitsPerFloor || 10, prefix: '1', model: ''
+              }))
+            }];
+            newSetup.specialConfigs = [];
+          }
+          writeLocalProjectJsonForId('local_project_setup', id, newSetup);
+          writeLocalProjectJsonForId('local_project_data', id, { buildings: [], units: [] });
+        } else {
+          if (!sbClient) throw new Error('Supabase is not connected.');
+          const { error } = await sbClient.from('projects').insert(project);
+          if (error) throw error;
+        }
+        alert(`Project “${name}” was created successfully. Select it from the project selector to open it.`);
+        await loadSetupProjectSelector();
+        const header = document.getElementById('projectSelector');
+        if (header) header.value = PROJECT_ID;
+      } catch (err) {
+        alert(`Could not create the project: ${err.message || err}`);
+      }
     }
 
     // ===== INSPECTION TYPES PER BUILDING CONFIG =====
@@ -5550,7 +5759,48 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       }).join('');
     }
 
-    function addSetupBuilding({ name = '', floors = 3, unitsPerFloor = 10, prefix = '', type = 'residential', enabled = true, activeSystems = null } = {}) {
+    function setupFloorValue(value, fallback = '') {
+      return String(value ?? fallback).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+    }
+    function setupFloorRows(floorConfigs, floors, unitsPerFloor, prefix) {
+      const rows = Array.isArray(floorConfigs) && floorConfigs.length
+        ? floorConfigs
+        : Array.from({ length: Math.max(1, parseInt(floors) || 1) }, (_, i) => ({ floor: i + 1, unitsPerFloor, prefix, model: '' }));
+      return rows.map((cfg, i) => `<div class="setup-floor-row" data-floor="${setupFloorValue(cfg.floor, i + 1)}" style="display:grid;grid-template-columns:24px 52px 90px 78px minmax(90px,1fr);gap:6px;align-items:end;margin-bottom:6px;">
+        <label style="font-size:10px;color:#64748B;text-align:center;">&nbsp;<input class="setup-floor-target" type="checkbox" title="Select this floor" style="cursor:pointer;"></label>
+        <label style="font-size:10px;color:#64748B;">Floor<input class="setup-floor-number" type="number" min="1" value="${setupFloorValue(cfg.floor, i + 1)}" style="width:100%;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"></label>
+        <label style="font-size:10px;color:#64748B;">Units<input class="setup-floor-units" type="number" min="1" max="99" value="${setupFloorValue(cfg.unitsPerFloor, unitsPerFloor)}" style="width:100%;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"></label>
+        <label style="font-size:10px;color:#64748B;">Prefix<input class="setup-floor-prefix" type="text" maxlength="3" value="${setupFloorValue(cfg.prefix, prefix)}" style="width:100%;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"></label>
+        <label style="font-size:10px;color:#64748B;">Unit model<input class="setup-floor-model" type="text" placeholder="A1 / B1" value="${setupFloorValue(cfg.model)}" style="width:100%;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"></label>
+      </div>`).join('');
+    }
+    function toggleSetupFloorEditor(id) {
+      const editor = document.getElementById(`${id}_floorEditor`);
+      const toggle = document.getElementById(`${id}_customFloors`);
+      if (!editor || !toggle) return;
+      editor.hidden = !toggle.checked;
+    }
+    function setupFloorGroupCopy(id) {
+      const editor = document.getElementById(`${id}_floorEditor`);
+      if (!editor) return;
+      const sourceFloor = editor.querySelector('.setup-floor-source')?.value;
+      const source = Array.from(editor.querySelectorAll('.setup-floor-row')).find(row => row.querySelector('.setup-floor-number')?.value === sourceFloor);
+      if (!source) return;
+      const sourceValues = {
+        units: source.querySelector('.setup-floor-units')?.value || '1',
+        prefix: source.querySelector('.setup-floor-prefix')?.value || '',
+        model: source.querySelector('.setup-floor-model')?.value || ''
+      };
+      editor.querySelectorAll('.setup-floor-target:checked').forEach(check => {
+        const target = check.closest('.setup-floor-row');
+        if (!target || target === source) return;
+        target.querySelector('.setup-floor-units').value = sourceValues.units;
+        target.querySelector('.setup-floor-prefix').value = sourceValues.prefix;
+        target.querySelector('.setup-floor-model').value = sourceValues.model;
+        check.checked = false;
+      });
+    }
+    function addSetupBuilding({ name = '', floors = 3, unitsPerFloor = 10, prefix = '', type = 'residential', enabled = true, activeSystems = null, floorConfigs = null } = {}) {
       setupBuildingCount++;
       const id = `setupBuilding_${setupBuildingCount}`;
       const isSpecial = type === 'special';
@@ -5601,7 +5851,16 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
               <input type="text" value="${autoPrefix}" maxlength="3" placeholder="1" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
             </div>
             <button type="button" onclick="addBuildingInspectionColumn('${id}')" style="padding:6px 12px;background:#1E40AF;color:white;border:none;border-radius:5px;cursor:pointer;font-size:12px;">Add</button>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#1E3A8A;white-space:nowrap;"><input id="${id}_customFloors" type="checkbox" class="setup-custom-floor-toggle" ${Array.isArray(floorConfigs) && floorConfigs.length ? 'checked' : ''} onchange="toggleSetupFloorEditor('${id}')"> Custom floor groups</label>
             <button type="button" onclick="document.getElementById('${id}').remove()" style="padding:6px 10px;background:#FEE2E2;color:#DC2626;border:none;border-radius:5px;cursor:pointer;font-size:13px;">✕</button>
+          </div>
+          <div id="${id}_floorEditor" class="setup-floor-editor" ${Array.isArray(floorConfigs) && floorConfigs.length ? '' : 'hidden'} style="border:1px solid #BFDBFE;background:#EFF6FF;border-radius:6px;padding:9px;">
+            <div style="font-size:11px;color:#1E3A8A;margin-bottom:7px;">Select floors to form a group, then copy one floor configuration to the selected floors.</div>
+            <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+              <label style="font-size:10px;color:#475569;">Copy from<select class="setup-floor-source" style="margin-left:4px;padding:5px;border:1px solid #CBD5E1;border-radius:5px;">${(Array.isArray(floorConfigs) && floorConfigs.length ? floorConfigs : Array.from({length:Math.max(1, parseInt(floors) || 1)}, (_, i) => ({floor:i + 1}))).map((cfg, i) => `<option value="${setupFloorValue(cfg.floor, i + 1)}">Floor ${setupFloorValue(cfg.floor, i + 1)}</option>`).join('')}</select></label>
+              <button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="setupFloorGroupCopy('${id}')">Apply to selected floors</button>
+            </div>
+            ${setupFloorRows(floorConfigs, floors, unitsPerFloor, autoPrefix)}
           </div>
           ${systemsHtml}`;
       }
@@ -5728,7 +5987,14 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           const floors = parseInt(numInputs[0]?.value) || 3;
           const unitsPerFloor = parseInt(numInputs[1]?.value) || 10;
           const prefix = textInputs[1] ? textInputs[1].value.trim() : String(residentialConfigs.length + 1);
-           if (name) residentialConfigs.push({ name, type: 'residential', floors, unitsPerFloor, prefix, systems: selectedSystems });
+          const customToggle = row.querySelector('.setup-custom-floor-toggle');
+          const floorConfigs = customToggle?.checked ? Array.from(row.querySelectorAll('.setup-floor-row')).map(floorRow => ({
+            floor: parseInt(floorRow.querySelector('.setup-floor-number')?.value) || 1,
+            unitsPerFloor: parseInt(floorRow.querySelector('.setup-floor-units')?.value) || 1,
+            prefix: floorRow.querySelector('.setup-floor-prefix')?.value.trim() || prefix,
+            model: floorRow.querySelector('.setup-floor-model')?.value.trim() || ''
+          })) : null;
+           if (name) residentialConfigs.push({ name, type: 'residential', floors, unitsPerFloor, prefix, systems: selectedSystems, ...(floorConfigs ? { floorConfigs } : {}) });
         }
       });
 
@@ -6929,7 +7195,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     }
 
     // ===== Who made the change =====
-    function getUserName() { return localStorage.getItem('cfg_user_name') || ''; }
+    function getUserName() {
+      // In production the authenticated profile is the source of truth.
+      // Keep the local value only as a fallback for the offline/local preview.
+      return String(window.userName || localStorage.getItem('cfg_user_name') || '').trim();
+    }
     function askText(title, placeholder) {
       return new Promise(resolve => {
         const ov = document.createElement('div');
@@ -7003,20 +7273,18 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
       if (unit && unit.id && sbClient && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
         // Update only this unit/system (no delete-all + reinsert: faster and never leaves a system "not applicable")
-        try { await syncUnitSystemSafe(unit, system); } catch (e) { console.warn('⚠️ unit system sync failed:', e); }
+        try { await syncUnitSystemSafe(unit, system); } catch (e) {
+          console.error('⚠️ unit system sync failed:', e);
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Event'; }
+          if (typeof toast === 'function') toast(`Could not save the event: ${e.message || 'connection error'}`);
+          return;
+        }
       } else {
         await saveData();
       }
-      renderUnits();
-      updateMetrics();
-      updateCharts();
-      switchDetailsTab('overview');
-      closeAddEventModal();
-
       // Sync to Supabase
       if (unit && unit.id && sbClient && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
-        (async () => {
-          try {
+        try {
 
             // 1. Sync unit_systems_status
             // (already saved above by syncUnitSystemSafe)
@@ -7036,10 +7304,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
               progress_percent: progress,
               status: status,
               notes: notes,
-              inspector_name: 'app_user',
+              inspector_name: userBy,
               event_date: new Date().toISOString()
             }).select('id').single();
-            if (evErr) console.warn('⚠️ inspection_event error:', evErr);
+            if (evErr) throw evErr;
             else if (evData) { eventId = evData.id; console.log('✅ inspection_event saved', eventId); }
 
             // 3. Save photos to photos table
@@ -7051,20 +7319,26 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
                 photo_url: b64,
                 photo_path: `events/${unit.id}/${eventId}/photo_${i}.jpg`,
                 description: `Photo ${i+1} - ${system} inspection`,
-                uploaded_by: 'app_user'
+                uploaded_by: userBy
               }));
               const { error: phErr } = await sbClient.from('photos').insert(photoRows);
-              if (phErr) console.warn('⚠️ Photos save error:', phErr);
+              if (phErr) throw phErr;
               else console.log('✅ Photos saved to Supabase:', photoBase64.length);
             }
-
-          } catch(e) {
-            console.warn('⚠️ Supabase sync failed (event save):', e);
-          }
-        })();
+        } catch(e) {
+          console.error('⚠️ Supabase sync failed (event save):', e);
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Event'; }
+          if (typeof toast === 'function') toast(`Could not save the event: ${e.message || 'connection error'}`);
+          return;
+        }
       }
-
-      alert('Event and photos saved successfully');
+      // Only close and refresh after every remote write has completed.
+      renderUnits();
+      updateMetrics();
+      updateCharts();
+      switchDetailsTab('overview');
+      closeAddEventModal();
+      if (typeof toast === 'function') toast(photoBase64.length ? `✅ Event and ${photoBase64.length} photo(s) saved successfully` : '✅ Event saved successfully');
     }
 
     function openAddUnitModal() {
@@ -9675,6 +9949,16 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       window.authIsActive = () => AUTH_REQUIRED || /[?&]login=1/.test(location.search);
       window.getAccessToken = async () => { try { const { data } = await sbClient.auth.getSession(); return (data && data.session && data.session.access_token) || null; } catch (e) { return null; } };
 
+      function normalizeRole(role) {
+        const value = String(role || '').toLowerCase();
+        if (value === 'supervisor' || value === 'project_manager' || value === 'project manager') return 'pm';
+        return ['admin', 'pm', 'inspector', 'viewer'].includes(value) ? value : 'viewer';
+      }
+
+      function roleLabel(role) {
+        return ({ admin: 'Admin', pm: 'PM', inspector: 'Inspector', viewer: 'Viewer' })[normalizeRole(role)] || 'Viewer';
+      }
+
       function showLogin(message) {
         return new Promise(resolve => {
           const ov = document.createElement('div');
@@ -9723,7 +10007,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           const { data: { session } } = await sbClient.auth.getSession();
           if (!session) await showLogin(msg);
           const p = await loadProfile();
-          if (p) { window.userRole = p.role === 'supervisor' ? 'pm' : p.role; window.userName = p.name || ''; break; }
+          if (p) { window.userRole = normalizeRole(p.role); window.userName = p.name || ''; break; }
           await sbClient.auth.signOut(); msg = 'This account has no access. Contact your administrator.';
         }
         if (window.userName) localStorage.setItem('cfg_user_name', window.userName);
@@ -9754,7 +10038,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           return;
         }
         if (!window.authIsActive() || !window.userRole) { el.innerHTML = `👤 ${esc(localStorage.getItem('cfg_user_name') || 'No name set')} · <a href="#" onclick="changeUserName();return false;" style="color:#1E40AF;">change</a>`; return; }
-        el.innerHTML = `👤 ${esc(window.userName)} <span style="color:#6B7280;">(${window.userRole})</span> · <a href="#" id="lnkOut" style="color:#1E40AF;">Sign out</a>` + (window.userRole === 'admin' ? ` · <a href="#" id="lnkUsers" style="color:#1E40AF;">👥 Users</a>` : '');
+        el.innerHTML = `👤 ${esc(window.userName)} <span style="color:#6B7280;">(${roleLabel(window.userRole)})</span> · <a href="#" id="lnkOut" style="color:#1E40AF;">Sign out</a>` + (window.userRole === 'admin' ? ` · <a href="#" id="lnkUsers" style="color:#1E40AF;">👥 Users</a>` : '');
         $('lnkOut').onclick = async e => { e.preventDefault(); await sbClient.auth.signOut(); location.reload(); };
         if ($('lnkUsers')) $('lnkUsers').onclick = e => { e.preventDefault(); openUsers(); };
       };
@@ -9766,13 +10050,13 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           let users = [];
           try { users = JSON.parse(localStorage.getItem(key) || '[]'); } catch (e) { users = []; }
           if (!users.length) users = [{ id: 'local-admin', name: localStorage.getItem('cfg_user_name') || 'Carlos', email: 'admin@local.test', role: 'admin', disabled: false }];
-          if (action === 'list') { localStorage.setItem(key, JSON.stringify(users)); return { users, me: 'local-admin' }; }
+          if (action === 'list') { users = users.map(u => ({ ...u, role: normalizeRole(u.role) })); localStorage.setItem(key, JSON.stringify(users)); return { users, me: 'local-admin' }; }
           if (action === 'create') {
             if (!String(p.name || '').trim() || !String(p.email || '').trim() || String(p.password || '').length < 8) throw new Error('Enter a name, email, and a password of at least 8 characters.');
             if (users.some(u => u.email.toLowerCase() === String(p.email).trim().toLowerCase())) throw new Error('A user with this email already exists.');
-            users.push({ id: 'local-' + Date.now(), name: String(p.name).trim(), email: String(p.email).trim(), role: p.role || 'inspector', disabled: false });
+            users.push({ id: 'local-' + Date.now(), name: String(p.name).trim(), email: String(p.email).trim(), role: normalizeRole(p.role || 'inspector'), disabled: false });
           } else if (action === 'setRole') {
-            const u = users.find(x => x.id === p.id); if (!u) throw new Error('User not found.'); if (u.id === 'local-admin') throw new Error('The local admin role cannot be changed.'); u.role = p.role;
+            const u = users.find(x => x.id === p.id); if (!u) throw new Error('User not found.'); if (u.id === 'local-admin') throw new Error('The local admin role cannot be changed.'); u.role = normalizeRole(p.role);
           } else if (action === 'setActive') {
             const u = users.find(x => x.id === p.id); if (!u) throw new Error('User not found.'); u.disabled = !p.active;
           } else if (action === 'delete') {
@@ -9810,12 +10094,15 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         $('uClose').onclick = () => ov.remove();
         async function refresh() {
           try {
-            const { users, me } = await adminCall('list');
-            $('uList').innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;"><tr style="background:#F3F4F6;text-align:left;"><th style="padding:7px;">Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr>${users.map(u => `<tr style="border-bottom:1px solid #E5E7EB;"><td style="padding:7px;">${esc(u.name)}</td><td>${esc(u.email)}</td>
-        <td><select data-role="${u.id}" ${u.id === me ? 'disabled' : ''} style="padding:4px;">${['admin', 'pm', 'inspector', 'viewer'].map(r => `<option value="${r}" ${u.role === r || (r === 'pm' && u.role === 'supervisor') ? 'selected' : ''}>${r}</option>`).join('')}${u.role ? '' : '<option selected>none</option>'}</select></td>
+            const { users, memberships = [], me } = await adminCall('list', { projectId: PROJECT_ID });
+            const membershipByUser = Object.fromEntries(memberships.map(m => [m.user_id, normalizeRole(m.role)]));
+            $('uList').innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;"><tr style="background:#F3F4F6;text-align:left;"><th style="padding:7px;">Name</th><th>Email</th><th>Global role</th><th>Current project</th><th>Status</th><th></th></tr>${users.map(u => `<tr style="border-bottom:1px solid #E5E7EB;"><td style="padding:7px;">${esc(u.name)}</td><td>${esc(u.email)}</td>
+        <td><select data-role="${u.id}" ${u.id === me ? 'disabled' : ''} style="padding:4px;">${['admin', 'pm', 'inspector', 'viewer'].map(r => `<option value="${r}" ${normalizeRole(u.role) === r ? 'selected' : ''}>${roleLabel(r)}</option>`).join('')}</select></td>
+              <td><select data-project-role="${u.id}" style="padding:4px;"><option value="none" ${!membershipByUser[u.id] ? 'selected' : ''}>No access</option>${['admin', 'pm', 'inspector', 'viewer'].map(r => `<option value="${r}" ${membershipByUser[u.id] === r ? 'selected' : ''}>${roleLabel(r)}</option>`).join('')}</select></td>
               <td>${u.disabled ? '<span style="color:#B91C1C;">Disabled</span>' : 'Active'}</td>
               <td style="white-space:nowrap;"><button data-pw="${u.id}" style="padding:4px 8px;font-size:12px;cursor:pointer;">Reset password</button> ${u.id === me ? '' : `<button data-act="${u.id}" data-on="${u.disabled ? 1 : 0}" style="padding:4px 8px;font-size:12px;cursor:pointer;">${u.disabled ? 'Enable' : 'Disable'}</button> <button data-del="${u.id}" data-name="${esc(u.name)}" style="padding:4px 8px;font-size:12px;cursor:pointer;background:#EF4444;color:#fff;border:none;border-radius:4px;">Delete</button>`}</td></tr>`).join('')}</table>`;
             $('uList').querySelectorAll('select[data-role]').forEach(s => s.onchange = async () => { try { await adminCall('setRole', { id: s.dataset.role, role: s.value }); msg('Role updated', true); } catch (e) { msg(e.message); refresh(); } });
+            $('uList').querySelectorAll('select[data-project-role]').forEach(s => s.onchange = async () => { try { await adminCall('setMembership', { userId: s.dataset.projectRole, projectId: PROJECT_ID, role: s.value }); msg('Project access updated', true); refresh(); } catch (e) { msg(e.message); refresh(); } });
             $('uList').querySelectorAll('button[data-act]').forEach(b => b.onclick = async () => { try { await adminCall('setActive', { id: b.dataset.act, active: b.dataset.on === '1' }); msg('Status updated', true); refresh(); } catch (e) { msg(e.message); } });
             $('uList').querySelectorAll('button[data-del]').forEach(b => b.onclick = async () => { if (!confirm(`Delete user "${b.dataset.name}"? This cannot be undone.`)) return; try { await adminCall('delete', { id: b.dataset.del }); msg('User deleted', true); refresh(); } catch (e) { msg(e.message); } });
             $('uList').querySelectorAll('button[data-pw]').forEach(b => b.onclick = async () => { const np = await (window.askText ? window.askText('New password for this user (8+ characters)', 'New password') : null); if (!np) return; try { await adminCall('resetPassword', { id: b.dataset.pw, password: np }); msg('Password changed', true); } catch (e) { msg(e.message); } });
@@ -9823,7 +10110,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         }
         $('uAdd').onclick = async () => {
           try {
-            await adminCall('create', { name: $('uName').value, email: $('uEmail').value, password: $('uPass').value, role: $('uRole').value });
+            await adminCall('create', { name: $('uName').value, email: $('uEmail').value, password: $('uPass').value, role: normalizeRole($('uRole').value), projectId: PROJECT_ID });
             ['uName', 'uEmail', 'uPass'].forEach(i => $(i).value = ''); msg('User created', true); refresh();
           } catch (e) { msg(e.message); }
         };
