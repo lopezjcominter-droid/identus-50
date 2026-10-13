@@ -2832,6 +2832,10 @@ Object.assign(APP_TRANSLATIONS.en, {
       const response = await proxyFetch(`${SUPABASE_URL}/rest/v1/${path}`, { method: 'POST', headers, body: JSON.stringify(rows) });
       if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
     }
+    async function quantityRemoteDelete(path, headers) {
+      const response = await proxyFetch(`${SUPABASE_URL}/rest/v1/${path}`, { method: 'DELETE', headers });
+      if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
+    }
     async function quantityAuthHeaders() {
       const accessToken = window.getAccessToken ? await window.getAccessToken() : null;
       if (!accessToken) throw new Error('Your session has expired. Sign in again to save Quantity Control data.');
@@ -2955,7 +2959,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         const historyCount = Array.isArray(store.templateHistory?.[type]) ? store.templateHistory[type].length : 0;
         const updateHistoryCount = Array.isArray(store.templateUpdateHistory?.[type]) ? store.templateUpdateHistory[type].length : 0;
         const undoButton = updateHistoryCount ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityUndoTemplateUpdate(${JSON.stringify(type)})'>Undo</button>` : '';
-        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #E2E8F0;border-radius:6px;background:#F8FAFC;font-size:12px;"><strong style="min-width:55px;color:#1E3A8A;">${officialFinalEscape(type)}</strong><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${officialFinalEscape(model.name || 'Drawing')}</span><span style="color:#64748B;">v${model.version || 1} · ${assigned} assigned${historyCount ? ` · ${historyCount} previous` : ''}</span><span style="color:#15803D;font-weight:600;">Active</span><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityPreviewDrawing(${JSON.stringify(type)},quantityStore().templates[${JSON.stringify(type)}])'>View</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenChecklistTemplate(${JSON.stringify(type)})'>Checklist</button>${undoButton}</div>`;
+        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #E2E8F0;border-radius:6px;background:#F8FAFC;font-size:12px;"><strong style="min-width:55px;color:#1E3A8A;">${officialFinalEscape(type)}</strong><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${officialFinalEscape(model.name || 'Drawing')}</span><span style="color:#64748B;">v${model.version || 1} · ${assigned} assigned${historyCount ? ` · ${historyCount} previous` : ''}</span><span style="color:#15803D;font-weight:600;">Active</span><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityPreviewDrawing(${JSON.stringify(type)},quantityStore().templates[${JSON.stringify(type)}])'>View</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenChecklistTemplate(${JSON.stringify(type)})'>Checklist</button>${undoButton}<button type="button" class="btn btn-danger" style="font-size:11px;padding:4px 8px;" onclick='quantityDeleteTemplate(${JSON.stringify(type)})'>Remove</button></div>`;
       }).join('') : '<div style="font-size:12px;color:#94A3B8;padding:6px 0;">No drawing models saved yet.</div>';
     }
     function renderSetupFloorPlans() {
@@ -2972,8 +2976,39 @@ Object.assign(APP_TRANSLATIONS.en, {
       const entries = Object.entries(plans).sort(([a], [b]) => a.localeCompare(b));
       list.innerHTML = entries.length ? entries.map(([key, plan]) => {
         const historyCount = Array.isArray(store.sitePlanHistory?.[key]) ? store.sitePlanHistory[key].length : 0;
-        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #E2E8F0;border-radius:6px;background:#F8FAFC;font-size:12px;"><strong style="min-width:160px;color:#1E3A8A;">${officialFinalEscape(key.replace('::',' / '))}</strong><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${officialFinalEscape(plan.name || 'Floor plan')}</span><span style="color:#64748B;">v${plan.version || 1}${historyCount ? ` · ${historyCount} previous` : ''}</span><span style="color:#15803D;font-weight:600;">Active</span><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityPreviewDrawing(${JSON.stringify(key.replace('::',' / '))},quantityStore().sitePlans[${JSON.stringify(key)}])'>View</button></div>`;
+        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #E2E8F0;border-radius:6px;background:#F8FAFC;font-size:12px;"><strong style="min-width:160px;color:#1E3A8A;">${officialFinalEscape(key.replace('::',' / '))}</strong><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${officialFinalEscape(plan.name || 'Floor plan')}</span><span style="color:#64748B;">v${plan.version || 1}${historyCount ? ` · ${historyCount} previous` : ''}</span><span style="color:#15803D;font-weight:600;">Active</span><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityPreviewDrawing(${JSON.stringify(key.replace('::',' / '))},quantityStore().sitePlans[${JSON.stringify(key)}])'>View</button><button type="button" class="btn btn-danger" style="font-size:11px;padding:4px 8px;" onclick='quantityDeleteFloorPlan(${JSON.stringify(key)})'>Remove</button></div>`;
       }).join('') : '<div style="font-size:12px;color:#94A3B8;padding:6px 0;">No floor/site plans saved yet.</div>';
+    }
+    async function quantityDeleteTemplate(type) {
+      if (!quantityIsAdmin()) return;
+      const store = quantityStore(); const model = store.templates?.[type]; if (!model) return;
+      const assigned = Object.values(store.unitTypes || {}).filter(value => String(value).toUpperCase() === String(type).toUpperCase()).length;
+      if (!confirm(`Remove model ${type}${assigned ? ` and its assignment from ${assigned} unit${assigned === 1 ? '' : 's'}` : ''}? This cannot be undone.`)) return;
+      try {
+        if (!quantityUsesLocalStorage() && sbClient && quantityRemoteReady) {
+          const headers = await quantityAuthHeaders();
+          await quantityRemoteDelete(`quantity_templates?project_id=eq.${PROJECT_ID}&unit_type=eq.${encodeURIComponent(type)}`, headers);
+        }
+        delete store.templates[type];
+        Object.keys(store.unitTypes || {}).forEach(key => { if (String(store.unitTypes[key]).toUpperCase() === String(type).toUpperCase()) delete store.unitTypes[key]; });
+        store.templateHistory && delete store.templateHistory[type];
+        store.templateUpdateHistory && delete store.templateUpdateHistory[type];
+        quantitySave(store); await quantityFlushRemoteSave(); renderSetupDrawingModels(); quantitySuccessToast(`✅ Model ${type} removed`);
+      } catch (error) { console.error('Quantity model removal failed', error); quantitySuccessToast('❌ Model could not be removed.'); }
+    }
+    async function quantityDeleteFloorPlan(key) {
+      if (!quantityIsAdmin()) return;
+      const store = quantityStore(); const plan = store.sitePlans?.[key]; if (!plan) return;
+      const [building, floor] = String(key).split('::');
+      if (!confirm(`Remove the ${building} / ${floor} floor plan? This cannot be undone.`)) return;
+      try {
+        if (!quantityUsesLocalStorage() && sbClient && quantityRemoteReady) {
+          const headers = await quantityAuthHeaders(); const b = (Array.isArray(data) ? data : []).find(u => String(u.building || '') === building);
+          if (b?.building_id) await quantityRemoteDelete(`quantity_floor_plans?project_id=eq.${PROJECT_ID}&building_id=eq.${encodeURIComponent(b.building_id)}&floor=eq.${encodeURIComponent(floor)}`, headers);
+        }
+        delete store.sitePlans[key]; store.sitePlanHistory && delete store.sitePlanHistory[key];
+        quantitySave(store); await quantityFlushRemoteSave(); renderSetupFloorPlans(); quantitySuccessToast(`✅ ${building} / ${floor} floor plan removed`);
+      } catch (error) { console.error('Floor plan removal failed', error); quantitySuccessToast('❌ Floor plan could not be removed.'); }
     }
     function renderSetupFloorPlanFloors() {
       const building = document.getElementById('setupFloorPlanBuilding')?.value || '';
