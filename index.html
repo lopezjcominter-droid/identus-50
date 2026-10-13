@@ -2853,7 +2853,20 @@ Object.assign(APP_TRANSLATIONS.en, {
           (states || []).forEach(row => { const u = (Array.isArray(data) ? data : []).find(x => String(x.id) === String(row.unit_id)); if (!u) return; const key = quantityUnitKey(u); store.unitTypes[key] = row.unit_type || ''; store.units[key] = { items: row.checklist || [], checklistMode: row.checklist_mode || 'template', markers: [], drawing: row.drawing_name ? { name: row.drawing_name, type: row.drawing_mime_type, dataUrl: row.drawing_storage_path || '', revision: row.drawing_revision || 0 } : null, revisions: [] }; });
           (marks || []).forEach(row => { const u = (Array.isArray(data) ? data : []).find(x => String(x.id) === String(row.unit_id)); if (!u) return; const key = quantityUnitKey(u); store.units[key] = store.units[key] || { items: quantityDefaultItems(), markers: [], revisions: [] }; store.units[key].markers.push({ id: row.id, itemIndex: row.item_index, x: Number(row.x), y: Number(row.y) }); });
           (revisions || []).forEach(row => { const u = (Array.isArray(data) ? data : []).find(x => String(x.id) === String(row.unit_id)); if (!u) return; const key = quantityUnitKey(u); store.units[key] = store.units[key] || { items: quantityDefaultItems(), markers: [], revisions: [] }; store.units[key].revisions.push({ id: row.id, number: row.revision_number, reason: row.reason, actor: row.actor_name, items: row.checklist || [], markers: row.marks || [], savedAt: row.created_at, drawing: row.drawing_name ? { name: row.drawing_name, type: row.drawing_mime_type, dataUrl: row.drawing_storage_path || '' } : null }); });
-          quantityRemoteStore = store; quantityRemoteReady = true; renderQuantityControl();
+          // One-time bridge for projects that were configured before Quantity
+          // Control was moved to Supabase. Production reads the browser copy
+          // only when the remote tables are completely empty, then immediately
+          // writes that seed to Supabase; all later reads use Supabase.
+          const remoteEmpty = !templates?.length && !plans?.length && !states?.length;
+          if (remoteEmpty) {
+            try {
+              const legacy = JSON.parse(localStorage.getItem('quantity_control_v1') || 'null');
+              if (legacy && typeof legacy === 'object' && Object.keys(legacy).length) Object.assign(store, legacy);
+            } catch (_) {}
+          }
+          quantityRemoteStore = store; quantityRemoteReady = true;
+          if (remoteEmpty && Object.keys(store).length) quantityPersistRemoteStore(store);
+          renderQuantityControl();
           if (document.getElementById('setupDrawingModelsList')) renderSetupDrawingModels();
           if (document.getElementById('setupFloorPlansList')) renderSetupFloorPlans();
         } catch (error) { console.error('Quantity Control Supabase load failed', error); quantityRemoteStore = {}; quantityRemoteReady = true; }
