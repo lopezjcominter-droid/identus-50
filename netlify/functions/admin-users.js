@@ -1,7 +1,7 @@
 // Admin-only user management for Identus 50.
 // SUPABASE_SERVICE_ROLE_KEY must exist only in Netlify environment variables.
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kihsukzcbohmxovbyisi.supabase.co';
-const ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+const ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const ROLES = ['admin', 'pm', 'inspector', 'viewer'];
 
@@ -49,7 +49,7 @@ exports.handler = async (event) => {
   if (!me.ok || !me.body || !me.body.id) return json(401, { error: 'Invalid session' });
   const myId = me.body.id;
   const profile = await rest(`/rest/v1/profiles?user_id=eq.${encodeURIComponent(myId)}&select=role`, { headers: serviceHeaders() });
-  const myRole = profile.body && profile.body[0] && profile.body[0].role;
+  const myRole = normalizeRole(profile.body && profile.body[0] && profile.body[0].role);
   if (!profile.ok || !['admin'].includes(myRole)) return json(403, { error: 'Admins only' });
 
   let req;
