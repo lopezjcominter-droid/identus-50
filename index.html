@@ -2012,7 +2012,7 @@
 
         <div class="form-group">
           <label class="form-label">System</label>
-          <select class="form-select" id="quickSystem" required onchange="autoFillQuickUnit(document.getElementById('quickUnit').value)">
+          <select class="form-select" id="quickSystem" required onchange="autoFillQuickUnit(document.getElementById('quickUnit').value); updateQuickEntryMode(this.value)">
             <option value="">Select System</option>
             <option value="Rough-In">Rough-In</option>
             <option value="Trim-Out">Trim-Out</option>
@@ -2027,12 +2027,13 @@
           </select>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Progress %</label>
+        <div class="form-group" id="quickProgressGroup">
+          <label class="form-label" id="quickProgressLabel">Progress %</label>
           <input type="number" class="form-input" id="quickProgress" min="0" max="100" value="0" required onchange="validateProgress(this)">
         </div>
+        <div id="quickQuantityHint" style="display:none;padding:9px 10px;border:1px solid #BFDBFE;border-radius:7px;background:#EFF6FF;color:#1E3A8A;font-size:12px;">This system uses Quantity Control. Saving will open the unit checklist and drawing so installed quantities can be marked there.</div>
 
-        <div class="form-group">
+        <div class="form-group" id="quickPhotoGroup">
           <label class="form-label">Photo</label>
           <div style="display:flex; gap:8px; margin-bottom:6px;">
             <button type="button" onclick="document.getElementById('quickPhotoFile').click()" class="btn btn-secondary" style="flex:1; font-size:13px;">📁 Choose File</button>
@@ -2047,7 +2048,8 @@
 
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" onclick="closeQuickAddModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Save Unit</button>
+          <button type="button" id="quickQuantityOpenButton" class="btn btn-secondary" style="display:none;" onclick="openQuantityFromQuick()">Open Quantity Control</button>
+          <button type="submit" id="quickSaveButton" class="btn btn-primary">Save Unit</button>
         </div>
       </form>
     </div>
@@ -2264,6 +2266,7 @@
             <div style="font-size:12px;color:#475569;">Create a fixed model such as C1, A1, or B1. Inspectors will see the assigned model read-only. PMs and administrators can later add a unit-specific RFI drawing.</div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <input id="setupDrawingModelType" type="text" placeholder="Model: C1" style="width:105px;padding:7px 9px;border:1px solid #BFDBFE;border-radius:6px;text-transform:uppercase;">
+              <select id="setupDrawingModelSystem" style="padding:7px;border:1px solid #BFDBFE;border-radius:6px;min-width:125px;" aria-label="System for this drawing"><option value="Rough-In">Rough-In</option><option value="Trim-Out">Trim-Out</option><option value="Data">Data</option><option value="Fire Alarm">Fire Alarm</option></select>
               <label class="btn btn-secondary" style="font-size:11px;padding:6px 9px;cursor:pointer;">📎 Upload model<input id="setupDrawingModelInput" type="file" accept="image/*,.pdf" onchange="saveSetupDrawingModel(this)" style="display:none"></label>
               <button type="button" class="btn btn-secondary" style="font-size:11px;padding:6px 9px;" onclick="quantityOpenChecklistTemplateFromInput()">Checklist</button>
               <span id="setupDrawingModelMessage" style="font-size:11px;color:#15803D;"></span>
@@ -2785,7 +2788,9 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
 
     // ===== Quantity Control =====
+    const QUANTITY_SYSTEMS = ['Rough-In', 'Trim-Out', 'Data', 'Fire Alarm'];
     let quantityCurrentUnit = null;
+    let quantityCurrentSystem = 'Rough-In';
     let quantityActiveItem = -1;
     let quantityRevisionCursor = null;
     let quantityDrawingZoom = 1;
@@ -2894,9 +2899,12 @@ Object.assign(APP_TRANSLATIONS.en, {
       const store = quantityStore(); store.unitTypes = store.unitTypes || {};
       return String(store.unitTypes[quantityUnitKey(unit)] || unit?.unitType || unit?.unit_type || '').trim().toUpperCase();
     }
-    function quantityTemplateFor(unit) {
+    function quantityTemplateFor(unit, system = quantityCurrentSystem) {
       const store = quantityStore(); const type = quantityUnitType(unit);
-      return type && store.templates?.[type] ? store.templates[type] : null;
+      const template = type && store.templates?.[type] ? store.templates[type] : null;
+      if (!template) return null;
+      const drawing = template.systemDrawings?.[system];
+      return drawing ? { ...template, ...drawing, checklist: template.checklist || [] } : template;
     }
     function quantityEffectiveDrawing(unit, state) {
       return state?.drawing?.dataUrl ? { ...state.drawing, source: 'unit' } : (quantityTemplateFor(unit) ? { ...quantityTemplateFor(unit), source: 'template' } : null);
@@ -2935,7 +2943,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       units.forEach(unit => {
         const key = quantityUnitKey(unit); store.unitTypes[key] = type;
         const state = quantityUnitState(unit);
-        if (state.checklistMode !== 'custom') { state.items = quantityClone(template.checklist?.length ? template.checklist : quantityDefaultItems()); state.checklistMode = 'template'; store.units[key] = state; }
+        if (state.checklistMode !== 'custom') { state.items = quantityClone(template.checklist?.length ? template.checklist : quantityDefaultItems()); state.checklistMode = 'template'; quantityStoreUnitState(store, unit, state); }
       });
       quantitySave(store); renderQuantityControl();
       if (typeof toast === 'function') toast(`Template ${type} assigned to ${units.length} unit${units.length === 1 ? '' : 's'}`);
@@ -3142,7 +3150,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const store = quantityStore();
       if (quantityChecklistTemplateMode === 'unit') {
         const state = quantityUnitState(quantityCurrentUnit); state.items = quantityClone(checklist); state.checklistMode = 'custom'; state.markers = []; quantityAddHistory(state, 'Custom checklist updated', 'Unit-specific checklist saved; installed marks reset');
-        store.units = store.units || {}; store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); const saved = await quantityFlushRemoteSave(); if (!saved) return; quantityCloseChecklistTemplate(); quantityRenderUnit(); quantitySuccessToast(`✅ Unit ${quantityCurrentUnit.apt} checklist saved`); return;
+        store.units = store.units || {}; quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); const saved = await quantityFlushRemoteSave(); if (!saved) return; quantityCloseChecklistTemplate(); quantityRenderUnit(); quantitySuccessToast(`✅ Unit ${quantityCurrentUnit.apt} ${quantityCurrentSystem} checklist saved`); return;
       }
       const template = store.templates?.[quantityChecklistTemplateType]; if (!template) return;
       const assigned = (Array.isArray(data) ? data : []).filter(unit => quantityUnitType(unit) === quantityChecklistTemplateType && !(store.units?.[quantityUnitKey(unit)]?.checklistMode === 'custom'));
@@ -3165,18 +3173,20 @@ Object.assign(APP_TRANSLATIONS.en, {
     function saveSetupDrawingModel(input) {
       if (!quantityIsAdmin()) return;
       const file = input?.files?.[0]; const typeInput = document.getElementById('setupDrawingModelType');
-      const type = String(typeInput?.value || '').trim().toUpperCase(); const message = document.getElementById('setupDrawingModelMessage');
+      const system = String(document.getElementById('setupDrawingModelSystem')?.value || 'Rough-In'); const type = String(typeInput?.value || '').trim().toUpperCase(); const message = document.getElementById('setupDrawingModelMessage');
       if (!file || !type) { if (message) { message.textContent = 'Enter a model name first.'; message.style.color = '#B91C1C'; } if (input) input.value = ''; return; }
       quantityReadFile(file, (dataUrl, name, mime, storagePath) => {
         const store = quantityStore(); store.templates = store.templates || {}; store.templateHistory = store.templateHistory || {};
         const previous = store.templates[type];
-        if (previous && !confirm(`Update model ${type}? All units assigned to ${type} will use the new version. Unit-specific RFI drawings will remain unchanged.`)) { if (input) input.value = ''; return; }
+        if (previous && !confirm(`Update ${type} / ${system}? Assigned units will use the new system drawing. Unit-specific RFI drawings will remain unchanged.`)) { if (input) input.value = ''; return; }
         if (previous) quantityCaptureTemplateUpdate(type, store);
         if (previous) { store.templateHistory[type] = Array.isArray(store.templateHistory[type]) ? store.templateHistory[type] : []; store.templateHistory[type].unshift({ ...previous, archivedAt: new Date().toISOString() }); }
-        store.templates[type] = { ...previous, name, type: mime, dataUrl: (mime.startsWith('image/') || mime === 'application/pdf') ? dataUrl : '', storagePath, updatedAt: new Date().toISOString(), version: (previous?.version || 0) + 1 };
+        const next = { ...previous, name, type: mime, dataUrl: (mime.startsWith('image/') || mime === 'application/pdf') ? dataUrl : '', storagePath, updatedAt: new Date().toISOString(), version: (previous?.version || 0) + 1 };
+        next.systemDrawings = { ...(previous?.systemDrawings || {}), [system]: { name, type: mime, dataUrl: (mime.startsWith('image/') || mime === 'application/pdf') ? dataUrl : '', storagePath, updatedAt: next.updatedAt, version: next.version } };
+        store.templates[type] = next;
         quantitySave(store); if (typeInput) typeInput.value = ''; if (input) input.value = ''; renderSetupDrawingModels();
-        if (message) { message.textContent = `✓ ${type} saved successfully · v${store.templates[type].version}`; message.style.color = '#15803D'; }
-        if (typeof toast === 'function') toast(`Model ${type} saved successfully`);
+        if (message) { message.textContent = `✓ ${type} / ${system} saved successfully · v${store.templates[type].version}`; message.style.color = '#15803D'; }
+        if (typeof toast === 'function') toast(`Model ${type} / ${system} saved successfully`);
       });
     }
     function assignSetupDrawingModel() {
@@ -3201,7 +3211,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       selected.forEach(unit => {
         const key = quantityUnitKey(unit); store.unitTypes[key] = type;
         const state = quantityUnitState(unit);
-        if (state.checklistMode !== 'custom') { state.items = quantityClone(store.templates[type].checklist?.length ? store.templates[type].checklist : quantityDefaultItems()); state.checklistMode = 'template'; quantityAddHistory(state, 'Unit model assigned', `${type} model assigned with standard checklist`); store.units[key] = state; }
+        if (state.checklistMode !== 'custom') { state.items = quantityClone(store.templates[type].checklist?.length ? store.templates[type].checklist : quantityDefaultItems()); state.checklistMode = 'template'; quantityAddHistory(state, 'Unit model assigned', `${type} model assigned with standard checklist`); quantityStoreUnitState(store, unit, state); }
       });
       quantitySave(store); renderSetupDrawingModels();
       if (typeof toast === 'function') toast(`${type} assigned to ${selected.length} unit${selected.length === 1 ? '' : 's'} ${scope}`);
@@ -3224,7 +3234,19 @@ Object.assign(APP_TRANSLATIONS.en, {
       const key = quantityUnitKey(unit);
       const existing = store.units?.[key];
       const template = quantityTemplateFor(unit);
-      const state = existing || { items: template?.checklist?.length ? quantityClone(template.checklist) : quantityDefaultItems(), markers: [], drawing: null, checklistMode: template?.checklist?.length ? 'template' : 'custom' };
+      let state = existing;
+      // New system-specific state is stored under systemStates. Existing data
+      // is migrated to Rough-In on first use and remains backward compatible.
+      if (existing?.systemStates) {
+        state = existing.systemStates[quantityCurrentSystem];
+      } else if (existing && quantityCurrentSystem === 'Rough-In') {
+        state = existing;
+      } else if (existing) {
+        existing.systemStates = { 'Rough-In': quantityClone(existing) };
+        delete existing.systemStates['Rough-In'].systemStates;
+        state = existing.systemStates[quantityCurrentSystem];
+      }
+      if (!state) state = { items: template?.checklist?.length ? quantityClone(template.checklist) : quantityDefaultItems(), markers: [], drawing: null, checklistMode: template?.checklist?.length ? 'template' : 'custom' };
       state.items = Array.isArray(state.items) && state.items.length ? state.items : quantityDefaultItems();
       state.markers = Array.isArray(state.markers) ? state.markers : [];
       state.history = Array.isArray(state.history) ? state.history : [];
@@ -3242,6 +3264,54 @@ Object.assign(APP_TRANSLATIONS.en, {
       const oldRevisions = state.revisions.filter(revision => revision.revisionNumber == null);
       oldRevisions.forEach((revision, index) => { revision.revisionNumber = state.revisions.length - 1 - index; revision.isManual = true; });
       return state;
+    }
+    function quantityStoreUnitState(store, unit, state) {
+      const key = quantityUnitKey(unit); store.units = store.units || {};
+      const current = store.units[key];
+      if (quantityCurrentSystem === 'Rough-In' && !current?.systemStates) {
+        store.units[key] = state;
+        return;
+      }
+      const base = current?.systemStates ? current : { systemStates: { 'Rough-In': quantityClone(current || state) } };
+      if (base.systemStates['Rough-In']) delete base.systemStates['Rough-In'].systemStates;
+      base.systemStates[quantityCurrentSystem] = state;
+      store.units[key] = base;
+    }
+    function quantitySwitchSystem(system) {
+      const next = QUANTITY_SYSTEMS.includes(system) ? system : 'Rough-In';
+      quantityCurrentSystem = next;
+      quantityActiveItem = -1;
+      if (quantityCurrentUnit) quantityRenderUnit();
+    }
+    function quantityComputedProgress(unit, system) {
+      if (!unit || !QUANTITY_SYSTEMS.includes(system)) return null;
+      const previous = quantityCurrentSystem;
+      try {
+        quantityCurrentSystem = system;
+        const state = quantityUnitState(unit);
+        const takeoff = (state.items || []).reduce((sum, item) => sum + Math.max(0, Number(item.takeoff) || 0), 0);
+        if (!takeoff) return null;
+        const installed = (state.markers || []).length;
+        return Math.max(0, Math.min(100, Math.round((installed / takeoff) * 100)));
+      } finally { quantityCurrentSystem = previous; }
+    }
+    function quantityApplyComputedProgress(unit) {
+      if (!unit?.systems) return;
+      QUANTITY_SYSTEMS.forEach(system => {
+        if (!unit.systems[system]) return;
+        const progress = quantityComputedProgress(unit, system);
+        if (progress == null) return;
+        unit.systems[system].progress = progress;
+        unit.systems[system].status = progressToStatus(progress);
+      });
+    }
+    function quantityCompletionDate(unit, system) {
+      const previous = quantityCurrentSystem;
+      try {
+        quantityCurrentSystem = system;
+        const state = quantityUnitState(unit);
+        return (state.history || []).find(entry => entry.action === 'Installed mark added' || entry.action === 'Revision saved')?.at || new Date().toISOString();
+      } finally { quantityCurrentSystem = previous; }
     }
     function quantityClone(value) {
       return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -3287,7 +3357,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantityRevisionCursor = 0;
       state.lastSavedRevisionId = state.revisions[0].id;
       quantityAddHistory(state, 'Revision saved', `Rev ${revisionNumber}: plan, takeoff checklist, and installed marks saved (${state.revisions[0].savedAt})`);
-      store.units[key] = state;
+      quantityStoreUnitState(store, quantityCurrentUnit, state);
       const saved = quantitySave(store);
       quantityRenderUnit();
       if (saved) setTimeout(() => quantitySuccessToast(`✅ Rev ${revisionNumber} saved successfully`), 0);
@@ -3311,7 +3381,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       state.lastSavedRevisionId = state.revisions[0]?.id || null;
       state.history = (state.history || []).filter(entry => !(entry.action === 'Revision saved' && String(entry.details || '').includes(label)));
       quantityRevisionCursor = null;
-      store.units[key] = state; quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
       quantitySuccessToast(`✅ ${label} undone · previous saved state restored`);
     }
     function quantityResetRevisionHistory() {
@@ -3327,7 +3397,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       state.revisions = [original];
       state.history = [{ id: Date.now() + Math.random(), at: original.savedAt, actor: original.actor, action: 'Revision saved', details: `Rev 0: original plan, takeoff checklist, and installed marks saved (${original.savedAt})` }];
       quantityRevisionCursor = null;
-      store.units[key] = state; quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
       quantitySuccessToast('✅ Test history cleared · Rev 0 kept');
     }
     function quantityLoadRevision(index, ask = true) {
@@ -3347,7 +3417,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantityRevisionCursor = Number(index);
       state.lastSavedRevisionId = revision.id;
       if (ask) quantityAddHistory(state, 'Revision loaded', `Restored saved plan and takeoff revision from ${dateText}`);
-      store.units[key] = state; quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
       if (ask && typeof toast === 'function') toast('Saved revision loaded');
     }
     function quantitySuccessToast(message, ms) {
@@ -3727,7 +3797,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         state.lastSavedRevisionId = null;
         state.drawing = { name, type, dataUrl: (type.startsWith('image/') || type === 'application/pdf') ? dataUrl : '', storagePath, revision: (state.drawing?.revision || 0) + 1, updatedAt: new Date().toISOString() };
         quantityAddHistory(state, 'Drawing updated / RFI', `${previousDrawing} → ${name}; takeoff preserved and installed count reset for the new drawing`);
-        store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+        quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
         if (typeof toast === 'function') toast('Unit drawing saved locally');
       });
     }
@@ -3744,7 +3814,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (state.drawing?.dataUrl) state.drawingHistory.unshift({ ...state.drawing, archivedAt: new Date().toISOString() });
       state.drawingHistory = state.drawingHistory.slice(0, 20); state.drawing = null;
       quantityAddHistory(state, 'Returned to unit type template', `Using ${quantityUnitType(quantityCurrentUnit)} template`);
-      store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
       if (typeof toast === 'function') toast('Unit is using its type template again');
     }
     function quantityOpenUnit(index) {
@@ -3773,7 +3843,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (!note) { if (typeof toast === 'function') toast('Enter an RFI or change note first'); return; }
       const store = quantityStore(); store.units = store.units || {};
       const state = quantityUnitState(quantityCurrentUnit); quantityAddHistory(state, 'RFI / Admin note', note);
-      store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
     }
     function quantityRenderHistoryPanel() {
       const panel = document.querySelector('#quantityUnitContent .quantity-history');
@@ -3878,6 +3948,29 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantityDrawingZoom = Math.max(.5, Math.min(3, quantityDrawingZoom + (event.deltaY < 0 ? .1 : -.1)));
       quantityApplyDrawingView();
     }
+    // Return the visible drawing rectangle in the drawing stage's unscaled
+    // coordinate system. The image/canvas uses object-fit:contain, so the
+    // usable plan area can be smaller than the stage because of letterboxing.
+    // Keeping this calculation independent from the CSS transform makes marks
+    // land on the same symbol at 100%, zoomed, panned, or on a touch device.
+    function quantityDrawingContentGeometry(stage) {
+      if (!stage) return null;
+      const media = stage.querySelector('img, canvas');
+      const stageWidth = Math.max(1, stage.clientWidth || stage.offsetWidth);
+      const stageHeight = Math.max(1, stage.clientHeight || stage.offsetHeight);
+      if (!media) return { stageWidth, stageHeight, left: 0, top: 0, width: stageWidth, height: stageHeight };
+      let mediaWidth = Number(media.naturalWidth || media.videoWidth || media.width || 0);
+      let mediaHeight = Number(media.naturalHeight || media.videoHeight || media.height || 0);
+      if ((!mediaWidth || !mediaHeight) && media.getAttribute('data-pdf')) {
+        mediaWidth = Number(media.width || stageWidth);
+        mediaHeight = Number(media.height || stageHeight);
+      }
+      if (!mediaWidth || !mediaHeight) return { stageWidth, stageHeight, left: 0, top: 0, width: stageWidth, height: stageHeight };
+      const scale = Math.min(stageWidth / mediaWidth, stageHeight / mediaHeight);
+      const width = Math.max(1, mediaWidth * scale);
+      const height = Math.max(1, mediaHeight * scale);
+      return { stageWidth, stageHeight, left: (stageWidth - width) / 2, top: (stageHeight - height) / 2, width, height };
+    }
     function quantityTouchDistance(touches) {
       const dx = touches[0].clientX - touches[1].clientX; const dy = touches[0].clientY - touches[1].clientY;
       return Math.sqrt(dx * dx + dy * dy);
@@ -3906,7 +3999,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (previous === next) return;
       quantityRevisionCursor = null;
       state.items[index].takeoff = next; state.checklistMode = 'custom'; quantityAddHistory(state, 'Takeoff updated', `${state.items[index].description}: ${previous} → ${next}`);
-      store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
     }
     function quantityPlaceMarker(event) {
       if (!quantityCurrentUnit || quantityActiveItem < 0) { alert('Select a checklist item first.'); return; }
@@ -3918,10 +4011,28 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (Number(item.takeoff || 0) <= 0) { alert('Set a Takeoff Qty before marking installed items.'); return; }
       if (installed >= Number(item.takeoff || 0)) { alert('Installed quantity cannot exceed Takeoff Qty.'); return; }
       const board = document.querySelector('#quantityUnitContent .quantity-drawing-board');
-      const rect = board?.getBoundingClientRect() || event.currentTarget.getBoundingClientRect();
-      state.markers.push({ id: Date.now() + Math.random(), itemIndex: quantityActiveItem, x: ((event.clientX - rect.left) / rect.width) * 100, y: ((event.clientY - rect.top) / rect.height) * 100 });
+      const stage = board?.querySelector('.quantity-drawing-stage');
+      const stageRect = stage?.getBoundingClientRect() || event.currentTarget.getBoundingClientRect();
+      // stageRect includes translate + scale. Undo both before mapping the
+      // pointer into the actual visible drawing rectangle.
+      const zoom = Math.max(.01, Number(quantityDrawingZoom) || 1);
+      const localX = (event.clientX - stageRect.left) / zoom;
+      const localY = (event.clientY - stageRect.top) / zoom;
+      const geometry = quantityDrawingContentGeometry(stage) || {
+        stageWidth: Math.max(1, stageRect.width / zoom),
+        stageHeight: Math.max(1, stageRect.height / zoom),
+        left: 0, top: 0, width: Math.max(1, stageRect.width / zoom), height: Math.max(1, stageRect.height / zoom)
+      };
+      // Store stage percentages (the existing marker format) so all saved
+      // revisions remain compatible, while calculating them from the visible
+      // plan rather than from the letterboxed stage.
+      const contentX = Math.max(0, Math.min(100, ((localX - geometry.left) / geometry.width) * 100));
+      const contentY = Math.max(0, Math.min(100, ((localY - geometry.top) / geometry.height) * 100));
+      const x = Math.max(0, Math.min(100, ((geometry.left + (contentX / 100) * geometry.width) / geometry.stageWidth) * 100));
+      const y = Math.max(0, Math.min(100, ((geometry.top + (contentY / 100) * geometry.height) / geometry.stageHeight) * 100));
+      state.markers.push({ id: Date.now() + Math.random(), itemIndex: quantityActiveItem, x, y });
       quantityAddHistory(state, 'Installed mark added', `${item.description} marked on drawing`);
-      store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
     }
     function quantityRemoveMarker(id, event) {
       event?.stopPropagation(); if (!quantityCurrentUnit) return;
@@ -3936,7 +4047,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       }
       state.markers = state.markers.filter(marker => String(marker.id) !== String(id));
       if (removed) quantityAddHistory(state, 'Installed mark removed', `${state.items[removed.itemIndex]?.description || 'Item'} mark removed from drawing`);
-      store.units[quantityUnitKey(quantityCurrentUnit)] = state; quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
     }
     function quantityClearMarkers() {
       if (!quantityCurrentUnit) return;
@@ -3946,7 +4057,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (!confirm(`Clear all installed marks for Unit ${quantityCurrentUnit.apt}? Takeoff quantities and drawings will remain.`)) return;
       quantityRevisionCursor = null;
       state.markers = []; quantityAddHistory(state, 'Installed marks cleared', 'All drawing marks were removed');
-      store.units[key] = state; quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
       if (typeof toast === 'function') toast('All installed marks cleared');
     }
     function quantityRenderUnit() {
@@ -3978,12 +4089,17 @@ Object.assign(APP_TRANSLATIONS.en, {
       const revisionNavLabel = activeRevision ? `Rev ${activeRevision.revisionNumber != null ? activeRevision.revisionNumber : ''}`.trim() : 'Current working version';
       const revisionNav = `<div class="quantity-revision-nav" style="position:absolute;left:50%;bottom:8px;transform:translateX(-50%);display:flex;align-items:center;justify-content:center;gap:8px;padding:4px 7px;background:rgba(255,255,255,.94);border:1px solid #CBD5E1;border-radius:7px;z-index:5;"><button type="button" class="btn btn-secondary" aria-label="Older plan revision" title="Older plan revision" ${olderDisabled ? 'disabled' : ''} onclick="quantityNavigateRevision(-1)" style="font-size:18px;line-height:1;padding:2px 9px;">‹</button><strong style="min-width:54px;text-align:center;font-size:11px;">${officialFinalEscape(revisionNavLabel)}</strong><button type="button" class="btn btn-secondary" aria-label="Newer plan revision" title="Newer plan revision" ${newerDisabled ? 'disabled' : ''} onclick="quantityNavigateRevision(1)" style="font-size:18px;line-height:1;padding:2px 9px;">›</button></div>`;
       const revisionStamp = `<div class="quantity-plan-revision-stamp" style="position:absolute;right:10px;top:10px;z-index:4;background:rgba(255,255,255,.92);border:1px solid #CBD5E1;border-radius:5px;padding:4px 7px;font-size:11px;color:#334155;pointer-events:none;">${officialFinalEscape(activeRevisionDate)}</div>`;
-      document.getElementById('quantityUnitContent').innerHTML = `<div class="quantity-checklist"><div class="quantity-card-header"><strong>Takeoff Checklist</strong><span>Click Select, then click the drawing</span></div><table><thead><tr><th>#</th><th>Description</th><th>Takeoff</th><th>Installed</th><th>Remaining</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div><div class="quantity-card-header" style="border:1px solid #E2E8F0;border-bottom:0;border-radius:8px 8px 0 0;"><strong>Unit Drawing</strong><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${typeControl}${templateButton}${quantityIsAdmin() ? `<label class="btn btn-secondary" style="font-size:11px;padding:5px 8px;cursor:pointer;">Upload Drawing / RFI<input type="file" accept="image/*,.pdf" onchange="quantityHandleUnitPlan(this)" style="display:none"></label>` : ''}<button type="button" class="insp-btn insp-btn-success" style="font-size:11px;padding:5px 8px;" onclick="quantitySaveRevision()">Save Revision</button>${undoRevisionButton}<button class="btn btn-danger" style="font-size:11px;padding:5px 8px;" onclick="quantityClearMarkers()">Clear All Marks</button>${quantityIsAdmin() ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityResetRevisionHistory()">Reset test history</button>` : ''}</span></div><div class="quantity-drawing-board">${drawingHtml}${drawingHitArea}${drawingUpdateStamp}${revisionStamp}${markers}${revisionNav}</div><div class="quantity-help"><strong>${drawingSource}</strong><br>${quantityActiveItem >= 0 ? `Active item: <strong>${String(quantityActiveItem + 1).padStart(2, '0')} — ${officialFinalEscape(state.items[quantityActiveItem]?.description || '')}</strong>. Click the corresponding symbol location to add an installed mark. Click a numbered green mark to remove it.` : 'Select an item to start marking its corresponding symbol on the drawing.'}</div></div>`;
+      const systemTabs = QUANTITY_SYSTEMS.map(system => `<button type="button" class="btn ${quantityCurrentSystem === system ? 'btn-primary' : 'btn-secondary'}" style="font-size:11px;padding:6px 9px;" onclick="quantitySwitchSystem('${system}')">${system}</button>`).join('');
+      document.getElementById('quantityUnitContent').innerHTML = `<div style="grid-column:1/-1;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;border:1px solid #BFDBFE;border-radius:8px;background:#EFF6FF;"><strong style="font-size:12px;color:#1E3A8A;margin-right:4px;">System / QC:</strong>${systemTabs}<span style="font-size:11px;color:#64748B;margin-left:auto;">${quantityCurrentSystem} quantities, drawing and RFI history</span></div><div class="quantity-checklist"><div class="quantity-card-header"><strong>${quantityCurrentSystem} Takeoff Checklist</strong><span>Click Select, then click the drawing</span></div><table><thead><tr><th>#</th><th>Description</th><th>Takeoff</th><th>Installed</th><th>Remaining</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div><div class="quantity-card-header" style="border:1px solid #E2E8F0;border-bottom:0;border-radius:8px 8px 0 0;"><strong>${quantityCurrentSystem} Drawing</strong><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${typeControl}${templateButton}${quantityIsAdmin() ? `<label class="btn btn-secondary" style="font-size:11px;padding:5px 8px;cursor:pointer;">Upload Drawing / RFI<input type="file" accept="image/*,.pdf" onchange="quantityHandleUnitPlan(this)" style="display:none"></label>` : ''}<button type="button" class="insp-btn insp-btn-success" style="font-size:11px;padding:5px 8px;" onclick="quantitySaveRevision()">Save Revision</button>${undoRevisionButton}<button class="btn btn-danger" style="font-size:11px;padding:5px 8px;" onclick="quantityClearMarkers()">Clear All Marks</button>${quantityIsAdmin() ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityResetRevisionHistory()">Reset test history</button>` : ''}</span></div><div class="quantity-drawing-board">${drawingHtml}${drawingHitArea}${drawingUpdateStamp}${revisionStamp}${markers}${revisionNav}</div><div class="quantity-help"><strong>${drawingSource}</strong><br>${quantityActiveItem >= 0 ? `Active item: <strong>${String(quantityActiveItem + 1).padStart(2, '0')} — ${officialFinalEscape(state.items[quantityActiveItem]?.description || '')}</strong>. Click the corresponding symbol location to add an installed mark. Click a numbered green mark to remove it.` : 'Select an item to start marking its corresponding symbol on the drawing.'}</div></div>`;
       const checklistHint = document.querySelector('#quantityUnitContent .quantity-checklist .quantity-card-header span');
       if (checklistHint && quantityIsAdmin()) checklistHint.innerHTML = `Click Select, then click the drawing <button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityOpenUnitChecklist()">Edit unit checklist</button>`;
       requestAnimationFrame(quantityApplyDrawingView);
       if (drawing?.type === 'application/pdf') requestAnimationFrame(() => quantityRenderPdf(document.querySelector('#quantityUnitContent .quantity-pdf-canvas'), drawing.dataUrl));
       quantityRefreshUnitListStatuses();
+      quantityApplyComputedProgress(quantityCurrentUnit);
+      if (typeof updateMetrics === 'function') updateMetrics();
+      if (typeof updateCharts === 'function') updateCharts();
+      if (typeof renderInspectionRequiredTasks === 'function') renderInspectionRequiredTasks();
     }
     function renderQuantityControl() {
       const select = document.getElementById('quantityFloorSelect'); const buildingSelect = document.getElementById('quantityBuildingSelect'); if (!select || !buildingSelect) return;
@@ -6627,11 +6743,15 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       // Populate with existing values
       SYSTEMS.forEach(sys => {
         if (unit.systems[sys]) {
-          document.querySelector(`input[data-system="${sys}"][data-field="progress"]`).value = unit.systems[sys].progress;
-          document.querySelector(`select[data-system="${sys}"][data-field="status"]`).value = unit.systems[sys].status;
+          const progressInput = document.querySelector(`input[data-system="${sys}"][data-field="progress"]`);
+          const statusInput = document.querySelector(`select[data-system="${sys}"][data-field="status"]`);
+          if (progressInput) progressInput.value = unit.systems[sys].progress;
+          if (statusInput) statusInput.value = unit.systems[sys].status;
         } else {
           // System not applicable to this unit: shown transparent and not editable
-          const g = document.querySelector(`input[data-system="${sys}"][data-field="progress"]`).closest('.form-group');
+          const field = document.querySelector(`input[data-system="${sys}"][data-field="progress"]`);
+          const g = field?.closest('.form-group');
+          if (!g) return;
           g.style.opacity = '0.35';
           g.querySelectorAll('input,select').forEach(el => { el.disabled = true; });
         }
@@ -6646,6 +6766,23 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const building = btn.dataset.building;
       const floor = btn.dataset.floor;
       openDetailsModal(apt, building, floor, evt);
+    }
+
+    function openQuantityFromUnit(apt, building, floor, system) {
+      const unit = data.find(item => item.apt === apt && item.building === building && item.floor === floor);
+      if (!unit) return;
+      quantityCurrentSystem = QUANTITY_SYSTEMS.includes(system) ? system : 'Rough-In';
+      closeDetailsModal();
+      switchMainTab('quantity', null);
+      requestAnimationFrame(() => {
+        const buildingSelect = document.getElementById('quantityBuildingSelect');
+        const floorSelect = document.getElementById('quantityFloorSelect');
+        if (buildingSelect) buildingSelect.value = building;
+        if (floorSelect) { renderQuantityControl(); floorSelect.value = floor; }
+        renderQuantityControl();
+        const index = quantityVisibleUnits().findIndex(item => quantityUnitKey(item) === quantityUnitKey(unit));
+        if (index >= 0) quantityOpenUnit(index);
+      });
     }
 
     function handleEditClick(btn, evt) {
@@ -6716,20 +6853,171 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
 
     let currentDetailsUnit = null;
     let currentEventUnit = null;
+    let officialRemoteStore = { final: {}, requests: [], tasks: [] };
+    let officialRemoteReady = false;
+    let officialRemoteLoading = null;
+
+    function officialUsesRemote() {
+      return typeof LOCAL_PROJECT_MODE !== 'undefined' && !LOCAL_PROJECT_MODE && window.location.protocol !== 'file:' && typeof sbClient !== 'undefined' && !!sbClient;
+    }
+    async function hydrateOfficialRemote() {
+      if (!officialUsesRemote() || officialRemoteReady) return officialRemoteStore;
+      if (officialRemoteLoading) return officialRemoteLoading;
+      officialRemoteLoading = (async () => {
+        try {
+          const [finalRes, requestRes, taskRes] = await Promise.all([
+            sbClient.from('official_final_records').select('*').eq('project_id', PROJECT_ID),
+            sbClient.from('official_inspection_requests').select('*').eq('project_id', PROJECT_ID).order('created_at', { ascending: false }),
+            sbClient.from('inspection_required_tasks').select('*').eq('project_id', PROJECT_ID)
+          ]);
+          if (finalRes.error) throw finalRes.error;
+          if (requestRes.error) throw requestRes.error;
+          if (taskRes.error) throw taskRes.error;
+          officialRemoteStore.final = Object.fromEntries((finalRes.data || []).map(row => [row.unit_key, { draft: row.draft, current: row.current, history: row.history || [] }]));
+          officialRemoteStore.requests = (requestRes.data || []).map(row => ({ ...row.payload, id: row.request_key }));
+          officialRemoteStore.tasks = (taskRes.data || []).map(row => ({ ...row.payload, key: row.task_key }));
+        } catch (error) {
+          console.error('Supabase official inspection load failed', error);
+          officialRemoteStore = { final: {}, requests: [], tasks: [] };
+        } finally {
+          officialRemoteReady = true;
+        }
+        return officialRemoteStore;
+      })();
+      return officialRemoteLoading;
+    }
+    async function persistOfficialFinalRemote(store) {
+      if (!officialUsesRemote() || !officialRemoteReady) return;
+      const rows = Object.entries(store || {}).map(([unitKey, entry]) => {
+        const unit = (data || []).find(candidate => officialFinalKey(candidate) === unitKey);
+        return { project_id: PROJECT_ID, unit_key: unitKey, unit_id: unit?.id || null, unit_number: unit?.apt || '', building: unit?.building || '', floor: unit?.floor || '', draft: entry?.draft || null, current: entry?.current || null, history: entry?.history || [], updated_at: new Date().toISOString() };
+      });
+      if (rows.length) {
+        const { error } = await sbClient.from('official_final_records').upsert(rows, { onConflict: 'project_id,unit_key' });
+        if (error) console.error('Supabase official final save failed', error);
+      }
+    }
+    async function persistOfficialRequestsRemote(requests) {
+      if (!officialUsesRemote() || !officialRemoteReady) return;
+      const rows = (requests || []).map(request => ({ project_id: PROJECT_ID, request_key: String(request.id), payload: request, status: request.status || 'Requested', created_at: request.createdAt || new Date().toISOString(), updated_at: new Date().toISOString() }));
+      if (rows.length) {
+        const { error } = await sbClient.from('official_inspection_requests').upsert(rows, { onConflict: 'project_id,request_key' });
+        if (error) console.error('Supabase official request save failed', error);
+      }
+    }
+    async function persistInspectionTasksRemote(tasks) {
+      if (!officialUsesRemote() || !officialRemoteReady) return;
+      const rows = (tasks || []).map(task => ({ project_id: PROJECT_ID, task_key: task.key, payload: task, apt: String(task.apt || ''), system: String(task.system || ''), kind: task.kind || 'system', completed_at: task.completedAt ? new Date(task.completedAt).toISOString() : null, resolved_at: task.resolvedAt ? new Date(task.resolvedAt).toISOString() : null, updated_at: new Date().toISOString() }));
+      if (rows.length) {
+        const { error } = await sbClient.from('inspection_required_tasks').upsert(rows, { onConflict: 'project_id,task_key' });
+        if (error) console.error('Supabase inspection task save failed', error);
+      }
+    }
 
     function officialFinalKey(unit) {
       return [unit?.apt, unit?.building, unit?.floor].map(v => String(v || '').trim()).join('::');
     }
     function getOfficialFinalStore() {
+      if (officialUsesRemote()) return officialRemoteStore.final;
       try { return JSON.parse(localStorage.getItem('official_final_inspections') || '{}') || {}; }
       catch (_) { return {}; }
     }
     function saveOfficialFinalStore(store) {
+      if (officialUsesRemote()) { officialRemoteStore.final = store || {}; void persistOfficialFinalRemote(officialRemoteStore.final); return; }
       localStorage.setItem('official_final_inspections', JSON.stringify(store));
     }
     function officialFinalEntry(unit) {
       const store = getOfficialFinalStore();
       return store[officialFinalKey(unit)] || { draft: null, current: null, history: [] };
+    }
+    function getOfficialRequestStore() {
+      if (officialUsesRemote()) return officialRemoteStore.requests;
+      try { return JSON.parse(localStorage.getItem('official_inspection_requests') || '[]') || []; } catch (_) { return []; }
+    }
+    function saveOfficialRequestStore(requests) {
+      if (officialUsesRemote()) { officialRemoteStore.requests = requests || []; void persistOfficialRequestsRemote(officialRemoteStore.requests); return; }
+      localStorage.setItem('official_inspection_requests', JSON.stringify(requests || []));
+    }
+    function resolveOfficialReadyTask(apt) {
+      const tasks = getInspectionRequiredTasks();
+      let changed = false;
+      const next = tasks.map(task => {
+        if (task.kind === 'official_ready' && String(task.apt) === String(apt) && !task.resolvedAt) {
+          changed = true;
+          return { ...task, resolvedAt: new Date().toISOString() };
+        }
+        return task;
+      });
+      if (changed) saveInspectionRequiredTasks(next);
+    }
+    function officialBatchUnits() {
+      const building = document.getElementById('officialBatchBuilding')?.value || '';
+      const floor = document.getElementById('officialBatchFloor')?.value || '';
+      const area = document.getElementById('officialBatchArea')?.value || '';
+      const search = (document.getElementById('officialBatchSearch')?.value || '').trim().toLowerCase();
+      return (data || []).filter(unit => {
+        const unitArea = unit.area || unit.floor || '';
+        return (!building || unit.building === building) && (!floor || unit.floor === floor) && (!area || unitArea === area) && (!search || String(unit.apt || '').toLowerCase().includes(search));
+      });
+    }
+    function officialBatchRefreshFilters() {
+      const buildingSelect = document.getElementById('officialBatchBuilding');
+      const floorSelect = document.getElementById('officialBatchFloor');
+      const areaSelect = document.getElementById('officialBatchArea');
+      if (!buildingSelect || !floorSelect || !areaSelect) return;
+      const selectedBuilding = buildingSelect.value;
+      const selectedFloor = floorSelect.value;
+      const selectedArea = areaSelect.value;
+      const buildings = [...new Set((data || []).map(unit => unit.building).filter(Boolean))].sort();
+      buildingSelect.innerHTML = '<option value="">All buildings</option>' + buildings.map(value => `<option value="${officialFinalEscape(value)}">${officialFinalEscape(value)}</option>`).join('');
+      buildingSelect.value = buildings.includes(selectedBuilding) ? selectedBuilding : (currentDetailsUnit?.building || '');
+      const floors = [...new Set((data || []).filter(unit => !buildingSelect.value || unit.building === buildingSelect.value).map(unit => unit.floor).filter(Boolean))].sort();
+      floorSelect.innerHTML = '<option value="">All floors</option>' + floors.map(value => `<option value="${officialFinalEscape(value)}">${officialFinalEscape(value)}</option>`).join('');
+      floorSelect.value = floors.includes(selectedFloor) ? selectedFloor : (currentDetailsUnit?.floor || '');
+      const areas = [...new Set((data || []).filter(unit => (!buildingSelect.value || unit.building === buildingSelect.value) && (!floorSelect.value || unit.floor === floorSelect.value)).map(unit => unit.area || unit.floor).filter(Boolean))].sort();
+      areaSelect.innerHTML = '<option value="">All areas</option>' + areas.map(value => `<option value="${officialFinalEscape(value)}">${officialFinalEscape(value)}</option>`).join('');
+      areaSelect.value = areas.includes(selectedArea) ? selectedArea : '';
+      officialBatchRenderUnits();
+    }
+    function officialBatchRenderUnits() {
+      const host = document.getElementById('officialBatchUnits');
+      if (!host) return;
+      const units = officialBatchUnits();
+      host.innerHTML = units.length ? units.map(unit => {
+        const key = officialFinalKey(unit);
+        const entry = officialFinalEntry(unit);
+        const result = entry.current?.result || 'Not Scheduled';
+        const systemValues = Array.isArray(unit.systems) ? unit.systems : Object.values(unit.systems || {});
+        const ready = systemValues.some(system => Number(system?.progress || 0) >= 100) || result === 'Passed';
+        return `<label style="display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid #E2E8F0;border-radius:6px;background:#fff;font-size:12px;"><input type="checkbox" class="official-batch-unit" value="${officialFinalEscape(key)}" ${ready ? '' : ''}><strong>Unit ${officialFinalEscape(unit.apt)}</strong><span style="color:#64748B;">${officialFinalEscape(unit.floor || '')}</span><span style="margin-left:auto;color:${ready ? '#15803D' : '#64748B'};">${ready ? 'Ready' : result}</span></label>`;
+      }).join('') : '<div style="color:#64748B;padding:8px 0;">No units match the selected area.</div>';
+    }
+    function officialBatchToggleAll(checked) {
+      document.querySelectorAll('#officialBatchUnits .official-batch-unit').forEach(input => { input.checked = checked; });
+    }
+    function saveOfficialBatchRequest() {
+      const selected = [...document.querySelectorAll('#officialBatchUnits .official-batch-unit:checked')].map(input => input.value);
+      const inspector = document.getElementById('officialBatchInspector')?.value.trim() || '';
+      const date = document.getElementById('officialBatchDate')?.value || '';
+      if (!selected.length || !inspector || !date) {
+        if (typeof toast === 'function') toast('Select at least one unit, an inspector, and a requested date');
+        return;
+      }
+      const request = { id: `official-request-${Date.now()}`, building: document.getElementById('officialBatchBuilding')?.value || '', floor: document.getElementById('officialBatchFloor')?.value || '', area: document.getElementById('officialBatchArea')?.value || '', inspector, company: document.getElementById('officialBatchCompany')?.value.trim() || '', date, comments: document.getElementById('officialBatchComments')?.value.trim() || '', status: 'Requested', unitKeys: selected, unitStatuses: Object.fromEntries(selected.map(key => [key, 'Requested'])), createdAt: new Date().toISOString() };
+      const requests = getOfficialRequestStore();
+      requests.push(request);
+      saveOfficialRequestStore(requests);
+      selected.forEach(key => {
+        const unit = (data || []).find(candidate => officialFinalKey(candidate) === key);
+        if (unit) resolveOfficialReadyTask(unit.apt);
+      });
+      renderOfficialFinalTab();
+      if (typeof toast === 'function') toast(`Official inspection requested for ${selected.length} unit${selected.length === 1 ? '' : 's'}`);
+    }
+    function renderOfficialBatchPanel() {
+      const requests = getOfficialRequestStore().slice().reverse();
+      const requestHistory = requests.length ? requests.slice(0, 8).map(request => `<div style="padding:8px 0;border-top:1px solid #E5E7EB;font-size:12px;"><strong>${officialFinalEscape(request.status)}</strong> · ${officialFinalEscape(request.date)} · ${request.unitKeys.length} unit${request.unitKeys.length === 1 ? '' : 's'}<br><span style="color:#64748B;">${officialFinalEscape(request.building || 'All buildings')} · ${officialFinalEscape(request.floor || 'All floors')} · ${officialFinalEscape(request.inspector)}</span></div>`).join('') : '<div style="color:#64748B;padding:8px 0;">No area requests yet.</div>';
+      return `<section class="insp-card" style="margin-top:16px;"><div class="insp-card-header"><h3>Official Inspection Request — Area / Multiple Units</h3><span style="color:#1D4ED8;font-weight:700;">Batch</span></div><div style="padding:12px 16px;color:#475569;font-size:12px;">Select an area, choose several units, and create one request. Each unit keeps its own official result and history.</div><div style="padding:0 16px 16px;display:grid;gap:10px;"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;"><label>Building<select id="officialBatchBuilding" class="form-select" onchange="officialBatchRefreshFilters()"></select></label><label>Floor<select id="officialBatchFloor" class="form-select" onchange="officialBatchRefreshFilters()"></select></label><label>Area<select id="officialBatchArea" class="form-select" onchange="officialBatchRenderUnits()"></select></label><label>Search unit<input id="officialBatchSearch" class="form-input" placeholder="Unit number" oninput="officialBatchRenderUnits()"></label></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><strong>Units in selected area</strong><label style="font-size:12px;"><input type="checkbox" onchange="officialBatchToggleAll(this.checked)"> Select all</label></div><div id="officialBatchUnits" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;max-height:220px;overflow:auto;"></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;"><label>Official inspector<input id="officialBatchInspector" class="form-input" required></label><label>Company / agency<input id="officialBatchCompany" class="form-input"></label><label>Requested date<input id="officialBatchDate" class="form-input" type="date" required></label></div><label>Comments<textarea id="officialBatchComments" class="form-input" rows="2"></textarea></label><div style="display:flex;justify-content:flex-end;"><button type="button" class="btn btn-primary" onclick="saveOfficialBatchRequest()">Request official inspection</button></div><div><h4 style="margin:4px 0;">Area request history</h4>${requestHistory}</div></div></section>`;
     }
     function officialFinalEscape(value) {
       return String(value == null ? '' : value).replace(/[&<>"']/g, char => ({
@@ -6754,6 +7042,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     function renderOfficialFinalTab() {
       const unit = currentDetailsUnit;
       if (!unit) return;
+      if (officialUsesRemote() && !officialRemoteReady) {
+        document.getElementById('detailsContent').innerHTML = '<div class="insp-card" style="padding:20px;color:#64748B;">Loading official inspection data…</div>';
+        void hydrateOfficialRemote().then(() => renderOfficialFinalTab());
+        return;
+      }
       const entry = officialFinalEntry(unit);
       const value = entry.draft || entry.current || {};
       const latest = entry.current;
@@ -6778,7 +7071,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;"><button type="button" class="btn btn-secondary" onclick="switchDetailsTab('official_final')">Cancel</button><button type="submit" class="btn btn-secondary">Save Draft</button><button type="button" class="btn btn-primary" onclick="submitOfficialFinal()">Submit</button></div>
           </form>
           <div style="padding:0 16px 16px;"><h4 style="margin:8px 0;">Official Final History</h4>${historyHtml}</div>
-        </div>`;
+        </div>${renderOfficialBatchPanel()}`;
+      officialBatchRefreshFilters();
     }
     function saveOfficialFinalDraft(event) {
       event?.preventDefault();
@@ -6891,6 +7185,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
                 <span>Events:</span>
                 <span>${sysData.events ? sysData.events.length : 0}</span>
               </div>
+              ${QUANTITY_SYSTEMS.includes(sysName) ? `<button type="button" class="btn btn-secondary" style="margin-top:8px;font-size:11px;padding:6px 9px;" onclick="openQuantityFromUnit('${officialFinalEscape(unit.apt)}','${officialFinalEscape(unit.building)}','${officialFinalEscape(unit.floor)}','${sysName}')">Open ${sysName} Quantity Control</button>` : ''}
             </div>
           `;
         });
@@ -7557,15 +7852,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       form.innerHTML = SYSTEMS.map(sys => `
         <div class="form-group">
           <label class="form-label">${systemDisplayName(sys)}</label>
-          <div class="form-row">
-            <input type="number" class="form-input" placeholder="%" min="0" max="100" value="0" data-system="${sys}" data-field="progress" onchange="validateProgress(this)">
-            <select class="form-select" data-system="${sys}" data-field="status">
-              <option value="Behind">Behind</option>
-              <option value="At Risk">At Risk</option>
-              <option value="In Progress" selected>In Progress</option>
-              <option value="Completed">Completed</option>
-            </select>
-          </div>
+          ${typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(sys) ? '<div style="padding:8px 10px;border:1px solid #BFDBFE;border-radius:6px;background:#EFF6FF;color:#1E3A8A;font-size:11px;">Managed in Quantity Control: takeoff vs installed quantities.</div>' : `<div class="form-row"><input type="number" class="form-input" placeholder="%" min="0" max="100" value="0" data-system="${sys}" data-field="progress" onchange="validateProgress(this)"><select class="form-select" data-system="${sys}" data-field="status"><option value="Behind">Behind</option><option value="At Risk">At Risk</option><option value="In Progress" selected>In Progress</option><option value="Completed">Completed</option></select></div>`}
         </div>
       `).join('');
     }
@@ -7613,8 +7900,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const systems = {};
       SYSTEMS.forEach(sys => {
         if (currentEditingUnit && !currentEditingUnit.systems[sys]) return; // not applicable
-        const progress = parseInt(document.querySelector(`input[data-system="${sys}"][data-field="progress"]`).value) || 0;
-        const status = document.querySelector(`select[data-system="${sys}"][data-field="status"]`).value;
+        const progressInput = document.querySelector(`input[data-system="${sys}"][data-field="progress"]`);
+        const statusInput = document.querySelector(`select[data-system="${sys}"][data-field="status"]`);
+        const progress = progressInput ? (parseInt(progressInput.value) || 0) : (currentEditingUnit?.systems?.[sys]?.progress || 0);
+        const status = statusInput ? statusInput.value : (currentEditingUnit?.systems?.[sys]?.status || (progress >= 100 ? 'Completed' : progress > 0 ? 'In Progress' : 'Behind'));
 
         // If editing, preserve existing photos and events; if new, initialize empty
         if (currentEditingUnit && currentEditingUnit.systems[sys]) {
@@ -7647,7 +7936,21 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       updateMetrics();
       updateCharts();
       closeUnitModal();
-      alert('Unit saved successfully');
+      const savedUnit = data.find(unit => unit.apt === unitNumber && unit.building === building && unit.floor === floor);
+      const firstQuantitySystem = savedUnit ? QUANTITY_SYSTEMS.find(system => savedUnit.systems?.[system]) : null;
+      if (savedUnit && firstQuantitySystem) {
+        quantityCurrentSystem = firstQuantitySystem;
+        switchMainTab('quantity', null);
+        setTimeout(() => {
+          const buildingSelect = document.getElementById('quantityBuildingSelect');
+          const floorSelect = document.getElementById('quantityFloorSelect');
+          if (buildingSelect) buildingSelect.value = building;
+          if (floorSelect) floorSelect.value = floor;
+          renderQuantityControl();
+          const index = quantityVisibleUnits().findIndex(unit => quantityUnitKey(unit) === quantityUnitKey(savedUnit));
+          if (index >= 0) quantityOpenUnit(index);
+        }, 0);
+      } else alert('Unit saved successfully');
     }
 
     function closeUnitModal() {
@@ -7676,6 +7979,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       document.getElementById('quickPhoto').value = '';
       document.getElementById('quickPhotoFile').value = '';
       document.getElementById('quickPhotoCamera').value = '';
+      updateQuickEntryMode('');
       pendingQuickPhotos = []; renderQuickPhotos();
       showAppModal('quickAddModal');
       setupQuickFloorOptions();
@@ -7685,6 +7989,31 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         quickBuilding.dataset.floorBound = '1';
       }
       setupQuickUnitAutocomplete();
+    }
+
+    function updateQuickEntryMode(system) {
+      const quantityMode = typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(system);
+      const group = document.getElementById('quickProgressGroup');
+      const hint = document.getElementById('quickQuantityHint');
+      const progress = document.getElementById('quickProgress');
+      const photoGroup = document.getElementById('quickPhotoGroup');
+      const openButton = document.getElementById('quickQuantityOpenButton');
+      const saveButton = document.getElementById('quickSaveButton');
+      if (group) group.style.display = quantityMode ? 'none' : '';
+      if (hint) hint.style.display = quantityMode ? 'block' : 'none';
+      if (photoGroup) photoGroup.style.display = quantityMode ? 'none' : '';
+      if (openButton) openButton.style.display = quantityMode ? '' : 'none';
+      if (saveButton) saveButton.textContent = quantityMode ? 'Save and Open Quantity Control' : 'Save Unit';
+      if (progress) { progress.required = !quantityMode; if (quantityMode) progress.value = '0'; }
+    }
+
+    function openQuantityFromQuick() {
+      const apt = String(document.getElementById('quickUnit')?.value || '').trim();
+      const system = String(document.getElementById('quickSystem')?.value || '');
+      const unit = data.find(item => String(item.apt) === apt);
+      if (!unit || !QUANTITY_SYSTEMS.includes(system)) { alert('Select an existing unit and a quantity system first.'); return; }
+      closeQuickAddModal();
+      setTimeout(() => openQuantityFromUnit(unit.apt, unit.building, unit.floor, system), 450);
     }
 
     function setupQuickUnitAutocomplete() {
@@ -7760,6 +8089,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const statusEl = document.getElementById('quickStatus');
         if (statusEl) statusEl.value = unit.systems[system].status || 'Behind';
       }
+      updateQuickEntryMode(system);
     }
 
     function autoFillFullUnit(apt) {
@@ -7807,7 +8137,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const apt = document.getElementById('quickUnit').value;
       const floor = document.getElementById('quickFloor').value;
       const system = document.getElementById('quickSystem').value;
-      const progress = parseInt(document.getElementById('quickProgress').value);
+      const quantityMode = typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(system);
+      const progress = quantityMode ? 0 : parseInt(document.getElementById('quickProgress').value);
       const hasPhoto = pendingQuickPhotos.length > 0;
 
       let building = document.getElementById('quickBuilding').value;
@@ -7818,7 +8149,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const qFiles = pendingQuickPhotos.slice();
       const qBy = await ensureUserName();
       const qImages = qFiles.length > 0 ? await readAndCompressPhotos(qFiles, 0.6, qBy) : [];
-      const qEvent = { timestamp: new Date().toISOString(), notes: `Quick add - ${progress}% complete`, photos: qFiles.length, images: qImages, by: qBy, progress: progress, status: progress === 100 ? 'Completed' : progress >= 21 ? 'In Progress' : progress >= 1 ? 'At Risk' : 'Behind' };
+      const qEvent = { timestamp: new Date().toISOString(), notes: quantityMode ? `Quick add - ${system} quantity control opened` : `Quick add - ${progress}% complete`, photos: qFiles.length, images: qImages, by: qBy, progress: progress, status: quantityMode ? 'In Progress' : progress === 100 ? 'Completed' : progress >= 21 ? 'In Progress' : progress >= 1 ? 'At Risk' : 'Behind' };
 
       // Check if unit already exists (match by apt only if building is empty, or by both)
       const existingUnit = data.find(u => u.apt === apt && (building ? u.building === building : true));
@@ -7870,7 +8201,19 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       updateMetrics();
       updateCharts();
       closeQuickAddModal();
-      alert('Unit saved quickly');
+      const quickSavedUnit = data.find(unit => unit.apt === apt && (!building || unit.building === building));
+      if (typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(system) && quickSavedUnit) {
+        // Quantity systems use the same unit record, then continue directly to
+        // the system-specific takeoff/drawing view instead of a second data path.
+        quantityCurrentSystem = system;
+        switchMainTab('quantity', document.querySelector('[onclick*="switchMainTab(\'quantity\'"]'));
+        setTimeout(() => {
+          const index = quantityVisibleUnits().findIndex(unit => quantityUnitKey(unit) === quantityUnitKey(quickSavedUnit));
+          if (index >= 0) quantityOpenUnit(index);
+        }, 0);
+      } else {
+        alert('Unit saved quickly');
+      }
     }
 
     function getPunchlistForCurrentStatusFilter() {
@@ -9883,24 +10226,45 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         renderChips();
       }
       function getInspectionRequiredTasks() {
+        if (officialUsesRemote()) return officialRemoteStore.tasks;
         try { return JSON.parse(localStorage.getItem('inspection_required_tasks') || '[]'); } catch (e) { return []; }
       }
       function saveInspectionRequiredTasks(tasks) {
+        if (officialUsesRemote()) { officialRemoteStore.tasks = tasks || []; void persistInspectionTasksRemote(officialRemoteStore.tasks); return; }
         try { localStorage.setItem('inspection_required_tasks', JSON.stringify(tasks)); } catch (e) {}
       }
       function syncInspectionRequiredTasks() {
         const tasks = getInspectionRequiredTasks();
         const byKey = new Map(tasks.map(task => [task.key, task]));
         const activeKeys = new Set();
-        (data || []).forEach(unit => Object.entries(unit.systems || {}).forEach(([system, value]) => {
+        (data || []).forEach(unit => {
+          quantityApplyComputedProgress(unit);
+          const quantityReady = QUANTITY_SYSTEMS.every(system => {
+            const value = (unit.systems || {})[system];
+            return value && Number(value.progress || 0) >= 100;
+          });
+          const internalInspectionReady = quantityReady && QUANTITY_SYSTEMS.every(system => {
+            const internalTask = byKey.get(`${unit.id || unit.apt}|${system}`);
+            return internalTask?.resolvedAt && !internalTask.lastAttempt;
+          });
+          if (internalInspectionReady) {
+            const readyKey = `${unit.id || unit.apt}|official-ready`;
+            const completionDates = QUANTITY_SYSTEMS.map(system => Date.parse(quantityCompletionDate(unit, system)) || 0);
+            const readyAt = Math.max(...completionDates, Date.now());
+            activeKeys.add(readyKey);
+            const priorReady = byKey.get(readyKey);
+            if (!priorReady || readyAt > Number(priorReady.completedAt || 0)) byKey.set(readyKey, { key: readyKey, apt: unit.apt, building: unit.building, floor: unit.floor, system: 'Official Inspection Ready', kind: 'official_ready', completedAt: readyAt, resolvedAt: priorReady?.resolvedAt || null, lastAttempt: null });
+          }
+          Object.entries(unit.systems || {}).forEach(([system, value]) => {
           if ((Number(value.progress) || 0) < 100) return;
           const completedEvent = (value.events || []).filter(event => (Number(event.progress) || 0) >= 100).sort((a, b) => Date.parse(a.timestamp || a.date || 0) - Date.parse(b.timestamp || b.date || 0)).at(-1);
-          const completedAt = Date.parse(completedEvent?.timestamp || completedEvent?.date || completedEvent?.createdAt || '') || Date.now();
+          const completedAt = Date.parse(completedEvent?.timestamp || completedEvent?.date || completedEvent?.createdAt || '') || (QUANTITY_SYSTEMS.includes(system) ? Date.parse(quantityCompletionDate(unit, system)) : Date.now());
           const key = `${unit.id || unit.apt}|${system}`;
           activeKeys.add(key);
           const prior = byKey.get(key);
           if (!prior || completedAt > Number(prior.completedAt || 0)) byKey.set(key, { key, apt: unit.apt, building: unit.building, floor: unit.floor, system, completedAt, resolvedAt: null, lastAttempt: null });
-        }));
+          });
+        });
         // Remove stale 100% notifications when Quick Add, Edit, or Undo lowers
         // the system progress again. The notification must follow live unit data.
         const next = Array.from(byKey.values()).filter(task => activeKeys.has(task.key));
@@ -9911,18 +10275,33 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const panel = document.getElementById('inspectionRequiredPanel');
         const list = document.getElementById('inspectionRequiredList');
         if (!panel || !list) return;
+        if (officialUsesRemote() && !officialRemoteReady) {
+          panel.style.display = 'block';
+          list.innerHTML = '<div style="padding:10px 0;color:#64748B;">Loading inspection notifications…</div>';
+          void hydrateOfficialRemote().then(() => renderInspectionRequiredTasks());
+          return;
+        }
         const tasks = syncInspectionRequiredTasks().filter(task => !task.resolvedAt && (!shouldShowUnit || (data || []).some(unit => String(unit.apt) === String(task.apt) && shouldShowUnit(unit))));
         panel.style.display = tasks.length ? 'block' : 'none';
-        list.innerHTML = tasks.map(task => `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid #E5E7EB;flex-wrap:wrap;"><div><div style="font-size:13px;font-weight:600;color:#1F2937;">Unit ${String(task.apt)} · ${String(task.system)}</div><div style="font-size:12px;color:#64748B;margin-top:3px;">System completed at 100% · Inspection required${task.lastAttempt ? ' · Previous inspection failed' : ''}</div></div><button type="button" class="btn btn-primary" data-inspection-start="${String(task.apt).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" style="font-size:12px;padding:7px 10px;">Start Inspection</button></div>`).join('');
+        list.innerHTML = tasks.map(task => { const officialReady = task.kind === 'official_ready'; return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid #E5E7EB;flex-wrap:wrap;"><div><div style="font-size:13px;font-weight:600;color:#1F2937;">Unit ${String(task.apt)} · ${String(task.system)}</div><div style="font-size:12px;color:#64748B;margin-top:3px;">${officialReady ? 'QA/QC and internal inspections passed for Rough-In, Trim-Out, Data, and Fire Alarm · Official inspection ready' : `System completed at 100% · Inspection required${task.lastAttempt ? ' · Previous inspection failed' : ''}`}</div></div><button type="button" class="btn btn-primary" data-inspection-start="${String(task.apt).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-inspection-kind="${officialReady ? 'official_ready' : 'system'}" style="font-size:12px;padding:7px 10px;">${officialReady ? 'Request Official Inspection' : 'Start Inspection'}</button></div>`; }).join('');
         list.querySelectorAll('[data-inspection-start]').forEach(button => {
           button.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
-            window.startInspectionRequiredTask(button.dataset.inspectionStart);
+            window.startInspectionRequiredTask(button.dataset.inspectionStart, button.dataset.inspectionKind);
           });
         });
       }
-      window.startInspectionRequiredTask = function (apt) {
+      window.renderInspectionRequiredTasks = renderInspectionRequiredTasks;
+      window.startInspectionRequiredTask = function (apt, kind) {
+        if (kind === 'official_ready') {
+          const unit = (data || []).find(candidate => String(candidate.apt) === String(apt));
+          if (unit && typeof openDetailsModal === 'function') {
+            openDetailsModal(unit.apt, unit.building, unit.floor, { stopPropagation() {} });
+            setTimeout(() => switchDetailsTab('official_final'), 0);
+          }
+          return;
+        }
         const tab = document.querySelector('.tab-main[onclick*="inspections"]');
         if (tab) switchMainTab('inspections', tab);
         if (typeof inspShowTab === 'function') inspShowTab('new');
@@ -10105,6 +10484,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       // remain available before Supabase authentication is connected.
       window.userRole = LOCAL_PROJECT_MODE ? 'admin' : null;
       window.userName = LOCAL_PROJECT_MODE ? (localStorage.getItem('cfg_user_name') || 'Carlos') : '';
+      window.localSignedOut = false;
       window.authSessionUser = null;
       window.authNoProjectAccess = false;
       window.authIsActive = () => AUTH_REQUIRED || /[?&]login=1/.test(location.search);
@@ -10210,20 +10590,57 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       }
 
       // Header line: name, role, sign out, manage users
+      async function performSignOut() {
+        const localAdmin = typeof LOCAL_PROJECT_MODE !== 'undefined' && LOCAL_PROJECT_MODE;
+        if (localAdmin) {
+          // Local preview has no Supabase session. Still make Sign out a real,
+          // reversible session action without deleting project data/configuration.
+          window.localSignedOut = true;
+          window.userName = '';
+          window.userRole = 'viewer';
+          window.authSessionUser = null;
+          window.authNoProjectAccess = false;
+          updateUserLabel();
+          if (typeof toast === 'function') toast('Signed out of the local preview.');
+          return;
+        }
+        try {
+          if (typeof sbClient !== 'undefined' && sbClient?.auth) await sbClient.auth.signOut();
+        } catch (error) {
+          console.warn('Sign out request failed; clearing the client session locally:', error);
+        } finally {
+          // Supabase normally clears this itself. Remove only auth/session
+          // artifacts as a safe fallback; never clear project data.
+          try {
+            Object.keys(localStorage).filter(key => /^sb-.+-auth-token$/.test(key) || key === 'supabase.auth.token').forEach(key => localStorage.removeItem(key));
+            sessionStorage.clear();
+          } catch (_) {}
+          window.authSessionUser = null;
+          window.userName = '';
+          window.userRole = null;
+          location.reload();
+        }
+      }
+
       window.updateUserLabel = function () {
         const el = $('userLabel'); if (!el) return;
         const localAdmin = typeof LOCAL_PROJECT_MODE !== 'undefined' && LOCAL_PROJECT_MODE;
         if (localAdmin) {
+          if (window.localSignedOut) {
+            el.innerHTML = `Signed out (local preview) · <a href="#" id="lnkIn" style="color:#1E40AF;">Sign in</a>`;
+            $('lnkIn').onclick = e => { e.preventDefault(); window.localSignedOut = false; window.userRole = 'admin'; window.userName = localStorage.getItem('cfg_user_name') || 'Carlos'; updateUserLabel(); };
+            return;
+          }
           const name = esc(localStorage.getItem('cfg_user_name') || window.userName || 'Carlos');
           el.innerHTML = `👤 ${name} (admin) · <a href="#" id="lnkOut" style="color:#1E40AF;">Sign out</a> · <a href="#" id="lnkUsers" style="color:#1E40AF;">👥 Users</a>`;
-          $('lnkOut').onclick = e => { e.preventDefault(); toast('Local admin preview remains active until the page is refreshed.'); };
+          $('lnkOut').onclick = async e => { e.preventDefault(); await performSignOut(); };
           $('lnkUsers').onclick = e => { e.preventDefault(); openUsers(); };
           return;
         }
         if (!window.authIsActive()) { el.innerHTML = `👤 ${esc(localStorage.getItem('cfg_user_name') || 'No name set')} · <a href="#" onclick="changeUserName();return false;" style="color:#1E40AF;">change</a>`; return; }
         const accessText = window.authNoProjectAccess ? ' <span style="color:#B45309;">(No project access)</span>' : ` <span style="color:#6B7280;">(${roleLabel(window.userRole)})</span>`;
         el.innerHTML = `👤 ${esc(window.userName || window.authSessionUser?.email || 'Signed-in user')}${accessText} · <a href="#" id="lnkOut" style="color:#1E40AF;">Sign out</a>` + (window.userRole === 'admin' && !window.authNoProjectAccess ? ` · <a href="#" id="lnkUsers" style="color:#1E40AF;">👥 Users</a>` : '');
-        $('lnkOut').onclick = async e => { e.preventDefault(); await sbClient.auth.signOut(); location.reload(); };
+        $('lnkOut').onclick = async e => { e.preventDefault(); await performSignOut(); };
         if ($('lnkUsers')) $('lnkUsers').onclick = e => { e.preventDefault(); openUsers(); };
       };
 
