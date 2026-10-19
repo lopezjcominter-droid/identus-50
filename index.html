@@ -1362,11 +1362,14 @@
 .quantity-unit-list button { display:flex; align-items:center; gap:8px; width:100%; text-align:left; padding:8px 10px; border:1px solid #E2E8F0; border-radius:6px; background:#fff; cursor:pointer; color:#334155; }
 .quantity-unit-list button.quantity-unit-pass { border-color:#86EFAC; background:#F0FDF4; }
 .quantity-unit-list button.quantity-unit-fail { border-color:#FCA5A5; background:#FEF2F2; }
+.quantity-unit-list button.quantity-unit-not-started { border-color:#CBD5E1; background:#F8FAFC; }
 .quantity-unit-list button.quantity-unit-pass:hover { background:#DCFCE7; }
 .quantity-unit-list button.quantity-unit-fail:hover { background:#FEE2E2; }
+.quantity-unit-list button.quantity-unit-not-started:hover { background:#F1F5F9; }
 .quantity-unit-list button .quantity-unit-result { margin-left:auto; font-size:10px; font-weight:700; letter-spacing:.03em; }
 .quantity-unit-list button.quantity-unit-pass .quantity-unit-result { color:#15803D; }
 .quantity-unit-list button.quantity-unit-fail .quantity-unit-result { color:#B91C1C; }
+.quantity-unit-list button.quantity-unit-not-started .quantity-unit-result { color:#64748B; }
 .quantity-unit-list button:hover { border-color:#2563EB; background:#EFF6FF; }
 .quantity-modal-overlay { position:fixed; inset:0; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(15,23,42,.58); z-index:10040; }
 .quantity-modal { width:min(1180px,100%); max-height:92vh; overflow:auto; background:#fff; border-radius:12px; box-shadow:0 25px 70px rgba(15,23,42,.35); animation:modalScaleIn .42s ease both; }
@@ -3078,7 +3081,7 @@ Object.assign(APP_TRANSLATIONS.en, {
             })());
           });
         }
-        const revisions = []; Object.entries(store.units || {}).forEach(([key, state]) => { const u = unitsByKey.get(key); if (!u?.id) return; (state.revisions || []).forEach(rev => revisions.push({ project_id: projectId, unit_id: u.id, revision_number: Number(rev.number || rev.revision || 0), reason: rev.reason || 'Manual save', actor_name: rev.actor || null, drawing_name: rev.drawing?.name || null, drawing_mime_type: rev.drawing?.type || null, drawing_storage_path: rev.drawing?.storagePath || rev.drawing?.storage_path || (String(rev.drawing?.dataUrl || '').startsWith('data:') ? null : (rev.drawing?.dataUrl || null)), checklist: rev.items || [], marks: rev.markers || [], created_at: rev.savedAt || rev.createdAt || new Date().toISOString() })); });
+        const revisions = []; Object.entries(store.units || {}).forEach(([key, state]) => { const u = unitsByKey.get(key); if (!u?.id) return; (state.revisions || []).forEach(rev => revisions.push({ project_id: projectId, unit_id: u.id, revision_number: Number(rev.revisionNumber ?? rev.number ?? rev.revision ?? 0), reason: rev.reason || 'Manual save', actor_name: rev.actor || null, drawing_name: rev.drawing?.name || null, drawing_mime_type: rev.drawing?.type || null, drawing_storage_path: rev.drawing?.storagePath || rev.drawing?.storage_path || (String(rev.drawing?.dataUrl || '').startsWith('data:') ? null : (rev.drawing?.dataUrl || null)), checklist: rev.items || [], marks: rev.markers || [], created_at: rev.savedAt || rev.createdAt || new Date().toISOString() })); });
         const revisionDiff = quantityChangedRows(revisions, 'revisions', row => `${row.project_id}::${row.unit_id}::${row.revision_number}`);
         if (revisionDiff.changed.length) writes.push(quantityRemoteWrite('quantity_revisions?on_conflict=project_id,unit_id,revision_number', headers, revisionDiff.changed));
         await Promise.all(writes);
@@ -3742,7 +3745,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         const store = quantityStore();
         const state = quantityUnitState(unit);
         if (state.revisions.length === 0) {
-          state.revisions = (rows || []).map(row => ({ id: row.id, number: row.revision_number, reason: row.reason, actor: row.actor_name, items: row.checklist || [], markers: row.marks || [], savedAt: row.created_at, drawing: row.drawing_name ? { name: row.drawing_name, type: row.drawing_mime_type, dataUrl: '', storagePath: row.drawing_storage_path || '' } : null }));
+          state.revisions = (rows || []).map(row => ({ id: row.id, revisionNumber: Number(row.revision_number || 0), isManual: true, reason: row.reason, actor: row.actor_name, items: row.checklist || [], markers: row.marks || [], savedAt: row.created_at, drawing: row.drawing_name ? { name: row.drawing_name, type: row.drawing_mime_type, dataUrl: '', storagePath: row.drawing_storage_path || '' } : null }));
           quantityStoreUnitState(store, unit, state);
         }
       })();
@@ -3794,10 +3797,13 @@ Object.assign(APP_TRANSLATIONS.en, {
     function quantityClosePreview() { const modal = document.getElementById('quantityPreviewModal'); if (modal) modal.style.display = 'none'; }
     function quantityUnitStatus(unit) {
       const state = quantityUnitState(unit);
-      const complete = state.items.every((item, index) => {
+      const items = Array.isArray(state.items) ? state.items : [];
+      const totalTakeoff = items.reduce((sum, item) => sum + Math.max(0, Number(item?.takeoff) || 0), 0);
+      if (!items.length || totalTakeoff <= 0) return 'not-started';
+      const complete = items.every((item, index) => {
         const takeoff = Number(item.takeoff || 0);
         const installed = quantityInstalledCount(state, index);
-        return takeoff === installed;
+        return takeoff > 0 && takeoff === installed;
       });
       return complete ? 'pass' : 'fail';
     }
@@ -3806,9 +3812,10 @@ Object.assign(APP_TRANSLATIONS.en, {
       document.querySelectorAll('#quantityUnitList > button').forEach((button, index) => {
         const status = quantityUnitStatus(units[index]);
         button.classList.remove('quantity-unit-pass', 'quantity-unit-fail');
+        button.classList.remove('quantity-unit-not-started');
         button.classList.add(`quantity-unit-${status}`);
         const result = button.querySelector('.quantity-unit-result');
-        if (result) result.textContent = status === 'pass' ? 'PASS' : 'FAIL';
+        if (result) result.textContent = status === 'pass' ? 'PASS' : status === 'fail' ? 'FAIL' : 'NOT STARTED';
       });
     }
     function quantityReadFile(file, callback) {
@@ -4109,10 +4116,11 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (typeof toast === 'function') toast('✅ Floor plan saved');
       });
     }
-    function quantityClearFloorPlan() {
+    async function quantityClearFloorPlan() {
       if (!quantityIsAdmin()) return;
       if (!confirm('Clear the saved floor plan from this local preview?')) return;
-      const store = quantityStore(); store.sitePlans = store.sitePlans || {}; delete store.sitePlans[quantityPlanKey()]; delete store.floorPlan; quantitySave(store); renderQuantityControl();
+      const store = quantityStore(); store.sitePlans = store.sitePlans || {}; delete store.sitePlans[quantityPlanKey()]; delete store.floorPlan; renderQuantityControl();
+      if (await quantityPersistEdit(store)) quantitySuccessToast('✅ Floor plan cleared');
     }
     function quantityHandleUnitPlan(input) {
       const file = input?.files?.[0]; if (!file || !quantityCurrentUnit) return;
@@ -4140,7 +4148,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (typeof toast === 'function') toast('✅ Unit drawing saved');
       });
     }
-    function quantityUseTemplate() {
+    async function quantityUseTemplate() {
       if (!quantityCurrentUnit || !quantityIsAdmin()) return;
       const template = quantityTemplateFor(quantityCurrentUnit); if (!template) return;
       const store = quantityStore(); store.units = store.units || {}; const state = quantityUnitState(quantityCurrentUnit);
@@ -4153,8 +4161,8 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (state.drawing?.dataUrl) state.drawingHistory.unshift({ ...state.drawing, archivedAt: new Date().toISOString() });
       state.drawingHistory = state.drawingHistory.slice(0, 20); state.drawing = null;
       quantityAddHistory(state, 'Returned to unit type template', `Using ${quantityUnitType(quantityCurrentUnit)} template`);
-      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
-      if (typeof toast === 'function') toast('Unit is using its type template again');
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantityRenderUnit();
+      if (await quantityPersistEdit(store) && typeof toast === 'function') toast('Unit is using its type template again');
     }
     function quantityOpenUnit(index) {
       const unit = quantityVisibleUnits()[index]; if (!unit) return;
@@ -4179,14 +4187,15 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantityActiveItem = quantityActiveItem === index ? -1 : index;
       quantityRenderUnit();
     }
-    function quantityAddRfiNote() {
+    async function quantityAddRfiNote() {
       if (!quantityCurrentUnit || !quantityIsAdmin()) return;
       const input = document.querySelector('#quantityUnitContent .quantity-rfi-input');
       const note = String(input?.value || '').trim();
       if (!note) { if (typeof toast === 'function') toast('Enter an RFI or change note first'); return; }
       const store = quantityStore(); store.units = store.units || {};
       const state = quantityUnitState(quantityCurrentUnit); quantityAddHistory(state, 'RFI / Admin note', note);
-      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantityRenderUnit();
+      if (await quantityPersistEdit(store) && typeof toast === 'function') toast('✅ RFI/change note saved');
     }
     function quantityRenderHistoryPanel() {
       const panel = document.querySelector('#quantityUnitContent .quantity-history');
@@ -4393,7 +4402,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const y = Math.max(0, Math.min(100, ((geometry.top + (contentY / 100) * geometry.height) / geometry.stageHeight) * 100));
       state.markers.push({ id: Date.now() + Math.random(), itemIndex: quantityActiveItem, x, y });
       quantityAddHistory(state, 'Installed mark added', `${item.description} marked on drawing`);
-      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantityRenderUnit(); void quantityPersistEdit(store);
     }
     function quantityRemoveMarker(id, event) {
       event?.stopPropagation(); if (!quantityCurrentUnit) return;
@@ -4405,12 +4414,12 @@ Object.assign(APP_TRANSLATIONS.en, {
       // A marker from another checklist item must not be removed when placing
       // a nearby marker. Only the currently selected item can remove its mark.
       if (removed && quantityActiveItem >= 0 && removed.itemIndex !== quantityActiveItem) {
-        quantityPlaceMarker(event);
+        if (typeof toast === 'function') toast('Select the matching checklist item to remove this mark.');
         return;
       }
       state.markers = state.markers.filter(marker => String(marker.id) !== String(id));
       if (removed) quantityAddHistory(state, 'Installed mark removed', `${state.items[removed.itemIndex]?.description || 'Item'} mark removed from drawing`);
-      quantityStoreUnitState(store, quantityCurrentUnit, state); quantitySave(store); quantityRenderUnit();
+      quantityStoreUnitState(store, quantityCurrentUnit, state); quantityRenderUnit(); void quantityPersistEdit(store);
     }
     async function quantityClearMarkers() {
       if (!quantityCurrentUnit) return;
@@ -4450,9 +4459,9 @@ Object.assign(APP_TRANSLATIONS.en, {
       const installedFor = index => quantityInstalledCount(state, index);
       const rows = state.items.map((item, index) => {
         const installed = installedFor(index); const remaining = Number(item.takeoff || 0) - installed;
-        const status = remaining === 0 ? 'PASS' : 'FAIL';
+        const status = Number(item.takeoff || 0) <= 0 ? 'NOT STARTED' : remaining === 0 ? 'PASS' : 'FAIL';
         const itemNumber = String(index + 1);
-        return `<tr class="${quantityActiveItem === index ? 'active' : ''}"><td class="quantity-item-number">${itemNumber}</td><td>${officialFinalEscape(item.description || 'Item')}</td><td>${quantityIsAdmin() ? `<input type="number" min="0" value="${Number(item.takeoff || 0)}" onchange="quantitySetTakeoff(${index},this.value)">` : Number(item.takeoff || 0)}</td><td>${installed}</td><td>${remaining}</td><td><span class="insp-badge ${status === 'PASS' ? 'insp-badge-pass' : 'insp-badge-fail'}">${status}</span></td><td><button class="quantity-select-item ${quantityActiveItem === index ? 'active' : ''}" onclick="quantitySelectItem(${index})">${quantityActiveItem === index ? 'Selected' : 'Select'}</button></td></tr>`;
+        return `<tr class="${quantityActiveItem === index ? 'active' : ''}"><td class="quantity-item-number">${itemNumber}</td><td>${officialFinalEscape(item.description || 'Item')}</td><td>${quantityIsAdmin() ? `<input type="number" min="0" value="${Number(item.takeoff || 0)}" onchange="quantitySetTakeoff(${index},this.value)">` : Number(item.takeoff || 0)}</td><td>${installed}</td><td>${remaining}</td><td><span class="insp-badge ${status === 'PASS' ? 'insp-badge-pass' : status === 'FAIL' ? 'insp-badge-fail' : 'insp-badge-na'}">${status}</span></td><td><button class="quantity-select-item ${quantityActiveItem === index ? 'active' : ''}" onclick="quantitySelectItem(${index})">${quantityActiveItem === index ? 'Selected' : 'Select'}</button></td></tr>`;
       }).join('');
       const markers = state.markers.map(marker => `<button class="quantity-marker" style="left:${marker.x}%;top:${marker.y}%;" title="Remove mark ${marker.itemIndex + 1}" onclick="quantityRemoveMarker('${marker.id}',event)">${marker.itemIndex + 1}</button>`).join('');
       const drawingHtml = drawing?.dataUrl ? (drawing.type === 'application/pdf' ? `<canvas class="quantity-pdf-canvas" data-pdf="${officialFinalEscape(drawing.dataUrl)}" aria-label="Unit drawing"></canvas>` : `<img src="${drawing.dataUrl}" alt="Unit drawing">`) : `<div class="quantity-drawing-empty">No unit drawing uploaded yet.<br>Select an item, then use this drawing area when a plan is uploaded.</div>`;
@@ -4533,7 +4542,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         button.classList.add(`quantity-unit-${status}`);
         const result = document.createElement('span');
         result.className = 'quantity-unit-result';
-        result.textContent = status === 'pass' ? 'PASS' : 'FAIL';
+        result.textContent = status === 'pass' ? 'PASS' : status === 'fail' ? 'FAIL' : 'NOT STARTED';
         button.appendChild(result);
       });
     }
@@ -5119,25 +5128,24 @@ Object.assign(APP_TRANSLATIONS.en, {
         // to draw the first Dashboard shell. Quantity Control is hydrated only
         // when that tab is opened; loading drawings/marks here caused an
         // unnecessary startup request even for dashboard-only sessions.
-        const backgroundLoads = await Promise.allSettled([
-          // Inspection History/records are loaded on demand when their tab or
-          // a unit's inspection overview is opened. Loading the full history
-          // during Dashboard startup made the first screen unnecessarily slow.
-          withTimeout(loadPunchlist(), 10000, 'Punch List')
-        ]);
-        backgroundLoads.forEach(result => {
-          if (result.status === 'rejected') console.warn('Background module load failed:', result.reason);
-        });
-        renderPunchlist();
-        updateMetrics();
-        updateCharts();
+        // Keep the dashboard interactive while secondary modules hydrate.
+        // Inspection History is on-demand; Punch List and Realtime must not
+        // hold the first paint hostage when Supabase is slow or degraded.
+        withTimeout(loadPunchlist(), 10000, 'Punch List')
+          .then(() => {
+            renderPunchlist();
+            updateMetrics();
+            updateCharts();
+          })
+          .catch(error => console.warn('Background Punch List load failed:', error));
 
         // Detect whether the project-scoped status migration is available
         // before opening Realtime. Without it, the status table would stream
-        // every project's changes to this browser.
-        await detectUnitStatusProjectScope();
-        // 🔄 Enable realtime sync - subscribes to Supabase changes
-        subscribeToRealtimeUpdates();
+        // every project's changes to this browser. This is intentionally
+        // deferred so it cannot block the initial screen.
+        detectUnitStatusProjectScope()
+          .then(() => subscribeToRealtimeUpdates())
+          .catch(error => console.warn('Realtime setup deferred:', error));
 
         console.log('✅ App initialized successfully');
       } catch (error) {
