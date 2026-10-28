@@ -2791,10 +2791,12 @@ Object.assign(APP_TRANSLATIONS.en, {
       applyProjectName();
       if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') return true;
       try {
-        const { data, error } = await withTimeout(sbClient.from('projects').update({ name, address }).eq('id', PROJECT_ID).select('id'), 15000, 'Project details save');
-        if (error || !data || data.length === 0) {
-          throw error || new Error('Supabase did not confirm the project update.');
-        }
+        // Do not require a returned row here. Supabase can complete the update
+        // while RLS or the PostgREST representation policy returns an empty
+        // representation from `.select('id')`. The error object is the reliable
+        // signal for whether the write failed.
+        const { error } = await withTimeout(sbClient.from('projects').update({ name, address }).eq('id', PROJECT_ID), 15000, 'Project details save');
+        if (error) throw error;
         return true;
       } catch (e) {
         console.error('saveSharedProject', e);
