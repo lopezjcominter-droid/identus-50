@@ -2802,6 +2802,43 @@ Object.assign(APP_TRANSLATIONS.en, {
         return false;
       }
     }
+
+    async function saveRemoteSetupConfig(residentialConfigs, specialConfigs) {
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') return;
+      const accessToken = window.getAccessToken ? await window.getAccessToken() : null;
+      if (!accessToken) throw new Error('Your administrator session has expired. Sign in again before saving Project Setup.');
+      const response = await proxyFetch(`${SUPABASE_URL}/rest/v1/project_setup_config`, {
+        method: 'POST',
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ project_id: PROJECT_ID, residential_configs: residentialConfigs || [], special_configs: specialConfigs || [], updated_at: new Date().toISOString() })
+      });
+      if (!response.ok) throw new Error('Project setup areas could not be saved: ' + await response.text());
+    }
+
+    async function loadRemoteSetupConfig() {
+      if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') return null;
+      const accessToken = window.getAccessToken ? await window.getAccessToken() : null;
+      if (!accessToken) return null;
+      const response = await proxyFetch(`${SUPABASE_URL}/rest/v1/project_setup_config?project_id=eq.${PROJECT_ID}&select=residential_configs,special_configs,updated_at`, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${accessToken}` } });
+      if (!response.ok) { console.warn('Project setup config unavailable:', await response.text()); return null; }
+      const rows = await response.json();
+      return Array.isArray(rows) && rows[0] ? rows[0] : null;
+    }
+
+    function rebuildRemoteSpecialAreas(residentialConfigs) {
+      const normalized = (residentialConfigs || []).filter(cfg => cfg && cfg.name);
+      specialAreaData = normalized.flatMap(cfg => (Array.isArray(cfg.specialAreas) ? cfg.specialAreas : []).flatMap((area, index) => {
+        const floors = String(area.floors || '1').split(',').map(v => v.trim()).filter(Boolean);
+        return floors.map(floor => ({
+          id: 'remote-area-' + String(cfg.name).replace(/\W+/g, '-').toLowerCase() + '-' + (index + 1) + '-floor-' + String(floor).replace(/\W+/g, '-'),
+          name: area.name, kind: area.kind || 'Special Area', building: cfg.name,
+          floor: 'Floor ' + String(floor).replace(/^Floor\s+/i, ''), floors: 'Floor ' + String(floor).replace(/^Floor\s+/i, ''),
+          systems: (Array.isArray(area.systems) && area.systems.length ? area.systems : SYSTEMS).reduce((out, system) => { out[system] = { progress: 0, status: 'Not Started', photos: 0, events: [] }; return out; }, {}),
+          inspections: Array.isArray(area.inspections) ? area.inspections : [], plan: area.plan || '', planName: area.planName || '', planType: area.planType || '', planHistory: Array.isArray(area.planHistory) ? area.planHistory : []
+        }));
+      }));
+      filters.specialAreas = new Set(specialAreaData.map(area => area.id));
+    }
     window.addEventListener('DOMContentLoaded', () => {
       applyProjectName();
       loadSharedProject();
@@ -5406,6 +5443,7 @@ Object.assign(APP_TRANSLATIONS.en, {
 
     let data = [];
     let specialAreaData = [];
+    let remoteSetupConfig = null;
     let punchlist = [];
     let punchSyncSnapshots = new Map();
     const PUNCH_PAGE_SIZE = 200;
@@ -6217,6 +6255,8 @@ Object.assign(APP_TRANSLATIONS.en, {
             .eq('project_id', PROJECT_ID)
         ]);
         const { data: units, error: unitsError } = unitsResult;
+        remoteSetupConfig = await loadRemoteSetupConfig();
+        if (remoteSetupConfig) rebuildRemoteSpecialAreas(remoteSetupConfig.residential_configs || []);
         const { data: buildings, error: buildingsError } = buildingsResult;
 
         if (unitsError) throw unitsError;
@@ -7323,13 +7363,16 @@ showAppModal('projectSetupModal');
 
         setupList.innerHTML = '';
         sbBuildings = Array.isArray(buildings) ? buildings : [];
+        remoteSetupConfig = await loadRemoteSetupConfig();
+        const remoteResidential = new Map((remoteSetupConfig?.residential_configs || []).map(cfg => [String(cfg.name), cfg]));
+        const remoteSpecial = new Map((remoteSetupConfig?.special_configs || []).map(cfg => [String(cfg.name), cfg]));
         buildings.forEach(b => {
           const bUnits = unitsByBuilding[b.id] || [];
           const isSpecial = bUnits.length === 1 || (bUnits.length > 0 && bUnits.every(u => u.floor === 'Ground' || u.floor === 'Underground'));
           // Active systems: null = all, array = specific ones
           const activeSystems = systemsByBuilding[b.id] ? [...systemsByBuilding[b.id]] : null;
           if (isSpecial) {
-            addSetupBuilding({ name: b.name, type: 'special', enabled: true, activeSystems });
+            addSetupBuilding({ ...(remoteSpecial.get(String(b.name)) || {}), name: b.name, type: 'special', enabled: true, activeSystems });
           } else {
             // Infer floors and units/floor from actual units
             const floorGroups = {};
@@ -7340,7 +7383,7 @@ showAppModal('projectSetupModal');
             // Infer prefix from first unit number
             const firstUnit = [...bUnits].sort((a,b) => a.unit_number.localeCompare(b.unit_number))[0];
             const prefix = firstUnit ? firstUnit.unit_number.charAt(0) : String(buildings.indexOf(b) + 1);
-            addSetupBuilding({ name: b.name, floors, unitsPerFloor, prefix, type: 'residential', activeSystems });
+            addSetupBuilding({ ...(remoteResidential.get(String(b.name)) || {}), name: b.name, floors, unitsPerFloor, prefix, type: 'residential', activeSystems, specialAreas: remoteResidential.get(String(b.name))?.specialAreas || [] });
           }
         });
 
@@ -8218,6 +8261,7 @@ The current project will not be changed. The new project will start with its own
         const savedInspectionCfg = getInspBuildingConfig() || {};
         const inspectionConfigChanged = JSON.stringify(setupInspectionCfg) !== JSON.stringify(savedInspectionCfg);
         if (addCount === 0 && removeUnits.length === 0 && removeBuildings.length === 0 && sysToRemove.length === 0 && sysToAdd.length === 0) {
+          await withTimeout(saveRemoteSetupConfig(residentialConfigs, specialConfigs), 15000, 'Project setup configuration save');
           if (inspectionConfigChanged) {
             await withTimeout(saveInspBuildingConfig(setupInspectionCfg), 15000, 'Inspection configuration save');
             setupNotify('✅ Inspection configuration saved.');
@@ -8345,6 +8389,9 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         if (document.querySelector('#insp-building-config-table input[type="checkbox"]')) {
           await withTimeout(saveInspBuildingConfig(setupInspectionCfg), 15000, 'Inspection configuration save');
         }
+        await withTimeout(saveRemoteSetupConfig(residentialConfigs, specialConfigs), 15000, 'Project setup configuration save');
+        remoteSetupConfig = { residential_configs: residentialConfigs, special_configs: specialConfigs, updated_at: new Date().toISOString() };
+        rebuildRemoteSpecialAreas(residentialConfigs);
         setupNotify(`✅ Saved. Added ${inserted.length} unit(s), removed ${removeUnits.length} unit(s), systems: -${sysToRemove.length} / +${sysToAdd.length}.`);
         closeProjectSetup();
         renderUnits();
