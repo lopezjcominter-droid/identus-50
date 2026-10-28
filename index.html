@@ -7209,12 +7209,22 @@ document.addEventListener('change', event => {
   if (event.target?.id === 'localDigestEnabled') localStorage.setItem('cfg_digest_enabled', event.target.checked ? 'on' : 'off');
 });
 
+function getSetupStructureSnapshot() {
+  const root = document.getElementById('setupBuildingsList');
+  if (!root) return '';
+  const controls = Array.from(root.querySelectorAll('input, select, textarea'))
+    .filter(el => !el.classList.contains('setup-area-inspection'))
+    .map(el => ({ tag: el.tagName, type: el.type || '', name: el.name || '', value: el.value || '', checked: el.type === 'checkbox' ? !!el.checked : undefined }));
+  return JSON.stringify({ controls, rows: Array.from(root.querySelectorAll('[data-type]')).map(row => ({ type: row.dataset.type || '', plan: row.dataset.plan || '', planName: row.dataset.planName || '', planHistory: row.dataset.planHistory || '' })) });
+}
 async function openProjectSetup() {
       setupBuildingCount = 0;
+      window.__identusSetupInspectionChanged = false;
       if (!window.__identusSetupAreaListener) {
         window.__identusSetupAreaListener = true;
         document.addEventListener('change', (event) => {
           if (event.target?.matches('#setupBuildingsList .setup-special-area-name, #setupBuildingsList .setup-special-area-floors, #setupBuildingsList .setup-special-area-kind, #setupBuildingsList .setup-area-inspection')) renderInspBuildingConfig();
+          if (event.target?.matches('#insp-building-config-table input[type=checkbox]')) window.__identusSetupInspectionChanged = true;
         });
       }
       const setupList = document.getElementById('setupBuildingsList');
@@ -7349,6 +7359,7 @@ showAppModal('projectSetupModal');
 
       document.getElementById('setupProjectName').value = getProjectName();
       document.getElementById('setupProjectAddress').value = getProjectAddress();
+      window.__identusSetupInitialStructure = getSetupStructureSnapshot();
     }
 
 function closeProjectSetup() {
@@ -8075,6 +8086,26 @@ The current project will not be changed. The new project will start with its own
       }
       if (residentialConfigs.some(cfg => cfg.floors < 1 || cfg.unitsPerFloor < 1 || !cfg.prefix)) {
         alert('Check each building name, floor count, unit count, and prefix.');
+        return;
+      }
+      // Inspection-only changes use a fast save and skip the expensive project sync.
+      const setupInspectionCfg = collectInspectionTypeConfigFromUI();
+      const savedInspectionCfg = getInspBuildingConfig() || {};
+      const inspectionConfigChanged = JSON.stringify(setupInspectionCfg) !== JSON.stringify(savedInspectionCfg);
+      const structureChanged = window.__identusSetupInitialStructure && getSetupStructureSnapshot() !== window.__identusSetupInitialStructure;
+      const matrixChanged = inspectionConfigChanged || window.__identusSetupInspectionChanged === true;
+      if (!structureChanged && matrixChanged) {
+        try {
+          await withTimeout(saveInspBuildingConfig(setupInspectionCfg), 15000, 'Inspection configuration save');
+          setupNotify('✅ Inspection configuration saved.');
+          closeProjectSetup();
+        } catch (err) {
+          console.error('inspection configuration save failed', err);
+          setupNotify('❌ Setup was not saved: ' + (err.message || 'connection error'));
+        } finally {
+          window.__identusSetupSaving = false;
+          if (setupButton) { setupButton.disabled = false; setupButton.textContent = setupOriginalText; }
+        }
         return;
       }
 
