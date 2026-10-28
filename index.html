@@ -7590,7 +7590,16 @@ The current project will not be changed. The new project will start with its own
         ...(Array.isArray(sbBuildings) ? sbBuildings.map(b => b.name).filter(Boolean) : []),
         ...setupNames
       ])];
-      const areaColumns = specialAreaData.map(area => ({ key: area.building + '::' + area.floor + '::' + area.name, label: area.building + ' · ' + area.floor + ' · ' + area.name }));
+      const savedAreaColumns = (Array.isArray(specialAreaData) ? specialAreaData : []).map(area => ({ key: area.building + '::' + area.floor + '::' + area.name, label: area.building + ' · ' + area.floor + ' · ' + area.name }));
+      const setupAreaColumns = Array.from(document.querySelectorAll('#setupBuildingsList > div[data-type="residential"]')).flatMap(row => {
+        const building = row.querySelector('input[type="text"]')?.value.trim() || '';
+        return Array.from(row.querySelectorAll('.setup-special-area-row')).flatMap(areaRow => {
+          const name = areaRow.querySelector('.setup-special-area-name')?.value.trim() || '';
+          const floors = Array.from(areaRow.querySelector('.setup-special-area-floors')?.selectedOptions || []).map(option => option.value);
+          return name ? (floors.length ? floors : ['1']).map(floor => ({ key: building + '::Floor ' + floor + '::' + name, label: building + ' · Floor ' + floor + ' · ' + name })) : [];
+        });
+      });
+      const areaColumns = [...savedAreaColumns, ...setupAreaColumns].filter((area, index, list) => list.findIndex(item => item.key === area.key) === index);
       const locationColumns = buildingNames.map(name => ({ key: name, label: name })).concat(areaColumns);
       let html = `<table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;">
         <thead><tr>
@@ -8035,7 +8044,8 @@ The current project will not be changed. The new project will start with its own
             floor: parseInt(floorRow.querySelector('.setup-floor-number')?.value) || 1,
             unitsPerFloor: parseInt(floorRow.querySelector('.setup-floor-units')?.value) || 1,
             prefix: floorRow.querySelector('.setup-floor-prefix')?.value.trim() || prefix,
-            model: floorRow.querySelector('.setup-floor-model')?.value.trim() || ''
+            model: floorRow.querySelector('.setup-floor-model')?.value.trim() || '',
+            underground: !!floorRow.querySelector('.setup-floor-underground')?.checked
           })) : null;
            const specialAreas = collectSetupSpecialAreas(row);
            if (name) residentialConfigs.push({ name, type: 'residential', floors, unitsPerFloor, prefix, systems: selectedSystems, ...(floorConfigs ? { floorConfigs } : {}), specialAreas, specialAreasConfigured: true });
@@ -8080,9 +8090,11 @@ The current project will not be changed. The new project will start with its own
         localStorage.setItem('cfg_project_address', (document.getElementById('setupProjectAddress').value || '').trim());
         sharedProject = { name: pn, address: (document.getElementById('setupProjectAddress').value || '').trim() };
         applyProjectName();
-        buildLocalProjectData(residentialConfigs, specialConfigs);
+        buildLocalProjectData(residentialConfigs, specialConfigs, { render: false });
+        await loadData();
+        renderLoadedShell({ deferHeavy: true });
         addLocalAudit('Project Setup saved', { buildings: configuredNames.length, specialUnits: specialConfigs.length });
-        alert('✅ Project Setup saved locally. Supabase is disabled while testing locally.');
+        if (typeof toast === 'function') toast('✅ Project Setup saved locally.'); else alert('✅ Project Setup saved locally.');
         closeProjectSetup();
         return;
       }
