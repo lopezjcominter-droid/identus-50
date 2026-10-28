@@ -8082,7 +8082,7 @@ The current project will not be changed. The new project will start with its own
         const confirmed = await showProjectSetupConfirm(residentialConfigs.length, specialConfigs.length);
         if (!confirmed) return;
         // Apply also persists Inspection Types by Area selections made in this setup window.
-        await withTimeout(saveInspBuildingConfig(collectInspectionTypeConfigFromUI()), 15000, 'Inspection configuration save');
+        await withTimeout(saveInspBuildingConfig(setupInspectionCfg), 15000, 'Inspection configuration save');
       }
 
       if (newUrl) {
@@ -8183,10 +8183,16 @@ The current project will not be changed. The new project will start with its own
           const s = sysByBuilding[unitBuilding[u.id]]; if (!s) return;
           s.forEach(sys => { if (!haveKey.has(u.id + '|' + sys)) sysToAdd.push({ unit_id: u.id, system_id: sys, progress: 0, status: 'Behind' }); });
         });
-        const addCount = [...desired].filter(n => !existingNums.has(n)).length;
-        const inspectionConfigPresent = Boolean(document.querySelector('#insp-building-config-table input[type="checkbox"]'));
-        if (addCount === 0 && removeUnits.length === 0 && removeBuildings.length === 0 && sysToRemove.length === 0 && sysToAdd.length === 0 && !inspectionConfigPresent) {
-          alert('Nothing to change: the setup already matches Supabase. No data was changed.');
+        const addCount = [...desired].filter(n => !existingNums.has(n)).length;        const setupInspectionCfg = collectInspectionTypeConfigFromUI();
+        const savedInspectionCfg = getInspBuildingConfig() || {};
+        const inspectionConfigChanged = JSON.stringify(setupInspectionCfg) !== JSON.stringify(savedInspectionCfg);
+        if (addCount === 0 && removeUnits.length === 0 && removeBuildings.length === 0 && sysToRemove.length === 0 && sysToAdd.length === 0) {
+          if (inspectionConfigChanged) {
+            await withTimeout(saveInspBuildingConfig(setupInspectionCfg), 15000, 'Inspection configuration save');
+            setupNotify('✅ Inspection configuration saved.');
+          } else {
+            setupNotify('✅ No setup changes detected.');
+          }
           closeProjectSetup();
           return;
         }
@@ -8306,7 +8312,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         // the same Project Setup save. Previously this only ran in local mode,
         // so the checks appeared selected but were lost after reopening.
         if (document.querySelector('#insp-building-config-table input[type="checkbox"]')) {
-          await withTimeout(saveInspBuildingConfig(collectInspectionTypeConfigFromUI()), 15000, 'Inspection configuration save');
+          await withTimeout(saveInspBuildingConfig(setupInspectionCfg), 15000, 'Inspection configuration save');
         }
         setupNotify(`✅ Saved. Added ${inserted.length} unit(s), removed ${removeUnits.length} unit(s), systems: -${sysToRemove.length} / +${sysToAdd.length}.`);
         closeProjectSetup();
