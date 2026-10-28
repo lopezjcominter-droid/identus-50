@@ -2791,7 +2791,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       applyProjectName();
       if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') return true;
       try {
-        const { data, error } = await sbClient.from('projects').update({ name, address }).eq('id', PROJECT_ID).select('id');
+        const { data, error } = await withTimeout(sbClient.from('projects').update({ name, address }).eq('id', PROJECT_ID).select('id'), 15000, 'Project details save');
         if (error || !data || data.length === 0) {
           throw error || new Error('Supabase did not confirm the project update.');
         }
@@ -8082,7 +8082,7 @@ The current project will not be changed. The new project will start with its own
         const confirmed = await showProjectSetupConfirm(residentialConfigs.length, specialConfigs.length);
         if (!confirmed) return;
         // Apply also persists Inspection Types by Area selections made in this setup window.
-        await saveInspBuildingConfig(collectInspectionTypeConfigFromUI());
+        await withTimeout(saveInspBuildingConfig(collectInspectionTypeConfigFromUI()), 15000, 'Inspection configuration save');
       }
 
       if (newUrl) {
@@ -8306,7 +8306,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         // the same Project Setup save. Previously this only ran in local mode,
         // so the checks appeared selected but were lost after reopening.
         if (document.querySelector('#insp-building-config-table input[type="checkbox"]')) {
-          await saveInspBuildingConfig(collectInspectionTypeConfigFromUI());
+          await withTimeout(saveInspBuildingConfig(collectInspectionTypeConfigFromUI()), 15000, 'Inspection configuration save');
         }
         setupNotify(`✅ Saved. Added ${inserted.length} unit(s), removed ${removeUnits.length} unit(s), systems: -${sysToRemove.length} / +${sysToAdd.length}.`);
         closeProjectSetup();
