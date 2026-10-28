@@ -7214,7 +7214,7 @@ async function openProjectSetup() {
       if (!window.__identusSetupAreaListener) {
         window.__identusSetupAreaListener = true;
         document.addEventListener('change', (event) => {
-          if (event.target?.matches('#setupBuildingsList .setup-special-area-name, #setupBuildingsList .setup-special-area-floors, #setupBuildingsList .setup-special-area-kind')) renderInspBuildingConfig();
+          if (event.target?.matches('#setupBuildingsList .setup-special-area-name, #setupBuildingsList .setup-special-area-floors, #setupBuildingsList .setup-special-area-kind, #setupBuildingsList .setup-area-inspection')) renderInspBuildingConfig();
         });
       }
       const setupList = document.getElementById('setupBuildingsList');
@@ -7596,13 +7596,13 @@ The current project will not be changed. The new project will start with its own
         ...(Array.isArray(sbBuildings) ? sbBuildings.map(b => b.name).filter(Boolean) : []),
         ...setupNames
       ])];
-      const savedAreaColumns = (Array.isArray(specialAreaData) ? specialAreaData : []).map(area => ({ key: area.building + '::' + area.floor + '::' + area.name, label: area.building + ' · ' + area.floor + ' · ' + area.name }));
+      const savedAreaColumns = (Array.isArray(specialAreaData) ? specialAreaData : []).map(area => ({ key: area.building + '::' + area.floor + '::' + area.name, label: area.building + ' · ' + area.floor + ' · ' + area.name, areaInspections: Array.isArray(area.inspections) ? area.inspections.map(String) : null, inspectionConfigured: Array.isArray(area.inspections) }));
       const setupAreaColumns = Array.from(document.querySelectorAll('#setupBuildingsList > div[data-type="residential"]')).flatMap(row => {
         const building = row.querySelector('input[type="text"]')?.value.trim() || '';
         return Array.from(row.querySelectorAll('.setup-special-area-row')).flatMap(areaRow => {
           const name = areaRow.querySelector('.setup-special-area-name')?.value.trim() || '';
           const floors = Array.from(areaRow.querySelector('.setup-special-area-floors')?.selectedOptions || []).map(option => option.value);
-          return name ? (floors.length ? floors : ['1']).map(floor => ({ key: building + '::Floor ' + floor + '::' + name, label: building + ' · Floor ' + floor + ' · ' + name })) : [];
+          const areaInspections = Array.from(areaRow.querySelectorAll('.setup-area-inspection:checked')).map(input => String(input.value)); return name ? (floors.length ? floors : ['1']).map(floor => ({ key: building + '::Floor ' + floor + '::' + name, label: building + ' · Floor ' + floor + ' · ' + name, areaInspections, inspectionConfigured: true })) : [];
         });
       });
       const areaColumns = [...savedAreaColumns, ...setupAreaColumns].filter((area, index, list) => list.findIndex(item => item.key === area.key) === index);
@@ -7617,7 +7617,7 @@ The current project will not be changed. The new project will start with its own
           <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:11px;">${type.num}. ${type.name}</td>
           ${locationColumns.map(location => {
             const b = location.key;
-            const isChecked = cfg === null || !cfg[type.id] ? true : cfg[type.id].includes(b);
+            const isAreaColumn = Array.isArray(location.areaInspections) && location.inspectionConfigured; const isChecked = isAreaColumn ? location.areaInspections.includes(String(type.id)) : (cfg === null || !cfg[type.id] ? true : cfg[type.id].includes(b));
             return `<td style="text-align:center;padding:5px;border:1px solid #E5E7EB;">
               <input type="checkbox" ${isChecked ? 'checked' : ''} data-typeid="${type.id}" data-building="${officialFinalEscape(b)}" title="${officialFinalEscape(location.label)}" style="cursor:pointer;width:15px;height:15px;">
             </td>`;
