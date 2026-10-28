@@ -7211,6 +7211,12 @@ document.addEventListener('change', event => {
 
 async function openProjectSetup() {
       setupBuildingCount = 0;
+      if (!window.__identusSetupAreaListener) {
+        window.__identusSetupAreaListener = true;
+        document.addEventListener('change', (event) => {
+          if (event.target?.matches('#setupBuildingsList .setup-special-area-name, #setupBuildingsList .setup-special-area-floors, #setupBuildingsList .setup-special-area-kind')) renderInspBuildingConfig();
+        });
+      }
       const setupList = document.getElementById('setupBuildingsList');
       setupList.innerHTML = '<div style="padding:12px;text-align:center;color:#6B7280;font-size:13px;">⏳ Loading from Supabase...</div>';
 showAppModal('projectSetupModal');
@@ -8003,6 +8009,13 @@ The current project will not be changed. The new project will start with its own
     }
 
     async function applyProjectSetup() {
+      if (window.__identusSetupSaving) return;
+      window.__identusSetupSaving = true;
+      const setupButton = document.querySelector('#projectSetupModal button[onclick*="applyProjectSetup"]');
+      const setupOriginalText = setupButton?.textContent || '⚠️ Apply Changes';
+      const setupNotify = (message) => { if (typeof toast === 'function') toast(message); else if (typeof window.appToast === 'function') window.appToast(message); };
+      if (setupButton) { setupButton.disabled = true; setupButton.textContent = '⏳ Saving…'; }
+      setupNotify('⏳ Saving Project Setup…');
       const fileLocalMode = window.location.protocol === 'file:';
       const localPreview = LOCAL_PROJECT_MODE || fileLocalMode;
       // Step 0: Apply Supabase connection settings if changed
@@ -8094,18 +8107,19 @@ The current project will not be changed. The new project will start with its own
         await loadData();
         renderLoadedShell({ deferHeavy: true });
         addLocalAudit('Project Setup saved', { buildings: configuredNames.length, specialUnits: specialConfigs.length });
-        if (typeof toast === 'function') toast('✅ Project Setup saved locally.'); else alert('✅ Project Setup saved locally.');
+        setupNotify('✅ Project Setup saved locally.');
         closeProjectSetup();
+        window.__identusSetupSaving = false;
+        if (setupButton) { setupButton.disabled = false; setupButton.textContent = setupOriginalText; }
         return;
       }
 
       const projectSaved = await saveSharedProject(pn, (document.getElementById('setupProjectAddress').value || '').trim());
-      if (!projectSaved) return;
+      if (!projectSaved) { window.__identusSetupSaving = false; if (setupButton) { setupButton.disabled = false; setupButton.textContent = setupOriginalText; } return; }
 
-      const btn = document.querySelector('#projectSetupModal button[onclick="applyProjectSetup()"]');
+      const btn = setupButton || document.querySelector('#projectSetupModal button[onclick*="applyProjectSetup"]');
       try {
-        btn.textContent = '⏳ Working...';
-        btn.disabled = true;
+        if (btn) { btn.textContent = '⏳ Working...'; btn.disabled = true; }
 
         const accessToken = window.getAccessToken ? await window.getAccessToken() : null;
         if (!accessToken) {
@@ -8294,7 +8308,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         if (document.querySelector('#insp-building-config-table input[type="checkbox"]')) {
           await saveInspBuildingConfig(collectInspectionTypeConfigFromUI());
         }
-        alert(`✅ Done! Added ${inserted.length} unit(s), removed ${removeUnits.length} unit(s), systems: -${sysToRemove.length} / +${sysToAdd.length}.`);
+        setupNotify(`✅ Saved. Added ${inserted.length} unit(s), removed ${removeUnits.length} unit(s), systems: -${sysToRemove.length} / +${sysToAdd.length}.`);
         closeProjectSetup();
         renderUnits();
         updateMetrics();
@@ -8302,9 +8316,11 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         setupFilterUI();
 
       } catch (err) {
-        alert('❌ Error: ' + err.message);
+        console.error('applyProjectSetup failed', err);
+        setupNotify('❌ Setup was not saved: ' + (err.message || 'connection error'));
       } finally {
-        if (btn) { btn.textContent = '⚠️ Apply Changes'; btn.disabled = false; }
+        window.__identusSetupSaving = false;
+        if (btn) { btn.textContent = setupOriginalText; btn.disabled = false; }
       }
     }
 
