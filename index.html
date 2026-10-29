@@ -7695,10 +7695,19 @@ The current project will not be changed. The new project will start with its own
           if (/^Building\s+/i.test(building.name)) rows.push({ project_id: PROJECT_ID, building_id: building.id, inspection_type_id: inspectionTypeId, floor: 'Underground', is_enabled: selected.has(building.name + '::Underground'), updated_at: new Date().toISOString() });
         });
       });
-      if (rows.length) {
-        const { error } = await sbClient.from('building_inspection_types').upsert(rows, { onConflict: 'project_id,building_id,inspection_type_id,floor' });
-        if (error) throw error;
-      }
+  if (rows.length) {
+    let result = await sbClient.from('building_inspection_types').upsert(rows, { onConflict: 'project_id,building_id,inspection_type_id,floor' });
+    // Some production PostgREST workers can temporarily retain the pre-floor
+    // schema cache after the additive migration. Keep Apply Changes usable
+    // while that cache converges; the next save will use the scoped schema.
+    if (result.error && /floor.*schema cache|column.*floor/i.test(result.error.message || '')) {
+      const legacyRows = rows.map(({ floor, ...row }) => row);
+      const cleared = await sbClient.from('building_inspection_types').delete().eq('project_id', PROJECT_ID);
+      if (cleared.error) throw cleared.error;
+      result = await sbClient.from('building_inspection_types').insert(legacyRows);
+    }
+    if (result.error) throw result.error;
+  }
       inspRemoteConfig = cfg || {};
       inspRemoteReady = true;
     }
@@ -13552,10 +13561,12 @@ async function inspLoadRemoteModuleData() {
       else typeRows = refreshed.data || [];
     }
   }
-  const [{ data: assignmentRows, error: assignmentError }, { data: recordRows, error: recordError }] = await Promise.all([
-    sbClient.from('building_inspection_types').select('building_id,inspection_type_id,floor,is_enabled').eq('project_id', PROJECT_ID).eq('is_enabled', true),
-    sbClient.from('inspection_records').select('id,unit_id,inspection_type_id,inspector_id,inspector_name,status,revision_number,parent_record_id,pass_count,fail_count,na_count,total_count,submitted_at,created_at,updated_at').eq('project_id', PROJECT_ID).order('created_at', { ascending: true })
-  ]);
+  let assignmentQuery = sbClient.from('building_inspection_types').select('building_id,inspection_type_id,floor,is_enabled').eq('project_id', PROJECT_ID).eq('is_enabled', true);
+  let assignmentResult = await assignmentQuery;
+  if (assignmentResult.error && /floor.*schema cache|column.*floor/i.test(assignmentResult.error.message || '')) {
+    assignmentResult = await sbClient.from('building_inspection_types').select('building_id,inspection_type_id,is_enabled').eq('project_id', PROJECT_ID).eq('is_enabled', true);
+  }
+  const [{ data: assignmentRows, error: assignmentError }, { data: recordRows, error: recordError }] = [assignmentResult, await sbClient.from('inspection_records').select('id,unit_id,inspection_type_id,inspector_id,inspector_name,status,revision_number,parent_record_id,pass_count,fail_count,na_count,total_count,submitted_at,created_at,updated_at').eq('project_id', PROJECT_ID).order('created_at', { ascending: true })];
   if (recordError) {
     throw recordError;
   }
