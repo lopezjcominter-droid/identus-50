@@ -1396,9 +1396,15 @@
     .quantity-drawing-tools button { min-width:28px; height:28px; padding:2px 7px; border:1px solid #CBD5E1; border-radius:5px; background:#fff; color:#334155; cursor:pointer; font-weight:700; }
     .quantity-drawing-tools button.active { background:#DBEAFE; border-color:#2563EB; color:#1D4ED8; }
     .quantity-drawing-zoom-label { min-width:42px; text-align:center; font-size:11px; color:#64748B; font-weight:600; }
-    .quantity-contour-editor-board { position:relative; aspect-ratio:1.4; min-height:280px; min-width:0; box-sizing:border-box; padding:12px; border:1px solid #CBD5E1; border-radius:8px; background:#F8FAFC; overflow:hidden; touch-action:none; }
-    .quantity-contour-editor-media { position:absolute; inset:12px; width:calc(100% - 24px); height:calc(100% - 24px); object-fit:contain; }
-    .quantity-contour-editor-overlay { position:absolute; inset:12px; width:calc(100% - 24px); height:calc(100% - 24px); touch-action:none; }
+    .quantity-contour-editor-board { position:relative; aspect-ratio:1.4; min-height:280px; min-width:0; box-sizing:border-box; padding:36px; border:1px solid #CBD5E1; border-radius:8px; background-color:#F8FAFC; background-image:linear-gradient(rgba(37,99,235,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(37,99,235,.16) 1px,transparent 1px); background-size:5px 5px; overflow:auto; touch-action:none; }
+    .quantity-contour-editor-media { position:absolute; inset:36px; width:calc(100% - 72px); height:calc(100% - 72px); object-fit:contain; }
+    .quantity-contour-editor-overlay { position:absolute; inset:36px; width:calc(100% - 72px); height:calc(100% - 72px); touch-action:none; }
+    .quantity-contour-editor-overlay { background:none; }
+    .quantity-contour-editor-overlay > rect:first-of-type { display:none; }
+    /* Keep the contour review focused on the plan; point coordinates are
+       edited directly by dragging the green handles. */
+    .quantity-contour-editor-board + div { display:none; }
+    #quantityContourEditorContent > div[style*="grid-template-columns"] { grid-template-columns:1fr !important; }
     .quantity-contour-editor-overlay circle { cursor:grab; }
     .quantity-contour-editor-overlay circle:active { cursor:grabbing; }
     .quantity-contour-inline-host { display:none; margin:10px 0; }
@@ -4435,6 +4441,9 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (board?.classList.contains('quantity-plan-media')) {
           canvas.style.width = '100%';
           canvas.style.height = '100%';
+        } else if (board?.classList.contains('quantity-contour-editor-board')) {
+          canvas.style.width = 'calc(100% - 72px)';
+          canvas.style.height = 'calc(100% - 72px)';
         } else {
           canvas.style.width = `${Math.round(viewport.width / renderQuality)}px`;
           canvas.style.height = `${Math.round(viewport.height / renderQuality)}px`;
@@ -4445,6 +4454,24 @@ Object.assign(APP_TRANSLATIONS.en, {
         context.setTransform(ratio, 0, 0, ratio, 0, 0);
         job.task = page.render({ canvasContext: context, viewport });
         await job.task.promise;
+        if (board?.classList.contains('quantity-contour-editor-board')) {
+          const overlay = board.querySelector('.quantity-contour-editor-overlay');
+          const innerWidth = Math.max(120, board.clientWidth - 72);
+          const innerHeight = Math.max(120, board.clientHeight - 72);
+          const fitWidth = Math.min(innerWidth, innerHeight * pdfRatio);
+          const fitHeight = fitWidth / pdfRatio;
+          const fitLeft = (board.clientWidth - fitWidth) / 2;
+          const fitTop = (board.clientHeight - fitHeight) / 2;
+          [canvas, overlay].forEach(node => {
+            if (!node) return;
+            node.style.left = `${fitLeft}px`;
+            node.style.top = `${fitTop}px`;
+            node.style.right = 'auto';
+            node.style.bottom = 'auto';
+            node.style.width = `${fitWidth}px`;
+            node.style.height = `${fitHeight}px`;
+          });
+        }
       } catch (error) {
         if (job.cancelled || error?.name === 'RenderingCancelledException') return;
         console.warn('PDF plan render failed:', error);
@@ -4577,15 +4604,25 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     function quantityRenderContourEditor() {
       const editor = quantityContourEditor; if (!editor) return;
+      const reusePlanCanvas = Boolean(editor.reusePlanCanvas);
+      editor.reusePlanCanvas = false;
       const points = editor.points || [];
       const polygon = points.map(point => point.join(',')).join(' ');
+      const allShapes = quantityContourShapes(editor.planKey);
+      const allContours = Object.entries(allShapes).filter(([apt, shape]) => String(apt) !== String(editor.apt) && Array.isArray(shape) && shape.length >= 3).map(([apt, shape]) => {
+        const center = shape.reduce((sum, point) => [sum[0] + point[0] / shape.length, sum[1] + point[1] / shape.length], [0, 0]);
+        return `<polygon points="${shape.map(point => point.join(',')).join(' ')}" fill="rgba(59,130,246,.08)" stroke="#2563EB" stroke-width=".35" class="quantity-contour-secondary" onclick="quantitySelectContourInEditor('${officialFinalEscape(apt)}')"></polygon><text x="${center[0]}" y="${center[1]}" font-size="2" fill="#1D4ED8" pointer-events="none">${officialFinalEscape(apt)}</text>`;
+      }).join('');
       const vertices = points.map((point, index) => `<circle cx="${point[0]}" cy="${point[1]}" r="1.5" fill="#16A34A" stroke="#fff" stroke-width=".5" tabindex="0" aria-label="Point ${index + 1}" onpointerdown="quantityStartContourPointDrag(event,${index})"></circle><text x="${point[0]}" y="${point[1]}" dx="2" dy="-2" font-size="2.2" fill="#166534">${index + 1}</text>`).join('');
       const inputs = points.map((point, index) => `<label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#475569;">Point ${index + 1}<input type="number" min="0" max="100" step="0.1" value="${point[0]}" onchange="quantitySetContourPoint(${index},0,this.value)" style="width:72px;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"><input type="number" min="0" max="100" step="0.1" value="${point[1]}" onchange="quantitySetContourPoint(${index},1,this.value)" style="width:72px;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"></label>`).join('');
       const plan = quantityStore().sitePlans?.[editor.planKey] || null;
       const planDataUrl = plan?.dataUrl || (plan?.storagePath ? quantityPreviewUrlCache.get(plan.storagePath) || '' : '');
       const planMarkup = planDataUrl ? (plan.type === 'application/pdf' ? `<canvas id="quantityContourEditorPdf" class="quantity-contour-editor-media" data-pdf="${officialFinalEscape(planDataUrl)}" aria-label="Base floor plan"></canvas>` : `<img class="quantity-contour-editor-media" src="${planDataUrl}" alt="Base floor plan">`) : plan?.storagePath ? '<div class="quantity-contour-editor-empty">Loading base floor plan…</div>' : '<div class="quantity-contour-editor-empty">No base floor plan uploaded</div>';
       const unitOptions = quantityVisibleUnits().map(unit => { const apt = String(unit.apt || ''); return `<option value="${officialFinalEscape(apt)}" ${apt === editor.apt ? 'selected' : ''}>${officialFinalEscape(quantityUnitLabel(unit))}</option>`; }).join('');
-      document.getElementById('quantityContourEditorContent').innerHTML = `<div class="quantity-help">${editor.isNew ? 'New contour' : `Editing contour for <strong>Unit ${officialFinalEscape(editor.apt)}</strong>`}. Adjust the points directly on the base plan, then assign the unit.</div><div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><label style="font-size:12px;color:#475569;font-weight:600;">Assigned unit <select id="quantityContourEditorUnit" style="padding:6px;border:1px solid #CBD5E1;border-radius:6px;"><option value="">Select unit</option>${unitOptions}</select></label><button type="button" class="btn btn-secondary" onclick="quantityUndoContourEditor()">Undo</button><span style="font-size:11px;color:#64748B;">Snap grid: 1%</span></div><div style="display:grid;grid-template-columns:minmax(320px,1fr) minmax(190px,.7fr);gap:14px;align-items:start;"><div class="quantity-contour-editor-board">${planMarkup}<svg viewBox="0 0 100 100" preserveAspectRatio="none" class="quantity-contour-editor-overlay"><defs><pattern id="quantityContourGrid" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M 1 0 L 0 0 0 1" fill="none" stroke="rgba(37,99,235,.16)" stroke-width=".08"></path></pattern></defs><rect width="100" height="100" fill="url(#quantityContourGrid)"></rect><polygon points="${polygon}" fill="rgba(34,197,94,.24)" stroke="#16A34A" stroke-width=".8"></polygon>${vertices}</svg></div><div><strong style="display:block;margin-bottom:8px;color:#1E3A8A;">Boundary points</strong><div style="display:grid;gap:7px;">${inputs}</div><small style="display:block;margin-top:10px;color:#64748B;">Drag the green points on the plan or edit X/Y values. ` + (editor.isNew ? 'Assign a unit before saving.' : '') + `</small></div></div>`;
+      document.getElementById('quantityContourEditorContent').innerHTML = `<div class="quantity-help">${editor.isNew ? 'New contour' : `Editing contour for <strong>Unit ${officialFinalEscape(editor.apt)}</strong>`}. All contours are visible; click any blue contour to edit it.</div><div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><label style="font-size:12px;color:#475569;font-weight:600;">Assigned unit <select id="quantityContourEditorUnit" style="padding:6px;border:1px solid #CBD5E1;border-radius:6px;"><option value="">Select unit</option>${unitOptions}</select></label><button type="button" class="btn btn-secondary" onclick="quantityUndoContourEditor()">Undo</button><span style="font-size:11px;color:#64748B;">Snap grid: 0.5%</span></div><div style="display:grid;grid-template-columns:minmax(320px,1fr) minmax(190px,.7fr);gap:14px;align-items:start;"><div class="quantity-contour-editor-board">${planMarkup}<svg viewBox="0 0 100 100" preserveAspectRatio="none" class="quantity-contour-editor-overlay"><defs><pattern id="quantityContourGrid" width=".5" height=".5" patternUnits="userSpaceOnUse"><path d="M .5 0 L 0 0 0 .5" fill="none" stroke="rgba(37,99,235,.18)" stroke-width=".055"></path></pattern></defs><rect width="100" height="100" fill="url(#quantityContourGrid)"></rect>${allContours}<polygon points="${polygon}" fill="rgba(34,197,94,.28)" stroke="#16A34A" stroke-width=".9"></polygon>${vertices}</svg></div><div><strong style="display:block;margin-bottom:8px;color:#1E3A8A;">Boundary points</strong><div style="display:grid;gap:7px;">${inputs}</div><small style="display:block;margin-top:10px;color:#64748B;">Drag the green points on the plan or edit X/Y values. ` + (editor.isNew ? 'Assign a unit before saving.' : '') + `</small></div></div>`;
+      const contourEditorContent = document.getElementById('quantityContourEditorContent');
+      if (contourEditorContent) contourEditorContent.innerHTML = contourEditorContent.innerHTML.replace('Snap grid: 0.5%', 'Snap grid: 0.1%');
+      quantityEnsureContourEditorTools();
       if (plan?.storagePath && !planDataUrl) {
         const editorPlanKey = editor.planKey;
         quantityStoragePreviewUrl(plan.storagePath).then(url => {
@@ -4594,7 +4631,70 @@ Object.assign(APP_TRANSLATIONS.en, {
           quantityRenderContourEditor();
         }).catch(error => console.warn('Contour editor base plan unavailable:', error));
       }
-      if (plan?.type === 'application/pdf' && planDataUrl) requestAnimationFrame(() => quantityRenderPdf(document.getElementById('quantityContourEditorPdf'), planDataUrl));
+      if (plan?.type === 'application/pdf' && planDataUrl && !reusePlanCanvas) requestAnimationFrame(() => quantityRenderPdf(document.getElementById('quantityContourEditorPdf'), planDataUrl));
+    }
+    function quantityEnsureContourEditorTools() {
+      const content = document.getElementById('quantityContourEditorContent');
+      if (!content || content.querySelector('.quantity-contour-zoom-tools')) return;
+      const unitSelect = content.querySelector('#quantityContourEditorUnit');
+      if (unitSelect) unitSelect.onchange = event => quantitySelectContourInEditor(event.target.value);
+      const tools = document.createElement('div');
+      tools.className = 'quantity-contour-zoom-tools';
+      tools.style.cssText = 'display:flex;align-items:center;gap:5px;margin:0 0 10px 0;';
+      tools.innerHTML = '<strong style="font-size:12px;color:#1E3A8A;margin-right:4px;">Plan zoom</strong><button type="button" class="btn btn-secondary" aria-label="Zoom out contour plan">−</button><span class="quantity-drawing-zoom-label">100%</span><button type="button" class="btn btn-secondary" aria-label="Zoom in contour plan">+</button><button type="button" class="btn btn-secondary" aria-label="Reset contour plan zoom">Reset</button>';
+      const buttons = tools.querySelectorAll('button');
+      buttons[0].onclick = () => quantityAdjustContourEditorZoom(-0.25);
+      buttons[1].onclick = () => quantityAdjustContourEditorZoom(0.25);
+      buttons[2].onclick = () => quantitySetContourEditorZoom(1);
+      content.prepend(tools);
+      quantitySetContourEditorZoom(quantityContourEditor?.zoom || 1);
+    }
+    function quantitySetContourEditorZoom(value) {
+      if (!quantityContourEditor) return;
+      quantityContourEditor.zoom = Math.max(0.5, Math.min(3, Number(value) || 1));
+      const board = document.querySelector('.quantity-contour-editor-board');
+      const media = board?.querySelector('.quantity-contour-editor-media');
+      const overlay = board?.querySelector('.quantity-contour-editor-overlay');
+      [media, overlay].forEach(node => { if (node) { node.style.transform = `scale(${quantityContourEditor.zoom})`; node.style.transformOrigin = 'top left'; } });
+      const label = document.querySelector('.quantity-contour-zoom-tools .quantity-drawing-zoom-label');
+      if (label) label.textContent = `${Math.round(quantityContourEditor.zoom * 100)}%`;
+    }
+    function quantityAdjustContourEditorZoom(delta) {
+      quantitySetContourEditorZoom((quantityContourEditor?.zoom || 1) + Number(delta || 0));
+    }
+    function quantitySelectContourInEditor(apt) {
+      if (!quantityContourEditor || !apt) return;
+      const store = quantityStore();
+      store.contours = store.contours || {};
+      store.contours[quantityContourEditor.planKey] = { ...(store.contours[quantityContourEditor.planKey] || {}), [String(quantityContourEditor.apt)]: quantityNormalizeContourPoints(quantityContourEditor.points) };
+      quantitySave(store);
+      const points = quantityContourShapes(quantityContourEditor.planKey)[String(apt)];
+      if (!Array.isArray(points) || points.length < 3) return;
+      quantityContourEditor.apt = String(apt);
+      quantityContourEditor.points = points.map(point => [Number(point[0]), Number(point[1])]);
+      quantityContourEditor.undoStack = [];
+      const previousCanvas = document.getElementById('quantityContourEditorPdf');
+      quantityContourEditor.reusePlanCanvas = Boolean(previousCanvas);
+      quantityRenderContourEditor();
+      const nextCanvas = document.getElementById('quantityContourEditorPdf');
+      if (previousCanvas && nextCanvas && previousCanvas !== nextCanvas) nextCanvas.replaceWith(previousCanvas);
+      if (previousCanvas) {
+        const board = document.querySelector('.quantity-contour-editor-board');
+        const overlay = board?.querySelector('.quantity-contour-editor-overlay');
+        if (board && overlay) {
+          overlay.style.left = previousCanvas.style.left || '36px';
+          overlay.style.top = previousCanvas.style.top || '36px';
+          overlay.style.right = 'auto';
+          overlay.style.bottom = 'auto';
+          overlay.style.width = previousCanvas.style.width || 'calc(100% - 72px)';
+          overlay.style.height = previousCanvas.style.height || 'calc(100% - 72px)';
+          overlay.style.transform = previousCanvas.style.transform || '';
+          overlay.style.transformOrigin = previousCanvas.style.transformOrigin || 'top left';
+        }
+        const plan = quantityStore().sitePlans?.[quantityContourEditor.planKey];
+        const planDataUrl = plan?.dataUrl || '';
+        if (plan?.type === 'application/pdf' && planDataUrl) requestAnimationFrame(() => quantityRenderPdf(previousCanvas, planDataUrl));
+      }
     }
     function quantityOpenContourEditor(apt) {
       if (!quantityIsAdmin()) return;
@@ -4639,9 +4739,11 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     function quantityStartContourPointDrag(event, index) {
       event.preventDefault(); event.stopPropagation();
-      const target = event.currentTarget.closest('.quantity-contour-editor-board');
-      if (!target || !quantityContourEditor?.points[index]) return;
-      const handle = event.currentTarget; const label = handle.nextElementSibling; const svg = handle.closest('svg'); const polygon = svg?.querySelector('polygon');
+      const board = event.currentTarget.closest('.quantity-contour-editor-board');
+      const svg = event.currentTarget.closest('svg');
+      if (!board || !svg || !quantityContourEditor?.points[index]) return;
+      const target = svg;
+      const handle = event.currentTarget; const label = handle.nextElementSibling; const polygon = svg.querySelector('polygon:not(.quantity-contour-secondary)');
       quantityContourEditor.undoStack = quantityContourEditor.undoStack || [];
       quantityContourEditor.undoStack.push(quantityContourEditor.points.map(point => [...point]));
       const startX = event.clientX; const startY = event.clientY; let dragging = false;
@@ -4650,8 +4752,10 @@ Object.assign(APP_TRANSLATIONS.en, {
       const move = moveEvent => {
         if (!dragging && Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 4) return;
         dragging = true;
+        // Use the SVG drawing area, not the outer editor card. The card has
+        // deliberate padding so the PDF corners remain reachable and aligned.
         const rect = target.getBoundingClientRect();
-        const snap = value => Math.max(0, Math.min(100, Math.round(value / 2.5) * 2.5));
+        const snap = value => Math.max(0, Math.min(100, Math.round(value / 0.1) * 0.1));
         const x = snap(((moveEvent.clientX - rect.left) / rect.width) * 100);
         const y = snap(((moveEvent.clientY - rect.top) / rect.height) * 100);
         quantityContourEditor.points[index] = [x, y];
@@ -4659,7 +4763,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (label) { label.setAttribute('x', String(x)); label.setAttribute('y', String(y)); }
         if (polygon) polygon.setAttribute('points', quantityContourEditor.points.map(point => point.join(',')).join(' '));
       };
-      const stop = () => { if (!dragging) quantityContourEditor.undoStack.pop(); if (label) { label.textContent = String(index + 1); label.setAttribute('font-size', '2.2'); } handle.setAttribute('r', '1.5'); handle.setAttribute('stroke', '#fff'); document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', stop); document.removeEventListener('pointercancel', stop); quantityRenderContourEditor(); };
+      const stop = () => { if (!dragging) quantityContourEditor.undoStack.pop(); if (label) { label.textContent = String(index + 1); label.setAttribute('font-size', '2.2'); } handle.setAttribute('r', '1.5'); handle.setAttribute('stroke', '#fff'); document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', stop); document.removeEventListener('pointercancel', stop); if (dragging) { const store = quantityStore(); store.contours = store.contours || {}; store.contours[quantityContourEditor.planKey] = { ...(store.contours[quantityContourEditor.planKey] || {}), [String(quantityContourEditor.apt)]: quantityNormalizeContourPoints(quantityContourEditor.points) }; quantitySave(store); } };
       document.addEventListener('pointermove', move); document.addEventListener('pointerup', stop);
       document.addEventListener('pointercancel', stop);
     }
