@@ -7701,7 +7701,18 @@ The current project will not be changed. The new project will start with its own
     // schema cache after the additive migration. Keep Apply Changes usable
     // while that cache converges; the next save will use the scoped schema.
     if (result.error && /floor.*schema cache|column.*floor/i.test(result.error.message || '')) {
-      const legacyRows = rows.map(({ floor, ...row }) => row);
+      // Legacy production schemas do not have `floor` in the unique key (and
+      // some do not expose the column at all).  Do not send both the regular
+      // and Underground rows: after removing floor they become the same key
+      // and PostgREST rejects the batch with 23505 duplicate-key.
+      const legacyByKey = new Map();
+      rows.forEach(({ floor, ...row }) => {
+        const key = `${row.project_id}|${row.building_id}|${row.inspection_type_id}`;
+        const previous = legacyByKey.get(key);
+        // Preserve an enabled value if either representation is enabled.
+        legacyByKey.set(key, previous ? { ...previous, is_enabled: previous.is_enabled || row.is_enabled } : row);
+      });
+      const legacyRows = [...legacyByKey.values()];
       const cleared = await sbClient.from('building_inspection_types').delete().eq('project_id', PROJECT_ID);
       if (cleared.error) throw cleared.error;
       result = await sbClient.from('building_inspection_types').insert(legacyRows);
