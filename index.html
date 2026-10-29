@@ -6172,7 +6172,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           units.push({ id: `local-unit-${units.length + 1}`, apt, building: cfg.name, building_id: building.id, floor, systems: unitSystems });
         };
         if (cfg.type === 'special' || !('floors' in cfg)) {
-          addUnit(cfg.name, 'Underground');
+          if (cfg.undergroundEnabled !== false) addUnit(cfg.name, 'Underground');
           const specialUnit = units[units.length - 1];
           specialUnit.setupDrawing = cfg.plan ? { dataUrl: cfg.plan, name: cfg.planName || 'Setup drawing', type: cfg.planType || '', history: Array.isArray(cfg.planHistory) ? cfg.planHistory : [] } : null;
         }
@@ -6181,19 +6181,19 @@ Object.assign(APP_TRANSLATIONS.en, {
             const floor = Math.max(1, parseInt(floorCfg.floor) || 1);
             const count = Math.max(1, parseInt(floorCfg.unitsPerFloor) || 1);
             const prefix = String(floorCfg.prefix || cfg.prefix || index + 1);
-            const floorSystems = systems.filter(sys => sys !== 'Underground' || floorCfg.underground === true || (floorCfg.underground === undefined && floor === 1));
+        const floorSystems = systems.filter(sys => sys !== 'Underground' || floorCfg.underground === true || (floorCfg.underground === undefined && floor === 1));
             for (let u = 1; u <= count; u++) {
               const apt = `${prefix}${floor}${String(u).padStart(2, '0')}`;
               addUnit(apt, `Floor ${floor}`, floorSystems);
               units[units.length - 1].unit_type = String(floorCfg.model || '').trim();
             }
           });
-          // Every residential building also has one Underground unit.
-          addUnit(`${cfg.prefix || index + 1}U`, 'Underground');
+          // Underground is optional per residential building. Existing setups
+          // default to enabled for backward compatibility.
+          if (cfg.undergroundEnabled !== false) addUnit(`${cfg.prefix || index + 1}U`, 'Underground');
         } else {
           for (let f = 1; f <= (cfg.floors || 3); f++) { const floorSystems = systems.filter(sys => sys !== 'Underground' || f === 1); for (let u = 1; u <= (cfg.unitsPerFloor || 10); u++) addUnit(`${cfg.prefix || index + 1}${f}${String(u).padStart(2, '0')}`, `Floor ${f}`, floorSystems); }
-          // Every residential building also has one Underground unit.
-          addUnit(`${cfg.prefix || index + 1}U`, 'Underground');
+          if (cfg.undergroundEnabled !== false) addUnit(`${cfg.prefix || index + 1}U`, 'Underground');
         }
       });
       sbBuildings = buildings;
@@ -7369,7 +7369,7 @@ async function openProjectSetup() {
       if (!window.__identusSetupAreaListener) {
         window.__identusSetupAreaListener = true;
         document.addEventListener('change', (event) => {
-          if (event.target?.matches('#setupBuildingsList .setup-special-area-name, #setupBuildingsList .setup-special-area-floors, #setupBuildingsList .setup-special-area-kind, #setupBuildingsList .setup-area-inspection')) renderInspBuildingConfig();
+          if (event.target?.matches('#setupBuildingsList .setup-special-area-name, #setupBuildingsList .setup-special-area-floors, #setupBuildingsList .setup-special-area-kind, #setupBuildingsList .setup-area-inspection, #setupBuildingsList .setup-underground-enabled')) renderInspBuildingConfig();
           if (event.target?.matches('#insp-building-config-table input[type=checkbox]')) window.__identusSetupInspectionChanged = true;
         });
       }
@@ -7689,16 +7689,14 @@ The current project will not be changed. The new project will start with its own
       Object.keys(cfg || {}).forEach(code => {
         const inspectionTypeId = typeIds.get(code);
         if (!inspectionTypeId) return;
-        buildings.forEach(building => rows.push({
-          project_id: PROJECT_ID,
-          building_id: building.id,
-          inspection_type_id: inspectionTypeId,
-          is_enabled: Array.isArray(cfg[code]) && cfg[code].includes(building.name),
-          updated_at: new Date().toISOString()
-        }));
+        buildings.forEach(building => {
+          const selected = new Set(Array.isArray(cfg[code]) ? cfg[code] : []);
+          rows.push({ project_id: PROJECT_ID, building_id: building.id, inspection_type_id: inspectionTypeId, floor: '', is_enabled: selected.has(building.name), updated_at: new Date().toISOString() });
+          if (/^Building\s+/i.test(building.name)) rows.push({ project_id: PROJECT_ID, building_id: building.id, inspection_type_id: inspectionTypeId, floor: 'Underground', is_enabled: selected.has(building.name + '::Underground'), updated_at: new Date().toISOString() });
+        });
       });
       if (rows.length) {
-        const { error } = await sbClient.from('building_inspection_types').upsert(rows, { onConflict: 'project_id,building_id,inspection_type_id' });
+        const { error } = await sbClient.from('building_inspection_types').upsert(rows, { onConflict: 'project_id,building_id,inspection_type_id,floor' });
         if (error) throw error;
       }
       inspRemoteConfig = cfg || {};
@@ -7749,6 +7747,7 @@ The current project will not be changed. The new project will start with its own
       }
       // Header row: buildings
       const setupNames = Array.from(document.querySelectorAll('#setupBuildingsList > div[data-type]'))
+        .filter(row => row.dataset.type !== 'residential' || row.querySelector('.setup-underground-enabled')?.checked !== false)
         .map(row => row.querySelector('input[type="text"]:not([data-special-floor])')?.value.trim())
         .filter(Boolean);
       const buildingNames = [...new Set([
@@ -7766,7 +7765,11 @@ The current project will not be changed. The new project will start with its own
         });
       });
       const areaColumns = [...savedAreaColumns, ...setupAreaColumns].filter((area, index, list) => list.findIndex(item => item.key === area.key) === index);
-      const locationColumns = buildingNames.map(name => ({ key: name, label: name })).concat(areaColumns);
+      const undergroundEnabledNames = new Set(Array.from(document.querySelectorAll('#setupBuildingsList > div[data-type]'))
+        .filter(row => row.querySelector('.setup-underground-enabled')?.checked !== false)
+        .map(row => row.querySelector('input[type="text"]')?.value.trim()).filter(Boolean));
+      const undergroundColumns = buildingNames.filter(name => (!document.querySelector('#setupBuildingsList > div[data-type]') || undergroundEnabledNames.has(name))).map(name => ({ key: name + '::Underground', label: name + ' · Underground', scopeFloor: 'Underground' }));
+      const locationColumns = buildingNames.map(name => ({ key: name, label: name, scopeFloor: null })).concat(undergroundColumns, areaColumns);
       let html = `<table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;">
         <thead><tr>
           <th style="text-align:left;padding:6px 8px;background:#F3F4F6;border:1px solid #E5E7EB;min-width:140px;">Tipo de Inspección</th>
@@ -7777,7 +7780,10 @@ The current project will not be changed. The new project will start with its own
           <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:11px;">${type.num}. ${type.name}</td>
           ${locationColumns.map(location => {
             const b = location.key;
-            const isAreaColumn = Array.isArray(location.areaInspections) && location.inspectionConfigured; const isChecked = isAreaColumn ? location.areaInspections.includes(String(type.id)) : (cfg === null || !cfg[type.id] ? true : cfg[type.id].includes(b));
+            const isAreaColumn = Array.isArray(location.areaInspections) && location.inspectionConfigured;
+            const isScopedColumn = location.scopeFloor === 'Underground';
+            const hasScopedConfig = Array.isArray(cfg?.[type.id]) && cfg[type.id].some(value => String(value).includes('::Underground'));
+            const isChecked = isAreaColumn ? location.areaInspections.includes(String(type.id)) : (cfg === null || !cfg[type.id] ? true : cfg[type.id].includes(b) || (isScopedColumn && !hasScopedConfig && cfg[type.id].includes(b.replace('::Underground',''))));
             return `<td style="text-align:center;padding:5px;border:1px solid #E5E7EB;">
               <input type="checkbox" ${isChecked ? 'checked' : ''} data-typeid="${type.id}" data-building="${officialFinalEscape(b)}" title="${officialFinalEscape(location.label)}" style="cursor:pointer;width:15px;height:15px;">
             </td>`;
@@ -7788,7 +7794,7 @@ The current project will not be changed. The new project will start with its own
         <div style="margin-top:8px;display:flex;gap:8px;">
           <button onclick="inspBuildingConfigSelectAll(true)" style="font-size:11px;padding:4px 10px;border:1px solid #D1D5DB;border-radius:5px;background:#fff;cursor:pointer;">✅ Todos</button>
           <button onclick="inspBuildingConfigSelectAll(false)" style="font-size:11px;padding:4px 10px;border:1px solid #D1D5DB;border-radius:5px;background:#fff;cursor:pointer;">☐ Ninguno</button>
-  <button onclick="saveInspBuildingConfigFromUI(this)" style="font-size:11px;padding:4px 12px;border:none;border-radius:5px;background:#0B5394;color:#fff;cursor:pointer;font-weight:600;">💾 Save configuration</button>
+  <button type="button" onclick="saveInspBuildingConfigFromUI(this)" style="font-size:11px;padding:4px 12px;border:none;border-radius:5px;background:#0B5394;color:#fff;cursor:pointer;font-weight:600;">💾 Save configuration</button>
         </div>`;
       container.innerHTML = html;
     }
@@ -7806,6 +7812,10 @@ The current project will not be changed. The new project will start with its own
       btn.textContent = 'Saving…';
       try {
         await saveInspBuildingConfig(cfg);
+        // Re-read immediately so the next Setup open and the inspection
+        // selector use exactly the saved Underground scope.
+        inspRemoteConfig = cfg;
+        inspRemoteReady = true;
         btn.textContent = '✅ Saved';
         btn.style.background = '#15803d';
         if (typeof toast === 'function') toast('✅ Inspection configuration saved to Supabase');
@@ -7871,7 +7881,7 @@ The current project will not be changed. The new project will start with its own
         check.checked = false;
       });
     }
-    function addSetupBuilding({ name = '', floors = 3, unitsPerFloor = 10, prefix = '', type = 'residential', enabled = true, activeSystems = null, floorConfigs = null, specialAreas = [], plan = '', planName = '', planType = '', planHistory = [] } = {}) {
+    function addSetupBuilding({ name = '', floors = 3, unitsPerFloor = 10, prefix = '', type = 'residential', enabled = true, undergroundEnabled = true, activeSystems = null, floorConfigs = null, specialAreas = [], plan = '', planName = '', planType = '', planHistory = [] } = {}) {
       setupBuildingCount++;
       const id = `setupBuilding_${setupBuildingCount}`;
       const isSpecial = type === 'special';
@@ -7900,7 +7910,7 @@ The current project will not be changed. The new project will start with its own
                 <input type="text" value="${name}" placeholder="e.g. Clubhouse" style="width:100%;padding:6px;border:1px solid #FCD34D;border-radius:5px;font-size:13px;background:white;">
               </div>
             </div>
-              <div style="font-size:12px;color:#92400E;padding:4px 8px;background:#FEF3C7;border-radius:4px;height:fit-content;">Single unit · Underground floor</div>
+              <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#92400E;white-space:nowrap;" title="Include this special unit in the Underground area"><input class="setup-underground-enabled" type="checkbox" ${undergroundEnabled !== false ? 'checked' : ''}> Underground included</label>
             <label class="btn btn-secondary" style="font-size:11px;padding:6px 9px;cursor:pointer;">📎 Drawing<input type="file" accept="image/*,.pdf" onchange="readSetupSpecialUnitPlan(this)" style="display:none"></label>
             <button type="button" class="btn btn-secondary setup-special-plan-view" style="font-size:10px;padding:5px 7px;" ${plan ? '' : 'disabled'}>View</button>
             <button type="button" class="btn btn-secondary setup-special-plan-undo" style="font-size:10px;padding:5px 7px;" ${Array.isArray(planHistory) && planHistory.length ? '' : 'disabled'}>Undo</button>
@@ -7931,6 +7941,7 @@ The current project will not be changed. The new project will start with its own
               <input type="text" value="${autoPrefix}" maxlength="3" placeholder="1" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
             </div>
             <button type="button" onclick="addBuildingInspectionColumn('${id}')" style="padding:6px 12px;background:#1E40AF;color:white;border:none;border-radius:5px;cursor:pointer;font-size:12px;">Add</button>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#1E3A8A;white-space:nowrap;" title="Include one Underground area for this building"><input class="setup-underground-enabled" type="checkbox" ${undergroundEnabled !== false ? 'checked' : ''}> Underground included</label>
             <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#1E3A8A;white-space:nowrap;"><input id="${id}_customFloors" type="checkbox" class="setup-custom-floor-toggle" ${Array.isArray(floorConfigs) && floorConfigs.length ? 'checked' : ''} onchange="toggleSetupFloorEditor('${id}')"> Custom floor groups</label>
             <button type="button" onclick="document.getElementById('${id}').remove()" style="padding:6px 10px;background:#FEE2E2;color:#DC2626;border:none;border-radius:5px;cursor:pointer;font-size:13px;">✕</button>
           </div>
@@ -8204,7 +8215,8 @@ The current project will not be changed. The new project will start with its own
           const enabled = enabledCb ? enabledCb.checked : true;
            const nameInput = row.querySelector('input[type="text"]');
            const name = nameInput ? nameInput.value.trim() : '';
-           if (name && enabled) specialConfigs.push({ name, type: 'special', systems: selectedSystems, plan: row.dataset.plan || '', planName: row.dataset.planName || '', planType: row.dataset.planType || '', planHistory: (() => { try { return JSON.parse(row.dataset.planHistory || '[]'); } catch (_) { return []; } })() });
+           const undergroundEnabled = row.querySelector('.setup-underground-enabled')?.checked !== false;
+           if (name && enabled) specialConfigs.push({ name, type: 'special', undergroundEnabled, systems: selectedSystems, plan: row.dataset.plan || '', planName: row.dataset.planName || '', planType: row.dataset.planType || '', planHistory: (() => { try { return JSON.parse(row.dataset.planHistory || '[]'); } catch (_) { return []; } })() });
         } else {
           const textInputs = row.querySelectorAll('input[type="text"]');
           const numInputs = row.querySelectorAll('input[type="number"]');
@@ -8221,7 +8233,8 @@ The current project will not be changed. The new project will start with its own
             underground: !!floorRow.querySelector('.setup-floor-underground')?.checked
           })) : null;
            const specialAreas = collectSetupSpecialAreas(row);
-           if (name) residentialConfigs.push({ name, type: 'residential', floors, unitsPerFloor, prefix, systems: selectedSystems, ...(floorConfigs ? { floorConfigs } : {}), specialAreas, specialAreasConfigured: true });
+           const undergroundEnabled = row.querySelector('.setup-underground-enabled')?.checked !== false;
+           if (name) residentialConfigs.push({ name, type: 'residential', floors, unitsPerFloor, prefix, systems: selectedSystems, undergroundEnabled, ...(floorConfigs ? { floorConfigs } : {}), specialAreas, specialAreasConfigured: true });
         }
       });
 
@@ -13540,7 +13553,7 @@ async function inspLoadRemoteModuleData() {
     }
   }
   const [{ data: assignmentRows, error: assignmentError }, { data: recordRows, error: recordError }] = await Promise.all([
-    sbClient.from('building_inspection_types').select('building_id,inspection_type_id,is_enabled').eq('project_id', PROJECT_ID).eq('is_enabled', true),
+    sbClient.from('building_inspection_types').select('building_id,inspection_type_id,floor,is_enabled').eq('project_id', PROJECT_ID).eq('is_enabled', true),
     sbClient.from('inspection_records').select('id,unit_id,inspection_type_id,inspector_id,inspector_name,status,revision_number,parent_record_id,pass_count,fail_count,na_count,total_count,submitted_at,created_at,updated_at').eq('project_id', PROJECT_ID).order('created_at', { ascending: true })
   ]);
   if (recordError) {
@@ -13558,7 +13571,7 @@ async function inspLoadRemoteModuleData() {
     const building = buildingNames.get(row.building_id);
     if (!type || !building) return;
     if (!config[type.code]) config[type.code] = [];
-    config[type.code].push(building);
+    config[type.code].push(row.floor ? building + '::' + row.floor : building);
   });
   inspRemoteConfig = config;
 
@@ -14362,11 +14375,12 @@ function inspGetApplicableTypes() {
   if (window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE && inspRemoteReady) cfg = inspRemoteConfig;
   else try { cfg = JSON.parse(localStorage.getItem('insp_building_config') || 'null'); } catch(e) {}
   if (!cfg || !inspCurrentUnit) return INSP_INSPECTION_TYPES;
-  const building = inspCurrentUnit.building;
+    const building = inspCurrentUnit.building;
+    const scopeKey = normalizeFloorName(inspCurrentUnit.floor) === 'Underground' ? building + '::Underground' : building;
   return INSP_INSPECTION_TYPES.filter(t => {
     // If no config for this type, default to applicable (all buildings)
     if (!cfg[t.id]) return true;
-    return cfg[t.id].includes(building);
+    return cfg[t.id].includes(scopeKey) || (scopeKey.endsWith('::Underground') && !cfg[t.id].some(value => String(value).includes('::Underground')) && cfg[t.id].includes(building));
   });
 }
 
@@ -14386,7 +14400,14 @@ function inspGetApplicableTypes() {
     function inspIsInspectionTypeApplicableForUnit(type, unit) {
       if (!type || !unit) return true;
       if (type.requiredSystem && !unit.systems?.[type.requiredSystem]) return false;
-      return inspIsInspectionTypeApplicableForBuilding(type, unit.building);
+      let cfg = null;
+      if (window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE && inspRemoteReady) cfg = inspRemoteConfig;
+      else try { cfg = JSON.parse(localStorage.getItem('insp_building_config') || 'null'); } catch(e) {}
+      if (!cfg || !cfg[type.id]) return true;
+      const building = unit.building;
+      const scopeKey = normalizeFloorName(unit.floor) === 'Underground' ? building + '::Underground' : building;
+      const entries = cfg[type.id];
+      return entries.includes(scopeKey) || (scopeKey.endsWith('::Underground') && !entries.some(value => String(value).includes('::Underground')) && entries.includes(building));
 }
 
 function inspRenderTypeGrid() {
