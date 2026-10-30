@@ -3021,6 +3021,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     let quantityRemoteSavePromise = Promise.resolve(true);
     let quantityRemotePersistChain = Promise.resolve(true);
     let quantityRemoteSaveWaiters = [];
+    let quantitySystemSwitchGeneration = 0;
     let quantityRemotePendingStore = null;
     let quantityLastPersistedMarkSignature = '';
     let quantityLastPersistedMarksByUnit = new Map();
@@ -3999,6 +4000,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (next === quantityCurrentSystem) return;
       quantityCurrentSystem = next;
       quantityActiveItem = -1;
+      quantitySystemSwitchGeneration += 1;
       // Coalesce rapid tab changes. A tab switch must never start another
       // remote marks/preview load while the previous paint is still running.
       clearTimeout(quantitySystemSwitchTimer);
@@ -5018,6 +5020,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (subtitle) subtitle.textContent = `${unit.building} • ${unit.floor}`;
       if (content) content.innerHTML = '<div class="quantity-help" style="padding:24px;text-align:center;">Loading unit data…</div>';
       const renderUnitId = unit.id;
+      const openSwitchGeneration = quantitySystemSwitchGeneration;
       requestAnimationFrame(() => {
         if (quantityCurrentUnit?.id === renderUnitId) quantityRenderUnit(true);
       });
@@ -5029,7 +5032,12 @@ Object.assign(APP_TRANSLATIONS.en, {
           if (!quantityUsesLocalStorage() && !quantityRemoteReady) await quantityHydrateRemote({ unitId: unit.id, unitType: quantityUnitType(unit), skipUiRender: true, skipActiveUnitRender: true });
           await quantityLoadRemoteRevisions(unit);
         } catch (_) { /* the initial lightweight view remains usable */ }
-        if (quantityCurrentUnit?.id === unit.id) quantityRenderUnit(true);
+        if (quantityCurrentUnit?.id === unit.id) {
+          // Supabase can finish after the user has already changed QC tabs.
+          // In that case this late refresh must stay on the lightweight path;
+          // otherwise it starts PDF.js again and freezes production.
+          quantityRenderUnit(true, { deferPdf: quantitySystemSwitchGeneration !== openSwitchGeneration });
+        }
       };
       void loadUnitData();
     }
@@ -5428,7 +5436,11 @@ Object.assign(APP_TRANSLATIONS.en, {
           }).catch(() => {}).finally(() => { state._marksLoading = false; });
         }
       }
-      if (drawing?.storagePath && !drawing.dataUrl) {
+      // A system-tab switch must not ask Supabase Storage for a new signed
+      // URL. Each system can have a different PDF and rapid switching used to
+      // start several Storage requests and rerenders at once in production.
+      // The active drawing is hydrated on initial unit open or explicit load.
+      if (drawing?.storagePath && !drawing.dataUrl && !options.deferPdf) {
         quantityStoragePreviewUrl(drawing.storagePath).then(url => {
           if (renderToken === quantityRenderToken && url && quantityCurrentUnit && quantityEffectiveDrawing(quantityCurrentUnit, quantityUnitState(quantityCurrentUnit))?.storagePath === drawing.storagePath) quantityRenderUnit(true);
         }).catch(error => console.warn('Quantity drawing preview unavailable:', error));
