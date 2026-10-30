@@ -3999,7 +3999,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantitySystemSwitchTimer = setTimeout(() => {
         quantitySystemSwitchTimer = null;
         if (quantityCurrentUnit) quantityRenderUnit(true);
-      }, 0);
+      }, 60);
     }
     function quantityInstalledCount(state, index) {
       if (state?._marksLoaded === false) return Number(state.installedCounts?.[index] || 0);
@@ -5390,6 +5390,11 @@ Object.assign(APP_TRANSLATIONS.en, {
     function quantityRenderUnit(lightweight = false) {
       if (!quantityCurrentUnit) return;
       const renderToken = ++quantityRenderToken;
+      // Keep the already-rendered PDF/image node when only the QC tab changes.
+      // Recreating the canvas made PDF.js parse/draw the same sheet repeatedly
+      // and blocked the main thread in production for several seconds.
+      const previousDrawingMedia = document.querySelector('#quantityUnitContent .quantity-pdf-canvas, #quantityUnitContent .quantity-drawing-board > img');
+      const previousDrawingKey = previousDrawingMedia?.dataset?.drawingKey || '';
       const state = quantityUnitState(quantityCurrentUnit);
       const historicalRevision = quantityRevisionCursor != null ? state.revisions[quantityRevisionCursor] : null;
       const historicalDrawing = historicalRevision?.drawingRef && state.revisionDrawings?.[historicalRevision.drawingRef]
@@ -5398,6 +5403,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       // Historical views must render from the revision snapshot itself, not from the live unit state.
       const displayState = historicalRevision ? { ...state, items: quantityClone(historicalRevision.items || []), markers: quantityClone(historicalRevision.markers || []), installedCounts: quantityClone(historicalRevision.installedCounts || {}), drawing: quantityClone(historicalDrawing || null), _marksLoaded: true } : state;
       const unitType = quantityUnitType(quantityCurrentUnit); const drawing = quantityEffectiveDrawing(quantityCurrentUnit, displayState);
+      const drawingKey = drawing ? [drawing.storagePath || '', drawing.name || '', drawing.version || '', drawing.revisionNumber || '', drawing.updatedAt || '', historicalRevision ? (historicalRevision.revisionNumber ?? quantityRevisionCursor ?? 'history') : 'live'].join('|') : '';
       if (!quantityUsesLocalStorage() && state._marksLoaded === false) {
         const renderUnitId = quantityCurrentUnit.id;
         if (!state._marksLoading) {
@@ -5448,10 +5454,17 @@ Object.assign(APP_TRANSLATIONS.en, {
       const revisionStamp = `<div class="quantity-plan-revision-stamp" style="position:absolute;right:10px;top:10px;z-index:4;background:rgba(255,255,255,.92);border:1px solid #CBD5E1;border-radius:5px;padding:4px 7px;font-size:11px;color:#334155;pointer-events:none;">${officialFinalEscape(activeRevisionDate)}</div>`;
       const systemTabs = QUANTITY_SYSTEMS.map(system => `<button type="button" class="btn ${quantityCurrentSystem === system ? 'btn-primary' : 'btn-secondary'}" style="font-size:11px;padding:6px 9px;" onclick="quantitySwitchSystem('${system}')">${system}</button>`).join('');
       document.getElementById('quantityUnitContent').innerHTML = `<div style="grid-column:1/-1;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;border:1px solid #BFDBFE;border-radius:8px;background:#EFF6FF;"><strong style="font-size:12px;color:#1E3A8A;margin-right:4px;">System / QC:</strong>${systemTabs}<span style="font-size:11px;color:#64748B;margin-left:auto;">${quantityCurrentSystem} quantities, drawing and RFI history</span></div><div class="quantity-checklist"><div class="quantity-card-header"><strong>${quantityCurrentSystem} Takeoff Checklist</strong><span>Click Select, then click the drawing</span></div><table><thead><tr><th>#</th><th>Description</th><th>Takeoff</th><th>Installed</th><th>Remaining</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div><div class="quantity-card-header" style="border:1px solid #E2E8F0;border-bottom:0;border-radius:8px 8px 0 0;"><strong>${quantityCurrentSystem} Drawing</strong><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${typeControl}${templateButton}${quantityIsAdmin() ? `<label class="btn btn-secondary" style="font-size:11px;padding:5px 8px;cursor:pointer;">Upload Drawing / RFI<input type="file" accept="image/*,.pdf" onchange="quantityHandleUnitPlan(this)" style="display:none"></label>` : ''}${quantityIsAdmin() ? `<button type="button" class="insp-btn insp-btn-success" style="font-size:11px;padding:5px 8px;" onclick="quantitySaveRevision()">Save Revision</button>` : ``}${undoRevisionButton}<button class="btn btn-danger" style="font-size:11px;padding:5px 8px;" onclick="quantityClearMarkers()">Clear All Marks</button>${quantityIsAdmin() ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityResetRevisionHistory()">Reset test history</button>` : ''}</span></div><div class="quantity-drawing-board">${drawingHtml}${drawingHitArea}${drawingUpdateStamp}${revisionStamp}${markers}</div>${revisionNav}<div class="quantity-help"><strong>${drawingSource}</strong><br>${quantityActiveItem >= 0 ? `Active item: <strong>${String(quantityActiveItem + 1).padStart(2, '0')} — ${officialFinalEscape(state.items[quantityActiveItem]?.description || '')}</strong>. Click the corresponding symbol location to add an installed mark. Click a numbered green mark to remove it.` : 'Select an item to start marking its corresponding symbol on the drawing.'}</div></div>`;
+      const nextDrawingMedia = document.querySelector('#quantityUnitContent .quantity-pdf-canvas, #quantityUnitContent .quantity-drawing-board > img');
+      if (nextDrawingMedia) {
+        nextDrawingMedia.dataset.drawingKey = drawingKey;
+        if (previousDrawingMedia && previousDrawingKey && previousDrawingKey === drawingKey) {
+          nextDrawingMedia.replaceWith(previousDrawingMedia);
+        }
+      }
       const checklistHint = document.querySelector('#quantityUnitContent .quantity-checklist .quantity-card-header span');
       if (checklistHint && quantityIsAdmin()) checklistHint.innerHTML = `Click Select, then click the drawing <button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityOpenUnitChecklist()">Edit unit checklist</button>`;
       requestAnimationFrame(quantityApplyDrawingView);
-      if (drawing?.type === 'application/pdf') requestAnimationFrame(() => quantityRenderPdf(document.querySelector('#quantityUnitContent .quantity-pdf-canvas'), drawing.dataUrl, Math.max(2, quantityDrawingZoom)));
+      if (drawing?.type === 'application/pdf' && !(previousDrawingMedia && previousDrawingKey === drawingKey)) requestAnimationFrame(() => quantityRenderPdf(document.querySelector('#quantityUnitContent .quantity-pdf-canvas'), drawing.dataUrl, Math.max(2, quantityDrawingZoom)));
       // Opening QC should not rebuild the dashboard and all charts. Those
       // global recalculations are deferred to edits/close and made the unit
       // feel frozen, especially with large drawings.
