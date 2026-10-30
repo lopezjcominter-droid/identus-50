@@ -2942,6 +2942,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     const QUANTITY_SYSTEMS = ['Rough-In', 'Trim-Out', 'Fire Alarm', 'Data', 'Wiring'];
     let quantityCurrentUnit = null;
     let quantityCurrentSystem = 'Rough-In';
+    let quantityRenderToken = 0;
     let quantityActiveItem = -1;
     let quantityRevisionCursor = null;
     let quantityRevisionLoadToken = 0;
@@ -3978,9 +3979,12 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     function quantitySwitchSystem(system) {
       const next = QUANTITY_SYSTEMS.includes(system) ? system : 'Rough-In';
+      if (next === quantityCurrentSystem) return;
       quantityCurrentSystem = next;
       quantityActiveItem = -1;
-      if (quantityCurrentUnit) requestAnimationFrame(() => { if (quantityCurrentUnit) quantityRenderUnit(true); });
+      // Render the selected QC system immediately. Do not wait for a frame
+      // that may already be occupied by PDF rendering or a remote refresh.
+      if (quantityCurrentUnit) quantityRenderUnit(true);
     }
     function quantityInstalledCount(state, index) {
       if (state?._marksLoaded === false) return Number(state.installedCounts?.[index] || 0);
@@ -4364,6 +4368,11 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     let quantityPdfJsLoadPromise = null;
     const quantityPdfRenderJobs = new WeakMap();
+    // Keep the parsed first page by source. Switching QC systems replaces the
+    // canvas, but normally uses the same drawing; parsing the PDF again on
+    // every tab click was the main source of UI freezes.
+    const quantityPdfPageCache = new Map();
+    const quantityPdfPageCacheLimit = 8;
     function quantityEnsurePdfJs() {
       if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
       if (quantityPdfJsLoadPromise) return quantityPdfJsLoadPromise;
@@ -4390,20 +4399,32 @@ Object.assign(APP_TRANSLATIONS.en, {
         const pdfjs = await quantityEnsurePdfJs();
         pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         const source = String(dataUrl || '');
-        const pdfBytes = source.startsWith('data:')
-          ? Uint8Array.from(atob(source.split(',')[1] || ''), char => char.charCodeAt(0))
-          : await (await fetch(source)).arrayBuffer();
-        // Keep PDF parsing/rendering off the UI thread. Large architectural
-        // sheets otherwise freeze scrolling and pointer interactions.
-        let pdf;
-        try {
-          pdf = await pdfjs.getDocument({ data: pdfBytes, disableWorker: false }).promise;
-        } catch (workerError) {
-          // Preserve compatibility when a browser blocks the CDN worker.
-          console.warn('PDF worker unavailable; using compatibility mode.', workerError);
-          pdf = await pdfjs.getDocument({ data: pdfBytes, disableWorker: true }).promise;
+        let pagePromise = quantityPdfPageCache.get(source);
+        if (!pagePromise) {
+          pagePromise = (async () => {
+            const pdfBytes = source.startsWith('data:')
+              ? Uint8Array.from(atob(source.split(',')[1] || ''), char => char.charCodeAt(0))
+              : await (await fetch(source)).arrayBuffer();
+            // Keep PDF parsing/rendering off the UI thread. Large architectural
+            // sheets otherwise freeze scrolling and pointer interactions.
+            let pdf;
+            try {
+              pdf = await pdfjs.getDocument({ data: pdfBytes, disableWorker: false }).promise;
+            } catch (workerError) {
+              console.warn('PDF worker unavailable; using compatibility mode.', workerError);
+              pdf = await pdfjs.getDocument({ data: pdfBytes, disableWorker: true }).promise;
+            }
+            return pdf.getPage(1);
+          })();
+          quantityPdfPageCache.set(source, pagePromise);
+          while (quantityPdfPageCache.size > quantityPdfPageCacheLimit) {
+            const oldest = quantityPdfPageCache.keys().next().value;
+            if (oldest === source) break;
+            quantityPdfPageCache.delete(oldest);
+          }
+          pagePromise.catch(() => { if (quantityPdfPageCache.get(source) === pagePromise) quantityPdfPageCache.delete(source); });
         }
-        const page = await pdf.getPage(1);
+        const page = await pagePromise;
         if (job.cancelled || !canvas.isConnected) return;
         // Let PDF.js honor the page rotation embedded in the source plan.
         // Some architectural sheets store a landscape sheet as a rotated page.
@@ -5348,6 +5369,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     function quantityRenderUnit(lightweight = false) {
       if (!quantityCurrentUnit) return;
+      const renderToken = ++quantityRenderToken;
       const state = quantityUnitState(quantityCurrentUnit);
       const historicalRevision = quantityRevisionCursor != null ? state.revisions[quantityRevisionCursor] : null;
       const historicalDrawing = historicalRevision?.drawingRef && state.revisionDrawings?.[historicalRevision.drawingRef]
@@ -5359,12 +5381,12 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (!quantityUsesLocalStorage() && state._marksLoaded === false) {
         const renderUnitId = quantityCurrentUnit.id;
         quantityLoadRemoteMarks(quantityCurrentUnit).then(() => {
-          if (quantityCurrentUnit?.id === renderUnitId) quantityRenderUnit();
+          if (renderToken === quantityRenderToken && quantityCurrentUnit?.id === renderUnitId) quantityRenderUnit(true);
         }).catch(() => {});
       }
       if (drawing?.storagePath && !drawing.dataUrl) {
         quantityStoragePreviewUrl(drawing.storagePath).then(url => {
-          if (url && quantityCurrentUnit && quantityEffectiveDrawing(quantityCurrentUnit, quantityUnitState(quantityCurrentUnit))?.storagePath === drawing.storagePath) quantityRenderUnit();
+          if (renderToken === quantityRenderToken && url && quantityCurrentUnit && quantityEffectiveDrawing(quantityCurrentUnit, quantityUnitState(quantityCurrentUnit))?.storagePath === drawing.storagePath) quantityRenderUnit(true);
         }).catch(error => console.warn('Quantity drawing preview unavailable:', error));
       }
       const installedFor = index => quantityInstalledCount(displayState, index);
