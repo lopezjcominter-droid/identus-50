@@ -5532,7 +5532,17 @@ Object.assign(APP_TRANSLATIONS.en, {
       const planImage = selectedPlan?.dataUrl ? (selectedPlan.type === 'application/pdf' ? `<div class="quantity-plan-media"><canvas class="quantity-pdf-canvas" aria-label="Floor plan"></canvas>${hasContourMap ? quantityPlanContourSvg(planKey, units) : ''}</div>` : `<img src="${selectedPlan.dataUrl}" alt="Floor plan">`) : `<div class="quantity-plan-empty"><div><strong>No site plan uploaded for ${officialFinalEscape(buildingSelect.value || 'this building')} / ${officialFinalEscape(select.value || 'this floor')}</strong><br>Upload the site plan for this Building/Floor combination to begin.</div></div>`;
       const pins = hasContourMap ? '' : units.map((unit, index) => { const col = index % 5; const row = Math.floor(index / 5); return `<button class="quantity-unit-pin ${String(unit.floor).toLowerCase().includes('underground') ? 'special' : ''}" style="left:${12 + col * 19}%;top:${14 + (row % 5) * 17}%;" onclick="quantityOpenUnit(${index})">${officialFinalEscape(unit.apt)}</button>`; }).join('');
       board.innerHTML = `${planImage}${pins}`;
-      if (selectedPlan?.type === 'application/pdf') requestAnimationFrame(() => quantityRenderPdf(board.querySelector('.quantity-pdf-canvas'), selectedPlan.dataUrl, 2));
+      if (selectedPlan?.type === 'application/pdf') {
+        // Do not parse a large floor PDF during tab navigation.  Rendering it
+        // synchronously here blocks the main thread before the new QC tab can
+        // respond. Paint the checklist/navigation first, then render a light
+        // preview once the browser is idle.
+        clearTimeout(quantityDeferredDrawingTimer);
+        quantityDeferredDrawingTimer = setTimeout(() => {
+          if (document.getElementById('quantityFloorPlanBoard') !== board) return;
+          quantityRenderPdf(board.querySelector('.quantity-pdf-canvas'), selectedPlan.dataUrl, 1);
+        }, 900);
+      }
       const planNotice = document.getElementById('quantityPlanNotice');
       if (planNotice) planNotice.innerHTML = unmappedPlanUnits.length ? `<span style="color:#92400E;">⚠️ Not shown on this uploaded sheet: ${unmappedPlanUnits.map(apt => `<strong>${officialFinalEscape(apt)}</strong>`).join(', ')}. Open these units from the list below or upload the sheet that contains their contours.</span>` : '';
       document.getElementById('quantityUnitList').innerHTML = units.length ? units.map((unit, index) => `<button onclick="quantityOpenUnit(${index})"><strong>${officialFinalEscape(quantityUnitLabel(unit))}</strong><br><small>${officialFinalEscape(unit.building)} • ${officialFinalEscape(unit.floor)}</small></button>`).join('') : '<div style="padding:12px;color:#64748B;font-size:12px;">No units or special areas match this floor or search.</div>';
