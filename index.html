@@ -5479,7 +5479,10 @@ Object.assign(APP_TRANSLATIONS.en, {
       const checklistHint = document.querySelector('#quantityUnitContent .quantity-checklist .quantity-card-header span');
       if (checklistHint && quantityIsAdmin()) checklistHint.innerHTML = `Click Select, then click the drawing <button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityOpenUnitChecklist()">Edit unit checklist</button>`;
       requestAnimationFrame(quantityApplyDrawingView);
-      if (drawing?.type === 'application/pdf' && !(previousDrawingMedia && previousDrawingKey === drawingKey)) {
+      // A QC system-tab switch must never start PDF.js. Reuse the already
+      // rendered drawing; render only on initial/open or an explicit drawing
+      // change so large production PDFs cannot freeze the checklist controls.
+      if (drawing?.type === 'application/pdf' && !options.deferPdf && !(previousDrawingMedia && previousDrawingKey === drawingKey)) {
         clearTimeout(quantityDeferredDrawingTimer);
         const renderPdf = () => {
           if (renderToken !== quantityRenderToken || !quantityCurrentUnit) return;
@@ -5487,12 +5490,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           // Render a light first frame; zoom controls can request full quality later.
           quantityRenderPdf(document.querySelector('#quantityUnitContent .quantity-pdf-canvas'), drawing.dataUrl, options.deferPdf ? 1 : Math.max(2, quantityDrawingZoom));
         };
-        // A QC tab change must paint its checklist immediately. PDF.js can
-        // parse large architectural sheets synchronously before yielding in
-        // some production browsers, so defer the drawing until the new tab
-        // is stable and cancel it if the user changes tabs again.
-        if (options.deferPdf) quantityDeferredDrawingTimer = setTimeout(renderPdf, 1200);
-        else requestAnimationFrame(renderPdf);
+        requestAnimationFrame(renderPdf);
       }
       // Opening QC should not rebuild the dashboard and all charts. Those
       // global recalculations are deferred to edits/close and made the unit
