@@ -4996,14 +4996,17 @@ Object.assign(APP_TRANSLATIONS.en, {
       requestAnimationFrame(() => {
         if (quantityCurrentUnit?.id === renderUnitId) quantityRenderUnit(true);
       });
-      quantityLoadRemoteRevisions(unit).then(() => {
+      // In production, never hydrate the whole project and load this unit's
+      // revisions at the same time. Both operations update the same store and
+      // used to trigger competing renders/PDF work, freezing QC on open.
+      const loadUnitData = async () => {
+        try {
+          if (!quantityUsesLocalStorage() && !quantityRemoteReady) await quantityHydrateRemote();
+          await quantityLoadRemoteRevisions(unit);
+        } catch (_) { /* the initial lightweight view remains usable */ }
         if (quantityCurrentUnit?.id === unit.id) quantityRenderUnit(true);
-      });
-      if (!quantityUsesLocalStorage() && !quantityRemoteReady) {
-        quantityHydrateRemote().then(() => {
-          if (quantityCurrentUnit?.id === unit.id) quantityRenderUnit(true);
-        }).catch(() => {});
-      }
+      };
+      void loadUnitData();
     }
     function quantityCloseUnit() {
       if (quantityUsesLocalStorage()) quantityFlushDeferredLocalSave();
