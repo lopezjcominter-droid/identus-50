@@ -2943,6 +2943,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     let quantityCurrentUnit = null;
     let quantityCurrentSystem = 'Rough-In';
     let quantityRenderToken = 0;
+    let quantitySystemSwitchTimer = null;
     let quantityActiveItem = -1;
     let quantityRevisionCursor = null;
     let quantityRevisionLoadToken = 0;
@@ -3982,9 +3983,13 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (next === quantityCurrentSystem) return;
       quantityCurrentSystem = next;
       quantityActiveItem = -1;
-      // Render the selected QC system immediately. Do not wait for a frame
-      // that may already be occupied by PDF rendering or a remote refresh.
-      if (quantityCurrentUnit) quantityRenderUnit(true);
+      // Coalesce rapid tab changes. A tab switch must never start another
+      // remote marks/preview load while the previous paint is still running.
+      clearTimeout(quantitySystemSwitchTimer);
+      quantitySystemSwitchTimer = setTimeout(() => {
+        quantitySystemSwitchTimer = null;
+        if (quantityCurrentUnit) quantityRenderUnit(true);
+      }, 0);
     }
     function quantityInstalledCount(state, index) {
       if (state?._marksLoaded === false) return Number(state.installedCounts?.[index] || 0);
@@ -5382,9 +5387,12 @@ Object.assign(APP_TRANSLATIONS.en, {
       const unitType = quantityUnitType(quantityCurrentUnit); const drawing = quantityEffectiveDrawing(quantityCurrentUnit, displayState);
       if (!quantityUsesLocalStorage() && state._marksLoaded === false) {
         const renderUnitId = quantityCurrentUnit.id;
-        quantityLoadRemoteMarks(quantityCurrentUnit).then(() => {
-          if (renderToken === quantityRenderToken && quantityCurrentUnit?.id === renderUnitId) quantityRenderUnit(true);
-        }).catch(() => {});
+        if (!state._marksLoading) {
+          state._marksLoading = true;
+          quantityLoadRemoteMarks(quantityCurrentUnit).then(() => {
+            if (renderToken === quantityRenderToken && quantityCurrentUnit?.id === renderUnitId) quantityRenderUnit(true);
+          }).catch(() => {}).finally(() => { state._marksLoading = false; });
+        }
       }
       if (drawing?.storagePath && !drawing.dataUrl) {
         quantityStoragePreviewUrl(drawing.storagePath).then(url => {
