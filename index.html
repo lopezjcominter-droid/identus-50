@@ -1835,10 +1835,10 @@
         </div>
         <div class="quantity-filters">
           <label style="font-size:12px;color:#475569;font-weight:600;">Building
-            <select id="quantityBuildingSelect" class="form-select" onchange="renderQuantityControl()" style="margin-left:6px;min-width:145px;"></select>
+            <select id="quantityBuildingSelect" class="form-select" onchange="quantityHandlePlanContextChange()" style="margin-left:6px;min-width:145px;"></select>
           </label>
           <label style="font-size:12px;color:#475569;font-weight:600;">Floor
-            <select id="quantityFloorSelect" class="form-select" onchange="renderQuantityControl()" style="margin-left:6px;min-width:145px;"></select>
+            <select id="quantityFloorSelect" class="form-select" onchange="quantityHandlePlanContextChange()" style="margin-left:6px;min-width:145px;"></select>
           </label>
           <input id="quantityUnitSearch" type="search" placeholder="Search unit..." oninput="if(window.isCredentialSearchValue && window.isCredentialSearchValue(this.value)){this.value='';} quantityHandleUnitSearch()" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="search" enterkeyhint="search" readonly onpointerdown="this.removeAttribute('readonly')" onkeydown="this.removeAttribute('readonly')" data-form-type="other" data-lpignore="true" data-1p-ignore="true" style="padding:8px 10px;border:1px solid #CBD5E1;border-radius:6px;max-width:220px;">
           <span id="quantityAdminHint" style="font-size:12px;color:#64748B;"></span>
@@ -3907,6 +3907,15 @@ Object.assign(APP_TRANSLATIONS.en, {
       const building = document.getElementById('quantityBuildingSelect')?.value || '';
       const floor = document.getElementById('quantityFloorSelect')?.value || '';
       return `${building}::${floor}`;
+    }
+    function quantityHandlePlanContextChange() {
+      // A contour review belongs to exactly one Building/Floor. Close any
+      // nested editor before rebuilding so a click cannot continue editing the
+      // previous building's PDF or contour map after the selector changes.
+      quantityCloseContourReview();
+      quantityContourEditor = null;
+      quantityRevisionCursor = null;
+      renderQuantityControl();
     }
     function quantityDefaultItems() {
       return [
