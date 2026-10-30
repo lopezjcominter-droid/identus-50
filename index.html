@@ -3254,22 +3254,25 @@ Object.assign(APP_TRANSLATIONS.en, {
         return true;
       } catch (error) { console.error('Quantity Control Supabase save failed', error); quantitySuccessToast('❌ Quantity Control could not be saved to Supabase.'); return false; }
     }
-    async function quantityHydrateRemote() {
+    async function quantityHydrateRemote(options = {}) {
       if (quantityUsesLocalStorage() || quantityRemoteLoading) return quantityRemoteLoading;
+      const unitOnly = options.unitId != null;
+      const unitIdFilter = unitOnly ? `&unit_id=eq.${encodeURIComponent(options.unitId)}` : '';
+      const unitTypeFilter = unitOnly && options.unitType ? `&unit_type=eq.${encodeURIComponent(options.unitType)}` : '';
       quantityRemoteLoading = (async () => {
         try {
           const headers = await quantityAuthHeaders(); const q = async path => { const r = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers }), 12000, 'Quantity Control request'); if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`); return r.json(); };
           const [templates, plans, states] = await Promise.all([
-            q(`quantity_templates?project_id=eq.${PROJECT_ID}&is_active=eq.true&select=unit_type,name,mime_type,storage_path,system_drawings,checklist,version,updated_at`),
-            q(`quantity_floor_plans?project_id=eq.${PROJECT_ID}&is_active=eq.true&select=building_id,floor,name,mime_type,storage_path,version,updated_at`),
-            q(`quantity_unit_states?project_id=eq.${PROJECT_ID}&select=unit_id,unit_type,checklist,checklist_mode,drawing_name,drawing_mime_type,drawing_storage_path,drawing_revision`)
+            q(`quantity_templates?project_id=eq.${PROJECT_ID}&is_active=eq.true${unitTypeFilter}&select=unit_type,name,mime_type,storage_path,system_drawings,checklist,version,updated_at`),
+            unitOnly ? Promise.resolve([]) : q(`quantity_floor_plans?project_id=eq.${PROJECT_ID}&is_active=eq.true&select=building_id,floor,name,mime_type,storage_path,version,updated_at`),
+            q(`quantity_unit_states?project_id=eq.${PROJECT_ID}${unitIdFilter}&select=unit_id,unit_type,checklist,checklist_mode,drawing_name,drawing_mime_type,drawing_storage_path,drawing_revision`)
           ]);
           // Counts are optional until the additive view migration exists. Do
           // not fall back to every mark coordinate; selected-unit View loads
           // coordinates through quantityLoadRemoteMarks().
           let marks = [];
           try {
-            marks = await q(`quantity_installed_mark_counts?project_id=eq.${PROJECT_ID}&select=unit_id,item_index,installed_count`);
+            marks = await q(`quantity_installed_mark_counts?project_id=eq.${PROJECT_ID}${unitIdFilter}&select=unit_id,item_index,installed_count`);
           } catch (error) {
             console.warn('Installed mark count view unavailable; marks will load when a unit is opened.', error);
           }
@@ -3288,13 +3291,19 @@ Object.assign(APP_TRANSLATIONS.en, {
           quantityLastPersistedMarkSignature = quantityMarkSignature(quantityRemoteStore);
           quantityLastPersistedMarksByUnit = quantityMarksByUnit(quantityRemoteStore, new Map((Array.isArray(data) ? data : []).map(unit => [quantityUnitKey(unit), unit])));
           quantityRemotePendingStore = null;
-          quantityRemoteReady = true;
-          renderQuantityControl();
-          if (document.getElementById('setupDrawingModelsList')) renderSetupDrawingModels();
-          if (document.getElementById('setupFloorPlansList')) renderSetupFloorPlans();
+          // A unit-only hydration is deliberately not considered a complete
+          // project hydration. The dashboard/setup will perform the full load
+          // later, while opening a unit avoids downloading every drawing and
+          // checklist in the project.
+          quantityRemoteReady = !unitOnly;
+          if (!options.skipUiRender) {
+            renderQuantityControl();
+            if (document.getElementById('setupDrawingModelsList')) renderSetupDrawingModels();
+            if (document.getElementById('setupFloorPlansList')) renderSetupFloorPlans();
+          }
           // If a unit was opened while remote data was hydrating, refresh the
           // active system immediately instead of waiting for a tab click.
-          if (quantityCurrentUnit) quantityRenderUnit();
+          if (!options.skipActiveUnitRender && quantityCurrentUnit) quantityRenderUnit();
         } catch (error) {
           console.error('Quantity Control Supabase load failed', error);
           // Keep any edits made while the remote store was loading; do not
@@ -3302,10 +3311,11 @@ Object.assign(APP_TRANSLATIONS.en, {
           quantityRemoteStore = quantityRemotePendingStore || quantityRemoteStore || {};
           quantityRemotePendingStore = null;
           quantityRemoteReady = true;
-          renderQuantityControl();
+          if (!options.skipUiRender) renderQuantityControl();
           quantitySuccessToast('❌ Quantity Control could not load from Supabase. Check the connection before saving changes.');
         }
       })();
+      if (unitOnly) quantityRemoteLoading.finally(() => { if (!quantityRemoteReady) quantityRemoteLoading = null; });
       return quantityRemoteLoading;
     }
     function quantityUnitType(unit) {
@@ -5001,7 +5011,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       // used to trigger competing renders/PDF work, freezing QC on open.
       const loadUnitData = async () => {
         try {
-          if (!quantityUsesLocalStorage() && !quantityRemoteReady) await quantityHydrateRemote();
+          if (!quantityUsesLocalStorage() && !quantityRemoteReady) await quantityHydrateRemote({ unitId: unit.id, unitType: quantityUnitType(unit), skipUiRender: true, skipActiveUnitRender: true });
           await quantityLoadRemoteRevisions(unit);
         } catch (_) { /* the initial lightweight view remains usable */ }
         if (quantityCurrentUnit?.id === unit.id) quantityRenderUnit(true);
