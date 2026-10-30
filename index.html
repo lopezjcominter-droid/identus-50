@@ -2944,6 +2944,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     let quantityCurrentSystem = 'Rough-In';
     let quantityRenderToken = 0;
     let quantitySystemSwitchTimer = null;
+    let quantityDeferredDrawingTimer = null;
     let quantityActiveItem = -1;
     let quantityRevisionCursor = null;
     let quantityRevisionLoadToken = 0;
@@ -3998,7 +3999,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       clearTimeout(quantitySystemSwitchTimer);
       quantitySystemSwitchTimer = setTimeout(() => {
         quantitySystemSwitchTimer = null;
-        if (quantityCurrentUnit) quantityRenderUnit(true);
+        if (quantityCurrentUnit) quantityRenderUnit(true, { deferPdf: true });
       }, 60);
     }
     function quantityInstalledCount(state, index) {
@@ -5387,7 +5388,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (typeof toast === 'function') toast('All installed marks cleared');
       void quantityPersistEdit(store, true).then(saved => { if (!saved) quantitySuccessToast('❌ Clear could not be saved.'); });
     }
-    function quantityRenderUnit(lightweight = false) {
+    function quantityRenderUnit(lightweight = false, options = {}) {
       if (!quantityCurrentUnit) return;
       const renderToken = ++quantityRenderToken;
       // Keep the already-rendered PDF/image node when only the QC tab changes.
@@ -5464,7 +5465,21 @@ Object.assign(APP_TRANSLATIONS.en, {
       const checklistHint = document.querySelector('#quantityUnitContent .quantity-checklist .quantity-card-header span');
       if (checklistHint && quantityIsAdmin()) checklistHint.innerHTML = `Click Select, then click the drawing <button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityOpenUnitChecklist()">Edit unit checklist</button>`;
       requestAnimationFrame(quantityApplyDrawingView);
-      if (drawing?.type === 'application/pdf' && !(previousDrawingMedia && previousDrawingKey === drawingKey)) requestAnimationFrame(() => quantityRenderPdf(document.querySelector('#quantityUnitContent .quantity-pdf-canvas'), drawing.dataUrl, Math.max(2, quantityDrawingZoom)));
+      if (drawing?.type === 'application/pdf' && !(previousDrawingMedia && previousDrawingKey === drawingKey)) {
+        clearTimeout(quantityDeferredDrawingTimer);
+        const renderPdf = () => {
+          if (renderToken !== quantityRenderToken || !quantityCurrentUnit) return;
+          // Tab changes must stay responsive even with large production PDFs.
+          // Render a light first frame; zoom controls can request full quality later.
+          quantityRenderPdf(document.querySelector('#quantityUnitContent .quantity-pdf-canvas'), drawing.dataUrl, options.deferPdf ? 1 : Math.max(2, quantityDrawingZoom));
+        };
+        // A QC tab change must paint its checklist immediately. PDF.js can
+        // parse large architectural sheets synchronously before yielding in
+        // some production browsers, so defer the drawing until the new tab
+        // is stable and cancel it if the user changes tabs again.
+        if (options.deferPdf) quantityDeferredDrawingTimer = setTimeout(renderPdf, 1200);
+        else requestAnimationFrame(renderPdf);
+      }
       // Opening QC should not rebuild the dashboard and all charts. Those
       // global recalculations are deferred to edits/close and made the unit
       // feel frozen, especially with large drawings.
