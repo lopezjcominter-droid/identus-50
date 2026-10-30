@@ -3034,6 +3034,11 @@ Object.assign(APP_TRANSLATIONS.en, {
       revisions: new Map()
     };
     const quantityPreviewUrlCache = new Map();
+    // Deduplicate concurrent Storage signed-URL requests. Switching QC tabs
+    // can render the same drawing several times before the first URL returns;
+    // without this guard production sends competing requests to Supabase and
+    // can leave the modal waiting while each render replaces the canvas.
+    const quantityPreviewUrlPending = new Map();
     const quantityRevisionLoads = new Map();
     const quantityMarksLoads = new Map();
     const QUANTITY_STORAGE_BUCKET = 'quantity-drawings';
@@ -4371,11 +4376,22 @@ Object.assign(APP_TRANSLATIONS.en, {
         } catch (_) { return ''; }
       }
       if (quantityPreviewUrlCache.has(source)) return quantityPreviewUrlCache.get(source);
+      if (quantityPreviewUrlPending.has(source)) return quantityPreviewUrlPending.get(source);
       if (!sbClient) return '';
-      const signed = await sbClient.storage.from(QUANTITY_STORAGE_BUCKET).createSignedUrl(source, 3600);
-      const url = signed.data?.signedUrl || '';
-      if (url) quantityPreviewUrlCache.set(source, url);
-      return url;
+      const request = withTimeout(
+        sbClient.storage.from(QUANTITY_STORAGE_BUCKET).createSignedUrl(source, 3600),
+        10000,
+        'Drawing preview URL'
+      ).then(signed => {
+        const url = signed.data?.signedUrl || '';
+        if (url) quantityPreviewUrlCache.set(source, url);
+        return url;
+      }).catch(error => {
+        console.warn('Quantity Storage preview URL unavailable:', error);
+        return '';
+      }).finally(() => quantityPreviewUrlPending.delete(source));
+      quantityPreviewUrlPending.set(source, request);
+      return request;
     }
     async function quantityRemoveStorageFile(path) {
       if (!path || String(path).startsWith('data:') || !sbClient || quantityUsesLocalStorage()) return;
