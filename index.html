@@ -4418,18 +4418,16 @@ Object.assign(APP_TRANSLATIONS.en, {
         let pagePromise = quantityPdfPageCache.get(source);
         if (!pagePromise) {
           pagePromise = (async () => {
-            const pdfBytes = source.startsWith('data:')
-              ? Uint8Array.from(atob(source.split(',')[1] || ''), char => char.charCodeAt(0))
-              : await (await fetch(source)).arrayBuffer();
+            // Decode asynchronously.  atob() plus Uint8Array.from() blocks the
+            // main thread for large architectural PDFs in production.
+            const pdfBytes = await (await fetch(source)).arrayBuffer();
             // Keep PDF parsing/rendering off the UI thread. Large architectural
             // sheets otherwise freeze scrolling and pointer interactions.
-            let pdf;
-            try {
-              pdf = await pdfjs.getDocument({ data: pdfBytes, disableWorker: false }).promise;
-            } catch (workerError) {
-              console.warn('PDF worker unavailable; using compatibility mode.', workerError);
-              pdf = await pdfjs.getDocument({ data: pdfBytes, disableWorker: true }).promise;
-            }
+            // Do not fall back to disableWorker:true.  That compatibility path
+            // parses the whole drawing on the UI thread and freezes QC tabs.
+            // If the worker cannot start, fail the preview without blocking the
+            // rest of the checklist and tab controls.
+            const pdf = await pdfjs.getDocument({ data: pdfBytes, disableWorker: false }).promise;
             return pdf.getPage(1);
           })();
           quantityPdfPageCache.set(source, pagePromise);
