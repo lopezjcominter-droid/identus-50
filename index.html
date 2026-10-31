@@ -4406,7 +4406,10 @@ Object.assign(APP_TRANSLATIONS.en, {
     // canvas, but normally uses the same drawing; parsing the PDF again on
     // every tab click was the main source of UI freezes.
     const quantityPdfPageCache = new Map();
-    const quantityPdfPageCacheLimit = 8;
+    // Keep only two parsed pages.  A PDF.js page retains its PDF document and
+    // decoded buffers; caching eight architectural PDFs caused production
+    // memory to grow every time QC was opened for another system/unit.
+    const quantityPdfPageCacheLimit = 1;
     function quantityEnsurePdfJs() {
       if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
       if (quantityPdfJsLoadPromise) return quantityPdfJsLoadPromise;
@@ -4446,18 +4449,21 @@ Object.assign(APP_TRANSLATIONS.en, {
             // If the worker cannot start, fail the preview without blocking the
             // rest of the checklist and tab controls.
             const pdf = await pdfjs.getDocument({ data: pdfBytes, disableWorker: false }).promise;
-            return pdf.getPage(1);
+            return { pdf, page: await pdf.getPage(1) };
           })();
           quantityPdfPageCache.set(source, pagePromise);
           while (quantityPdfPageCache.size > quantityPdfPageCacheLimit) {
             const oldest = quantityPdfPageCache.keys().next().value;
             if (oldest === source) break;
+            const evicted = quantityPdfPageCache.get(oldest);
             quantityPdfPageCache.delete(oldest);
+            evicted?.then(entry => { try { entry?.pdf?.destroy(); } catch (_) {} }).catch(() => {});
           }
           pagePromise.catch(() => { if (quantityPdfPageCache.get(source) === pagePromise) quantityPdfPageCache.delete(source); });
         }
-        const page = await pagePromise;
+        const cachedPage = await pagePromise;
         if (job.cancelled || !canvas.isConnected) return;
+        const page = cachedPage?.page || cachedPage;
         // Let PDF.js honor the page rotation embedded in the source plan.
         // Some architectural sheets store a landscape sheet as a rotated page.
         const baseViewport = page.getViewport({ scale: 1 });
@@ -5433,6 +5439,17 @@ Object.assign(APP_TRANSLATIONS.en, {
       const displayState = historicalRevision ? { ...state, items: quantityClone(historicalRevision.items || []), markers: quantityClone(historicalRevision.markers || []), installedCounts: quantityClone(historicalRevision.installedCounts || {}), drawing: quantityClone(historicalDrawing || null), _marksLoaded: true } : state;
       const unitType = quantityUnitType(quantityCurrentUnit); const drawing = quantityEffectiveDrawing(quantityCurrentUnit, displayState);
       const drawingKey = drawing ? [drawing.storagePath || '', drawing.name || '', drawing.version || '', drawing.revisionNumber || '', drawing.updatedAt || '', historicalRevision ? (historicalRevision.revisionNumber ?? quantityRevisionCursor ?? 'history') : 'live'].join('|') : '';
+      // Release the previous canvas backing store when the drawing changes.
+      // A detached canvas can otherwise retain several million pixels until a
+      // delayed browser GC, which is especially visible after QC tab changes.
+      if (previousDrawingMedia && previousDrawingKey !== drawingKey) {
+        const previousJob = quantityPdfRenderJobs.get(previousDrawingMedia);
+        if (previousJob) { previousJob.cancelled = true; try { previousJob.task?.cancel(); } catch (_) {} }
+        if (previousDrawingMedia instanceof HTMLCanvasElement) {
+          previousDrawingMedia.width = 1;
+          previousDrawingMedia.height = 1;
+        }
+      }
       if (!quantityUsesLocalStorage() && state._marksLoaded === false) {
         const renderUnitId = quantityCurrentUnit.id;
         if (!state._marksLoading) {
