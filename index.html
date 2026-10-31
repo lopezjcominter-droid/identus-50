@@ -1352,7 +1352,6 @@
 .quantity-plan-contour:hover, .quantity-plan-contour:focus { fill:rgba(34,197,94,.28); stroke:#16A34A; stroke-width:.7; outline:none; }
 .quantity-plan-contour-label { font:600 2px Arial,sans-serif; fill:#1D4ED8; paint-order:stroke; stroke:#fff; stroke-width:.45px; stroke-linejoin:round; pointer-events:none; text-anchor:middle; dominant-baseline:middle; }
     .quantity-plan-board > iframe, .quantity-drawing-board > iframe { pointer-events:none; }
-    .quantity-drawing-board > iframe { display:block; width:100%; height:100%; min-height:430px; border:0; background:#fff; }
 .quantity-plan-empty { min-height:460px; display:flex; align-items:center; justify-content:center; text-align:center; padding:28px; color:#64748B; }
 .quantity-plan-empty strong { display:block; color:#334155; margin-bottom:6px; }
 .quantity-unit-pin { position:absolute; transform:translate(-50%,-50%); min-width:54px; padding:7px 9px; border:2px solid #2563EB; border-radius:7px; background:#fff; color:#1D4ED8; font-weight:700; font-size:11px; cursor:pointer; box-shadow:0 2px 5px rgba(15,23,42,.16); }
@@ -3042,7 +3041,23 @@ Object.assign(APP_TRANSLATIONS.en, {
     // can leave the modal waiting while each render replaces the canvas.
     const quantityPreviewUrlPending = new Map();
     const quantityRevisionLoads = new Map();
+    // In-flight installed-mark requests keyed by `${unitId}::${system}`. The
+    // entry is removed as soon as the request settles; "loaded" is recorded on
+    // the stored unit state itself (state._marksLoaded), never on a transient
+    // object. Keeping resolved promises here made quantityRenderUnit() and
+    // quantityLoadRemoteMarks() call each other forever (microtask loop) for
+    // any QC system whose state was not yet stored.
     const quantityMarksLoads = new Map();
+    // Signed Storage URLs expire after 3600s; refresh them before that.
+    const quantityPreviewUrlExpiry = new Map();
+    const QUANTITY_SIGNED_URL_TTL_MS = 50 * 60 * 1000;
+    // All asynchronous refreshes of the open unit go through one rAF.
+    let quantityUnitRenderFrame = null;
+    let quantityUnitRenderWantsPdf = false;
+    // Unit drawing and floor plan PDFs use separate timers. They used to share
+    // quantityDeferredDrawingTimer, so each one cancelled the other's render.
+    let quantityUnitPdfTimer = null;
+    let quantityFloorPdfPending = false;
     const QUANTITY_STORAGE_BUCKET = 'quantity-drawings';
 
     function quantityUnitKey(unit) {
@@ -3060,16 +3075,23 @@ Object.assign(APP_TRANSLATIONS.en, {
       });
       return merged;
     }
+    function quantityPersistedUnitState(state) {
+      return state?.systemStates?.['Rough-In'] || state;
+    }
     function quantityMarkSignature(store) {
       const marks = [];
-      Object.entries(store?.units || {}).forEach(([key, state]) => (state?.markers || []).forEach(marker => marks.push([key, Number(marker.itemIndex || 0), Number(marker.x || 0), Number(marker.y || 0)])));
+      Object.entries(store?.units || {}).forEach(([key, unitState]) => { const state = quantityPersistedUnitState(unitState); (state?.markers || []).forEach(marker => marks.push([key, Number(marker.itemIndex || 0), Number(marker.x || 0), Number(marker.y || 0)])); });
       return JSON.stringify(marks.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
     }
     function quantityMarksByUnit(store, unitsByKey) {
       const result = new Map();
-      Object.entries(store?.units || {}).forEach(([key, state]) => {
+      Object.entries(store?.units || {}).forEach(([key, unitState]) => {
         const unit = unitsByKey.get(key);
         if (!unit?.id) return;
+        const state = quantityPersistedUnitState(unitState);
+        // Marks not yet loaded from Supabase are unknown, not empty: keep the
+        // last persisted value so a save can never delete them.
+        if (state?._marksLoaded === false) { result.set(String(unit.id), quantityLastPersistedMarksByUnit.get(String(unit.id)) || { signature: '[]', rows: [] }); return; }
         const rows = (state?.markers || []).map(marker => ({
           project_id: PROJECT_ID,
           unit_id: unit.id,
@@ -3221,7 +3243,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         const planRows = Object.entries(store.sitePlans || {}).map(([key, value]) => { const [building, floor] = key.split('::'); const buildingId = buildingIdsByName.get(building); return buildingId ? { project_id: projectId, building_id: buildingId, floor, name: value.name || 'Floor plan', mime_type: value.type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), version: value.version || 1, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
         const planDiff = quantityChangedRows(planRows, 'plans', row => `${row.project_id}::${row.building_id}::${row.floor}`);
         if (planDiff.changed.length) writes.push(quantityRemoteWrite('quantity_floor_plans?on_conflict=project_id,building_id,floor', headers, planDiff.changed));
-        const unitRows = Object.entries(store.units || {}).map(([key, state]) => { const u = unitsByKey.get(key); return u?.id ? { project_id: projectId, unit_id: u.id, unit_type: store.unitTypes?.[key] || null, checklist: state.items || [], checklist_mode: state.checklistMode || 'template', drawing_name: state.drawing?.name || null, drawing_mime_type: state.drawing?.type || null, drawing_storage_path: state.drawing?.storagePath || state.drawing?.storage_path || (String(state.drawing?.dataUrl || '').startsWith('data:') ? null : (state.drawing?.dataUrl || null)), drawing_revision: state.drawing?.revision || 0, current_revision: state.lastSavedRevisionId || null, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
+        const unitRows = Object.entries(store.units || {}).map(([key, unitState]) => { const state = quantityPersistedUnitState(unitState); const u = unitsByKey.get(key); return u?.id ? { project_id: projectId, unit_id: u.id, unit_type: store.unitTypes?.[key] || null, checklist: state.items || [], checklist_mode: state.checklistMode || 'template', drawing_name: state.drawing?.name || null, drawing_mime_type: state.drawing?.type || null, drawing_storage_path: state.drawing?.storagePath || state.drawing?.storage_path || (String(state.drawing?.dataUrl || '').startsWith('data:') ? null : (state.drawing?.dataUrl || null)), drawing_revision: state.drawing?.revision || 0, current_revision: state.lastSavedRevisionId || null, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
         const unitDiff = quantityChangedRows(unitRows, 'units', row => `${row.project_id}::${row.unit_id}`);
         if (unitDiff.changed.length) writes.push(quantityRemoteWrite('quantity_unit_states?on_conflict=project_id,unit_id', headers, unitDiff.changed));
         // Installed marks are stored separately so they can be counted and
@@ -3246,7 +3268,7 @@ Object.assign(APP_TRANSLATIONS.en, {
             })());
           });
         }
-        const revisions = []; Object.entries(store.units || {}).forEach(([key, state]) => { const u = unitsByKey.get(key); if (!u?.id) return; (state.revisions || []).forEach(rev => revisions.push({ project_id: projectId, unit_id: u.id, revision_number: Number(rev.revisionNumber ?? rev.number ?? rev.revision ?? 0), reason: rev.reason || 'Manual save', actor_name: rev.actor || null, drawing_name: rev.drawing?.name || null, drawing_mime_type: rev.drawing?.type || null, drawing_storage_path: rev.drawing?.storagePath || rev.drawing?.storage_path || (String(rev.drawing?.dataUrl || '').startsWith('data:') ? null : (rev.drawing?.dataUrl || null)), checklist: rev.items || [], marks: rev.markers || [], created_at: rev.savedAt || rev.createdAt || new Date().toISOString() })); });
+        const revisions = []; Object.entries(store.units || {}).forEach(([key, unitState]) => { const state = quantityPersistedUnitState(unitState); const u = unitsByKey.get(key); if (!u?.id) return; (state.revisions || []).forEach(rev => revisions.push({ project_id: projectId, unit_id: u.id, revision_number: Number(rev.revisionNumber ?? rev.number ?? rev.revision ?? 0), reason: rev.reason || 'Manual save', actor_name: rev.actor || null, drawing_name: rev.drawing?.name || null, drawing_mime_type: rev.drawing?.type || null, drawing_storage_path: rev.drawing?.storagePath || rev.drawing?.storage_path || (String(rev.drawing?.dataUrl || '').startsWith('data:') ? null : (rev.drawing?.dataUrl || null)), checklist: rev.items || [], marks: rev.markers || [], created_at: rev.savedAt || rev.createdAt || new Date().toISOString() })); });
         const revisionDiff = quantityChangedRows(revisions, 'revisions', row => `${row.project_id}::${row.unit_id}::${row.revision_number}`);
         if (revisionDiff.changed.length) writes.push(quantityRemoteWrite('quantity_revisions?on_conflict=project_id,unit_id,revision_number', headers, revisionDiff.changed));
         await Promise.all(writes);
@@ -3299,6 +3321,9 @@ Object.assign(APP_TRANSLATIONS.en, {
           quantityLastPersistedMarkSignature = quantityMarkSignature(quantityRemoteStore);
           quantityLastPersistedMarksByUnit = quantityMarksByUnit(quantityRemoteStore, new Map((Array.isArray(data) ? data : []).map(unit => [quantityUnitKey(unit), unit])));
           quantityRemotePendingStore = null;
+          // State objects were replaced; cached revision promises belong to
+          // the old objects and would otherwise leave the history empty.
+          quantityRevisionLoads.clear();
           // A unit-only hydration is deliberately not considered a complete
           // project hydration. The dashboard/setup will perform the full load
           // later, while opening a unit avoids downloading every drawing and
@@ -3311,7 +3336,11 @@ Object.assign(APP_TRANSLATIONS.en, {
           }
           // If a unit was opened while remote data was hydrating, refresh the
           // active system immediately instead of waiting for a tab click.
-          if (!options.skipActiveUnitRender && quantityCurrentUnit) quantityRenderUnit();
+          if (!options.skipActiveUnitRender && quantityCurrentUnit) {
+            const openUnit = quantityCurrentUnit;
+            quantityScheduleUnitRender();
+            quantityLoadRemoteRevisions(openUnit).then(() => { if (quantityCurrentUnit === openUnit) quantityScheduleUnitRender({ deferPdf: true }); }).catch(() => {});
+          }
         } catch (error) {
           console.error('Quantity Control Supabase load failed', error);
           // Keep any edits made while the remote store was loading; do not
@@ -4005,9 +4034,12 @@ Object.assign(APP_TRANSLATIONS.en, {
       // Coalesce rapid tab changes. A tab switch must never start another
       // remote marks/preview load while the previous paint is still running.
       clearTimeout(quantitySystemSwitchTimer);
+      // The checklist paints on the next frame; the PDF for the final tab is
+      // rendered afterwards (see quantityRenderUnit), and any render for a
+      // tab the user already left is cancelled.
       quantitySystemSwitchTimer = setTimeout(() => {
         quantitySystemSwitchTimer = null;
-        if (quantityCurrentUnit) quantityRenderUnit(true, { deferPdf: true });
+        if (quantityCurrentUnit) quantityScheduleUnitRender();
       }, 60);
     }
     function quantityInstalledCount(state, index) {
@@ -4187,25 +4219,51 @@ Object.assign(APP_TRANSLATIONS.en, {
       toastMessage.textContent = message; box.appendChild(toastMessage);
       setTimeout(() => toastMessage.remove(), ms || 5000);
     }
-    async function quantityLoadRemoteMarks(unit) {
-      if (quantityUsesLocalStorage() || !unit?.id || !sbClient) return;
-      const state = quantityUnitState(unit);
-      if (state._marksLoaded !== false) return;
+    async function quantityLoadRemoteMarks(unit, system = quantityCurrentSystem) {
+      if (quantityUsesLocalStorage() || !unit?.id || !sbClient) return false;
+      const withSystem = fn => { const previous = quantityCurrentSystem; quantityCurrentSystem = system; try { return fn(); } finally { quantityCurrentSystem = previous; } };
+      if (withSystem(() => quantityUnitState(unit))._marksLoaded !== false) return false;
       const unitId = String(unit.id);
-      if (quantityMarksLoads.has(unitId)) return quantityMarksLoads.get(unitId);
+      const loadKey = `${unitId}::${system}`;
+      if (quantityMarksLoads.has(loadKey)) return quantityMarksLoads.get(loadKey);
       const promise = (async () => {
         const headers = await quantityAuthHeaders();
         const response = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_installed_marks?project_id=eq.${encodeURIComponent(PROJECT_ID)}&unit_id=eq.${encodeURIComponent(unitId)}&select=id,item_index,x,y`, { headers }), 12000, 'Quantity marks request');
         if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
         const rows = await response.json();
-        state.markers = (rows || []).map(row => ({ id: row.id, itemIndex: Number(row.item_index), x: Number(row.x), y: Number(row.y) }));
-        state.installedCounts = {};
-        state._marksLoaded = true;
-        const store = quantityStore(); quantityStoreUnitState(store, unit, state);
+        // Apply to the state of the system that asked for the marks, even if
+        // the user changed QC tabs while the request was in flight, and store
+        // it so the next quantityUnitState() call returns the same object.
+        return withSystem(() => {
+          const store = quantityStore();
+          const state = quantityUnitState(unit);
+          if (state._marksLoaded !== false) return false;
+          state.markers = (rows || []).map(row => ({ id: row.id, itemIndex: Number(row.item_index), x: Number(row.x), y: Number(row.y) }));
+          state.installedCounts = {};
+          state._marksLoaded = true;
+          quantityStoreUnitState(store, unit, state);
+          return quantityUnitState(unit)._marksLoaded === true;
+        });
       })();
-      quantityMarksLoads.set(unitId, promise);
-      try { await promise; } catch (error) { quantityMarksLoads.delete(unitId); console.warn('Quantity installed marks unavailable:', error); return; }
-      return true;
+      quantityMarksLoads.set(loadKey, promise);
+      try { return await promise; }
+      catch (error) { console.warn('Quantity installed marks unavailable:', error); return false; }
+      finally { if (quantityMarksLoads.get(loadKey) === promise) quantityMarksLoads.delete(loadKey); }
+    }
+    // Single entry point for async refreshes of the open unit (marks,
+    // revisions, signed URLs, hydration). Several completions in the same
+    // frame collapse into one render; nothing re-enters quantityRenderUnit
+    // from a promise callback.
+    function quantityScheduleUnitRender(options = {}) {
+      if (!quantityCurrentUnit) return;
+      if (!options.deferPdf) quantityUnitRenderWantsPdf = true;
+      const unitId = quantityCurrentUnit.id;
+      if (quantityUnitRenderFrame) return;
+      quantityUnitRenderFrame = requestAnimationFrame(() => {
+        quantityUnitRenderFrame = null;
+        const wantsPdf = quantityUnitRenderWantsPdf; quantityUnitRenderWantsPdf = false;
+        if (quantityCurrentUnit?.id === unitId) quantityRenderUnit(true, { deferPdf: !wantsPdf });
+      });
     }
     function quantityNavigateRevision(direction) {
       if (!quantityCurrentUnit) return;
@@ -4378,7 +4436,8 @@ Object.assign(APP_TRANSLATIONS.en, {
           return url;
         } catch (_) { return ''; }
       }
-      if (quantityPreviewUrlCache.has(source)) return quantityPreviewUrlCache.get(source);
+      if (quantityPreviewUrlCache.has(source) && Date.now() < (quantityPreviewUrlExpiry.get(source) || 0)) return quantityPreviewUrlCache.get(source);
+      quantityPreviewUrlCache.delete(source);
       if (quantityPreviewUrlPending.has(source)) return quantityPreviewUrlPending.get(source);
       if (!sbClient) return '';
       const request = withTimeout(
@@ -4387,7 +4446,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         'Drawing preview URL'
       ).then(signed => {
         const url = signed.data?.signedUrl || '';
-        if (url) quantityPreviewUrlCache.set(source, url);
+        if (url) { quantityPreviewUrlCache.set(source, url); quantityPreviewUrlExpiry.set(source, Date.now() + QUANTITY_SIGNED_URL_TTL_MS); }
         return url;
       }).catch(error => {
         console.warn('Quantity Storage preview URL unavailable:', error);
@@ -4410,7 +4469,54 @@ Object.assign(APP_TRANSLATIONS.en, {
     // Keep only two parsed pages.  A PDF.js page retains its PDF document and
     // decoded buffers; caching eight architectural PDFs caused production
     // memory to grow every time QC was opened for another system/unit.
+    // Unit drawing + floor plan can both be live, so keep two documents. An
+    // entry is only destroyed when no render is using it.
     const quantityPdfPageCacheLimit = 1;
+    // One rasterized base view per drawing (key = Storage path). Switching QC
+    // tabs repaints from this bitmap with drawImage(); PDF.js is used only the
+    // first time a drawing is shown and for zoom-quality re-renders.
+    const quantityPdfRasterCache = new Map();
+    const quantityPdfRasterCacheLimit = 6;
+    // Original PDF bytes as Blobs (browser-managed, not JS heap), so zoom or a
+    // returning tab does not download the sheet again. Byte budget, LRU.
+    const quantityPdfBlobCache = new Map();
+    const quantityPdfBlobCacheBudget = 80 * 1024 * 1024;
+    function quantityRememberPdfRaster(key, entry) {
+      const old = quantityPdfRasterCache.get(key); if (old && old !== entry) { try { old.bitmap.close(); } catch (_) {} }
+      quantityPdfRasterCache.delete(key); quantityPdfRasterCache.set(key, entry);
+      while (quantityPdfRasterCache.size > quantityPdfRasterCacheLimit) {
+        const [oldestKey, oldest] = quantityPdfRasterCache.entries().next().value;
+        quantityPdfRasterCache.delete(oldestKey); try { oldest.bitmap.close(); } catch (_) {}
+      }
+    }
+    async function quantityPdfBytes(key, source) {
+      let blob = quantityPdfBlobCache.get(key);
+      if (blob) { quantityPdfBlobCache.delete(key); quantityPdfBlobCache.set(key, blob); }
+      else {
+        const response = await fetch(source);
+        if (!response.ok) throw new Error(`Drawing download failed (${response.status})`);
+        blob = await response.blob();
+        quantityPdfBlobCache.set(key, blob);
+        let total = 0; quantityPdfBlobCache.forEach(value => { total += value.size; });
+        for (const [oldKey, value] of quantityPdfBlobCache) { if (total <= quantityPdfBlobCacheBudget || oldKey === key) continue; quantityPdfBlobCache.delete(oldKey); total -= value.size; }
+      }
+      return blob.arrayBuffer();
+    }
+    function quantityReleaseCanvas(canvas) {
+      if (!(canvas instanceof HTMLCanvasElement)) return;
+      const job = quantityPdfRenderJobs.get(canvas);
+      if (job) { job.cancelled = true; try { job.task?.cancel(); } catch (_) {} }
+      canvas.width = 1; canvas.height = 1;
+      delete canvas.dataset.painted; delete canvas.dataset.pdfScheduled;
+    }
+    function quantityEvictPdfCache(keepKey) {
+      for (const [key, entry] of quantityPdfPageCache) {
+        if (quantityPdfPageCache.size <= quantityPdfPageCacheLimit) break;
+        if (key === keepKey || entry.users > 0) continue;
+        quantityPdfPageCache.delete(key);
+        entry.promise.then(value => { try { value?.pdf?.destroy(); } catch (_) {} }).catch(() => {});
+      }
+    }
     function quantityEnsurePdfJs() {
       if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
       if (quantityPdfJsLoadPromise) return quantityPdfJsLoadPromise;
@@ -4424,8 +4530,12 @@ Object.assign(APP_TRANSLATIONS.en, {
       });
       return quantityPdfJsLoadPromise;
     }
-    async function quantityRenderPdf(canvas, dataUrl, qualityScale = 2) {
+    async function quantityRenderPdf(canvas, dataUrl, qualityScale = 2, cacheKey = '') {
       if (!canvas || !dataUrl) return;
+      // Signed URLs change on refresh; cache by the Storage path when known.
+      const pdfKey = String(cacheKey || canvas.dataset.pdfKey || dataUrl);
+      canvas.dataset.pdf = dataUrl; canvas.dataset.pdfKey = pdfKey;
+      let cacheEntry = null;
       const previousJob = quantityPdfRenderJobs.get(canvas);
       if (previousJob) {
         previousJob.cancelled = true;
@@ -4433,41 +4543,41 @@ Object.assign(APP_TRANSLATIONS.en, {
       }
       const job = { cancelled: false, task: null };
       quantityPdfRenderJobs.set(canvas, job);
+      const wantsBaseView = (Number(qualityScale) || 1) <= 1;
+      const raster = wantsBaseView ? quantityPdfRasterCache.get(pdfKey) : null;
       try {
+        let page = null;
+        if (!raster) {
         const pdfjs = await quantityEnsurePdfJs();
         pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         const source = String(dataUrl || '');
-        let pagePromise = quantityPdfPageCache.get(source);
-        if (!pagePromise) {
-          pagePromise = (async () => {
-            // Decode asynchronously.  atob() plus Uint8Array.from() blocks the
-            // main thread for large architectural PDFs in production.
-            const pdfBytes = await (await fetch(source)).arrayBuffer();
-            // Keep PDF parsing/rendering off the UI thread. Large architectural
-            // sheets otherwise freeze scrolling and pointer interactions.
-            // Do not fall back to disableWorker:true.  That compatibility path
-            // parses the whole drawing on the UI thread and freezes QC tabs.
-            // If the worker cannot start, fail the preview without blocking the
-            // rest of the checklist and tab controls.
+        cacheEntry = quantityPdfPageCache.get(pdfKey);
+        if (!cacheEntry) {
+          const promise = (async () => {
+            // Decode asynchronously and parse in the PDF.js worker.
+            const pdfBytes = await quantityPdfBytes(pdfKey, source);
             const pdf = await pdfjs.getDocument({ data: pdfBytes, disableWorker: false }).promise;
             return { pdf, page: await pdf.getPage(1) };
           })();
-          quantityPdfPageCache.set(source, pagePromise);
-          while (quantityPdfPageCache.size > quantityPdfPageCacheLimit) {
-            const oldest = quantityPdfPageCache.keys().next().value;
-            if (oldest === source) break;
-            const evicted = quantityPdfPageCache.get(oldest);
-            quantityPdfPageCache.delete(oldest);
-            evicted?.then(entry => { try { entry?.pdf?.destroy(); } catch (_) {} }).catch(() => {});
-          }
-          pagePromise.catch(() => { if (quantityPdfPageCache.get(source) === pagePromise) quantityPdfPageCache.delete(source); });
+          cacheEntry = { promise, users: 0 };
+          quantityPdfPageCache.set(pdfKey, cacheEntry);
+          promise.catch(() => { if (quantityPdfPageCache.get(pdfKey) === cacheEntry) quantityPdfPageCache.delete(pdfKey); });
+        } else {
+          // Refresh LRU order.
+          quantityPdfPageCache.delete(pdfKey); quantityPdfPageCache.set(pdfKey, cacheEntry);
         }
+        cacheEntry.users += 1;
+        quantityEvictPdfCache(pdfKey);
+        const pagePromise = cacheEntry.promise;
         const cachedPage = await pagePromise;
         if (job.cancelled || !canvas.isConnected) return;
-        const page = cachedPage?.page || cachedPage;
+        page = cachedPage?.page || cachedPage;
+        if (!page || typeof page.getViewport !== 'function') throw new Error('PDF page unavailable');
+        }
+        if (job.cancelled || !canvas.isConnected) return;
         // Let PDF.js honor the page rotation embedded in the source plan.
         // Some architectural sheets store a landscape sheet as a rotated page.
-        const baseViewport = page.getViewport({ scale: 1 });
+        const baseViewport = page ? page.getViewport({ scale: 1 }) : { width: raster.baseWidth, height: raster.baseHeight };
         const board = canvas.closest('.quantity-plan-media') || canvas.parentElement;
         // Keep the PDF's real aspect ratio. The previous implementation
         // forced every sheet into a fixed 1.4:1 box, which stretched/cropped
@@ -4492,7 +4602,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         const maxWidth = Math.max(320, ((board?.clientWidth || 800) - 2) * renderQuality);
         const maxHeight = Math.max(320, ((board?.clientHeight || 560) - 2) * renderQuality);
         const scale = Math.min(maxWidth / baseViewport.width, maxHeight / baseViewport.height);
-        const viewport = page.getViewport({ scale });
+        const viewport = page ? page.getViewport({ scale }) : { width: baseViewport.width * scale, height: baseViewport.height * scale };
         // Render PDFs at a higher backing resolution so thin architectural
         // lines remain readable when the viewer is zoomed. The CSS size and
         // normalized marker coordinates stay unchanged; only the canvas
@@ -4520,9 +4630,29 @@ Object.assign(APP_TRANSLATIONS.en, {
           canvas.style.margin = 'auto';
         }
         const context = canvas.getContext('2d', { alpha: false });
+        if (raster) {
+          // The board can be resized between visits; re-render if the cached
+          // raster no longer matches the requested backing size.
+          const close = Math.abs(raster.bitmap.width - canvas.width) / Math.max(1, canvas.width) < 0.12 && Math.abs(raster.bitmap.height - canvas.height) / Math.max(1, canvas.height) < 0.12;
+          if (!close) {
+            quantityPdfRasterCache.delete(pdfKey); try { raster.bitmap.close(); } catch (_) {}
+            quantityPdfRenderJobs.delete(canvas);
+            return quantityRenderPdf(canvas, dataUrl, qualityScale, pdfKey);
+          }
+          canvas.width = raster.bitmap.width; canvas.height = raster.bitmap.height;
+          context.setTransform(1, 0, 0, 1, 0, 0);
+          context.drawImage(raster.bitmap, 0, 0);
+        } else {
         context.setTransform(ratio, 0, 0, ratio, 0, 0);
         job.task = page.render({ canvasContext: context, viewport });
         await job.task.promise;
+        // Drop PDF.js operator lists / decoded images kept for this page; the
+        // pixels are already on the canvas.
+        try { page.cleanup(); } catch (_) {}
+        if (wantsBaseView && !job.cancelled && typeof createImageBitmap === 'function') {
+          try { quantityRememberPdfRaster(pdfKey, { bitmap: await createImageBitmap(canvas), baseWidth: baseViewport.width, baseHeight: baseViewport.height }); } catch (_) {}
+        }
+        }
         if (board?.classList.contains('quantity-contour-editor-board')) {
           const overlay = board.querySelector('.quantity-contour-editor-overlay');
           const innerWidth = Math.max(120, board.clientWidth - 72);
@@ -4541,12 +4671,14 @@ Object.assign(APP_TRANSLATIONS.en, {
             node.style.height = `${fitHeight}px`;
           });
         }
+        if (!job.cancelled) canvas.dataset.painted = canvas.dataset.drawingKey || pdfKey;
       } catch (error) {
         if (job.cancelled || error?.name === 'RenderingCancelledException') return;
         console.warn('PDF plan render failed:', error);
         canvas.replaceWith(Object.assign(document.createElement('div'), { className: 'quantity-plan-empty', innerHTML: '<div>Unable to render this PDF plan. Please upload it again or use an image export.</div>' }));
       } finally {
         if (quantityPdfRenderJobs.get(canvas) === job) quantityPdfRenderJobs.delete(canvas);
+        if (cacheEntry) { cacheEntry.users = Math.max(0, cacheEntry.users - 1); quantityEvictPdfCache(''); }
       }
     }
     function quantityDefaultContourShapes(planKey) {
@@ -5026,13 +5158,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (title) title.textContent = `${quantityUnitLabel(unit)} — Quantity Control`;
       if (subtitle) subtitle.textContent = `${unit.building} • ${unit.floor}`;
       if (content) content.innerHTML = '<div class="quantity-help" style="padding:24px;text-align:center;">Loading unit data…</div>';
-      const renderUnitId = unit.id;
-      const openSwitchGeneration = quantitySystemSwitchGeneration;
-      requestAnimationFrame(() => {
-        if (quantityCurrentUnit?.id === renderUnitId) {
-          quantityRenderUnit(true, { deferPdf: quantitySystemSwitchGeneration !== openSwitchGeneration });
-        }
-      });
+      quantityScheduleUnitRender();
       // In production, never hydrate the whole project and load this unit's
       // revisions at the same time. Both operations update the same store and
       // used to trigger competing renders/PDF work, freezing QC on open.
@@ -5041,12 +5167,9 @@ Object.assign(APP_TRANSLATIONS.en, {
           if (!quantityUsesLocalStorage() && !quantityRemoteReady) await quantityHydrateRemote({ unitId: unit.id, unitType: quantityUnitType(unit), skipUiRender: true, skipActiveUnitRender: true });
           await quantityLoadRemoteRevisions(unit);
         } catch (_) { /* the initial lightweight view remains usable */ }
-        if (quantityCurrentUnit?.id === unit.id) {
-          // Supabase can finish after the user has already changed QC tabs.
-          // In that case this late refresh must stay on the lightweight path;
-          // otherwise it starts PDF.js again and freezes production.
-          quantityRenderUnit(true, { deferPdf: quantitySystemSwitchGeneration !== openSwitchGeneration });
-        }
+        // Supabase can finish after the user has already changed QC tabs; the
+        // scheduler renders whatever system is active at that moment.
+        if (quantityCurrentUnit?.id === unit.id) quantityScheduleUnitRender();
       };
       void loadUnitData();
     }
@@ -5055,6 +5178,10 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (!quantityUsesLocalStorage()) quantityFlushRemoteSave().catch(() => {});
       const modal = document.getElementById('quantityUnitModal'); if (modal) modal.style.display = 'none';
       quantityCurrentUnit = null; quantityActiveItem = -1;
+      clearTimeout(quantityUnitPdfTimer);
+      quantityReleaseCanvas(document.querySelector('#quantityUnitContent .quantity-pdf-canvas'));
+      const unitContent = document.getElementById('quantityUnitContent'); if (unitContent) unitContent.innerHTML = '';
+      if (quantityFloorPdfPending) { quantityFloorPdfPending = false; renderQuantityControl(); }
     }
     function quantitySelectItem(index) {
       // Clicking the active checklist item again deselects it, so drawing clicks
@@ -5151,7 +5278,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantityPdfQualityTimer = setTimeout(() => {
         const canvas = document.querySelector('#quantityUnitContent .quantity-pdf-canvas');
         const source = canvas?.dataset?.pdf;
-        if (canvas && source) quantityRenderPdf(canvas, source, Math.max(2, quantityDrawingZoom));
+        if (canvas && source) quantityRenderPdf(canvas, source, Math.max(2, quantityDrawingZoom), canvas.dataset.pdfKey || '');
       }, 140);
     }
     function quantityAdjustDrawingZoom(delta) {
@@ -5272,8 +5399,9 @@ Object.assign(APP_TRANSLATIONS.en, {
       const state = quantityUnitState(quantityCurrentUnit);
       if (!quantityUsesLocalStorage() && state._marksLoaded === false) {
         const unitId = quantityCurrentUnit.id;
-        await quantityLoadRemoteMarks(quantityCurrentUnit);
+        const applied = await quantityLoadRemoteMarks(quantityCurrentUnit);
         if (quantityCurrentUnit?.id !== unitId) return;
+        if (!applied && quantityUnitState(quantityCurrentUnit)._marksLoaded === false) { if (typeof toast === 'function') toast('Installed marks are still loading. Try again.'); return; }
         return quantityPlaceMarker(event);
       }
       state._marksLoaded = true;
@@ -5393,7 +5521,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (!quantityUsesLocalStorage() && state._marksLoaded === false) {
         const unitId = quantityCurrentUnit.id;
         quantityLoadRemoteMarks(quantityCurrentUnit).then(() => {
-          if (quantityCurrentUnit?.id === unitId) quantityClearMarkers();
+          if (quantityCurrentUnit?.id === unitId && quantityUnitState(quantityCurrentUnit)._marksLoaded !== false) quantityClearMarkers();
         }).catch(() => {});
         return;
       }
@@ -5425,7 +5553,6 @@ Object.assign(APP_TRANSLATIONS.en, {
       // Remember which QC-tab generation started this render. Supabase marks
       // and signed-preview requests can finish later; their callbacks must not
       // turn a lightweight tab switch back into a full PDF render.
-      const renderSystemGeneration = quantitySystemSwitchGeneration;
       // Keep the already-rendered PDF/image node when only the QC tab changes.
       // Recreating the canvas made PDF.js parse/draw the same sheet repeatedly
       // and blocked the main thread in production for several seconds.
@@ -5443,34 +5570,20 @@ Object.assign(APP_TRANSLATIONS.en, {
       // Release the previous canvas backing store when the drawing changes.
       // A detached canvas can otherwise retain several million pixels until a
       // delayed browser GC, which is especially visible after QC tab changes.
-      if (previousDrawingMedia && previousDrawingKey !== drawingKey) {
-        const previousJob = quantityPdfRenderJobs.get(previousDrawingMedia);
-        if (previousJob) { previousJob.cancelled = true; try { previousJob.task?.cancel(); } catch (_) {} }
-        if (previousDrawingMedia instanceof HTMLCanvasElement) {
-          previousDrawingMedia.width = 1;
-          previousDrawingMedia.height = 1;
-        }
-      }
-      if (!quantityUsesLocalStorage() && state._marksLoaded === false) {
-        const renderUnitId = quantityCurrentUnit.id;
-        if (!state._marksLoading) {
-          state._marksLoading = true;
-          quantityLoadRemoteMarks(quantityCurrentUnit).then(() => {
-            if (renderToken === quantityRenderToken && quantityCurrentUnit?.id === renderUnitId) {
-              quantityRenderUnit(true, { deferPdf: options.deferPdf || quantitySystemSwitchGeneration !== renderSystemGeneration });
-            }
-          }).catch(() => {}).finally(() => { state._marksLoading = false; });
-        }
+      if (previousDrawingMedia && previousDrawingKey !== drawingKey) quantityReleaseCanvas(previousDrawingMedia);
+      if (!quantityUsesLocalStorage() && state._marksLoaded === false && !quantityMarksLoads.has(`${quantityCurrentUnit.id}::${quantityCurrentSystem}`)) {
+        // Re-render only when new marks were actually stored. A request that
+        // fails or finds the marks already loaded does not trigger anything.
+        quantityLoadRemoteMarks(quantityCurrentUnit, quantityCurrentSystem).then(applied => { if (applied) quantityScheduleUnitRender({ deferPdf: true }); }).catch(() => {});
       }
       // A system-tab switch must not ask Supabase Storage for a new signed
       // URL. Each system can have a different PDF and rapid switching used to
       // start several Storage requests and rerenders at once in production.
       // The active drawing is hydrated on initial unit open or explicit load.
-      if (drawing?.storagePath && !drawing.dataUrl && !options.deferPdf) {
+      if (drawing?.storagePath && !drawing.dataUrl) {
+        const requestedSystem = quantityCurrentSystem;
         quantityStoragePreviewUrl(drawing.storagePath).then(url => {
-          if (renderToken === quantityRenderToken && url && quantityCurrentUnit && quantityEffectiveDrawing(quantityCurrentUnit, quantityUnitState(quantityCurrentUnit))?.storagePath === drawing.storagePath) {
-            quantityRenderUnit(true, { deferPdf: options.deferPdf || quantitySystemSwitchGeneration !== renderSystemGeneration });
-          }
+          if (url && quantityCurrentUnit && quantityCurrentSystem === requestedSystem && quantityEffectiveDrawing(quantityCurrentUnit, quantityUnitState(quantityCurrentUnit))?.storagePath === drawing.storagePath) quantityScheduleUnitRender();
         }).catch(error => console.warn('Quantity drawing preview unavailable:', error));
       }
       const installedFor = index => quantityInstalledCount(displayState, index);
@@ -5486,11 +5599,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       // every QC tab switch was causing production browsers to freeze. The
       // renderer below already receives drawing.dataUrl directly and uses its
       // parsed-page cache.
-      // Unit QC uses the browser PDF viewer instead of PDF.js. The native
-      // viewer is isolated from the app's main thread, so switching systems
-      // cannot parse/render the same large drawing repeatedly. Markers remain
-      // in the independent overlay above the viewer.
-      const drawingHtml = drawing?.dataUrl ? (drawing.type === 'application/pdf' ? `<iframe class="quantity-pdf-frame" title="Unit drawing" data-pdf-source=""></iframe>` : `<img src="${drawing.dataUrl}" alt="Unit drawing">`) : `<div class="quantity-drawing-empty">No unit drawing uploaded yet.<br>Select an item, then use this drawing area when a plan is uploaded.</div>`;
+      const drawingHtml = drawing?.dataUrl ? (drawing.type === 'application/pdf' ? `<canvas class="quantity-pdf-canvas" aria-label="Unit drawing"></canvas>` : `<img src="${drawing.dataUrl}" alt="Unit drawing">`) : (drawing?.storagePath ? `<div class="quantity-drawing-empty">Loading ${officialFinalEscape(quantityCurrentSystem)} drawing…</div>` : `<div class="quantity-drawing-empty">No unit drawing uploaded yet.<br>Select an item, then use this drawing area when a plan is uploaded.</div>`);
       const drawingHitArea = drawing?.dataUrl ? '<div class="quantity-drawing-hitarea" onpointerdown="quantityDrawingPointerDown(event)" onpointermove="quantityDrawingPointerMove(event)" onpointerup="quantityDrawingPointerUp(event)" onpointercancel="quantityDrawingPointerUp(event)"></div>' : '';
       document.getElementById('quantityUnitTitle').textContent = `Unit ${quantityCurrentUnit.apt} — Quantity Control`;
       document.getElementById('quantityUnitSubtitle').textContent = `${quantityCurrentUnit.building} • ${quantityCurrentUnit.floor}${drawing?.name ? ` • ${drawing.name}` : ''}`;
@@ -5513,9 +5622,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const revisionStamp = `<div class="quantity-plan-revision-stamp" style="position:absolute;right:10px;top:10px;z-index:4;background:rgba(255,255,255,.92);border:1px solid #CBD5E1;border-radius:5px;padding:4px 7px;font-size:11px;color:#334155;pointer-events:none;">${officialFinalEscape(activeRevisionDate)}</div>`;
       const systemTabs = QUANTITY_SYSTEMS.map(system => `<button type="button" class="btn ${quantityCurrentSystem === system ? 'btn-primary' : 'btn-secondary'}" style="font-size:11px;padding:6px 9px;" onclick="quantitySwitchSystem('${system}')">${system}</button>`).join('');
       document.getElementById('quantityUnitContent').innerHTML = `<div style="grid-column:1/-1;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;border:1px solid #BFDBFE;border-radius:8px;background:#EFF6FF;"><strong style="font-size:12px;color:#1E3A8A;margin-right:4px;">System / QC:</strong>${systemTabs}<span style="font-size:11px;color:#64748B;margin-left:auto;">${quantityCurrentSystem} quantities, drawing and RFI history</span></div><div class="quantity-checklist"><div class="quantity-card-header"><strong>${quantityCurrentSystem} Takeoff Checklist</strong><span>Click Select, then click the drawing</span></div><table><thead><tr><th>#</th><th>Description</th><th>Takeoff</th><th>Installed</th><th>Remaining</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div><div class="quantity-card-header" style="border:1px solid #E2E8F0;border-bottom:0;border-radius:8px 8px 0 0;"><strong>${quantityCurrentSystem} Drawing</strong><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${typeControl}${templateButton}${quantityIsAdmin() ? `<label class="btn btn-secondary" style="font-size:11px;padding:5px 8px;cursor:pointer;">Upload Drawing / RFI<input type="file" accept="image/*,.pdf" onchange="quantityHandleUnitPlan(this)" style="display:none"></label>` : ''}${quantityIsAdmin() ? `<button type="button" class="insp-btn insp-btn-success" style="font-size:11px;padding:5px 8px;" onclick="quantitySaveRevision()">Save Revision</button>` : ``}${undoRevisionButton}<button class="btn btn-danger" style="font-size:11px;padding:5px 8px;" onclick="quantityClearMarkers()">Clear All Marks</button>${quantityIsAdmin() ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityResetRevisionHistory()">Reset test history</button>` : ''}</span></div><div class="quantity-drawing-board">${drawingHtml}${drawingHitArea}${drawingUpdateStamp}${revisionStamp}${markers}</div>${revisionNav}<div class="quantity-help"><strong>${drawingSource}</strong><br>${quantityActiveItem >= 0 ? `Active item: <strong>${String(quantityActiveItem + 1).padStart(2, '0')} — ${officialFinalEscape(state.items[quantityActiveItem]?.description || '')}</strong>. Click the corresponding symbol location to add an installed mark. Click a numbered green mark to remove it.` : 'Select an item to start marking its corresponding symbol on the drawing.'}</div></div>`;
-      const nativePdfFrame = document.querySelector('#quantityUnitContent .quantity-pdf-frame');
-      if (nativePdfFrame && drawing?.dataUrl) nativePdfFrame.src = drawing.dataUrl;
-      const nextDrawingMedia = document.querySelector('#quantityUnitContent .quantity-pdf-frame, #quantityUnitContent .quantity-drawing-board > img');
+      const nextDrawingMedia = document.querySelector('#quantityUnitContent .quantity-pdf-canvas, #quantityUnitContent .quantity-drawing-board > img');
       if (nextDrawingMedia) {
         nextDrawingMedia.dataset.drawingKey = drawingKey;
         if (previousDrawingMedia && previousDrawingKey && previousDrawingKey === drawingKey) {
@@ -5525,8 +5632,26 @@ Object.assign(APP_TRANSLATIONS.en, {
       const checklistHint = document.querySelector('#quantityUnitContent .quantity-checklist .quantity-card-header span');
       if (checklistHint && quantityIsAdmin()) checklistHint.innerHTML = `Click Select, then click the drawing <button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityOpenUnitChecklist()">Edit unit checklist</button>`;
       requestAnimationFrame(quantityApplyDrawingView);
-      // Unit QC PDFs are displayed by the native viewer above. Do not invoke
-      // PDF.js here; it remains available for floor-plan contour editing.
+      // Never render a PDF inside the tab-switch paint. Let the checklist and
+      // controls become interactive first, then render only the still-active
+      // drawing during an idle period. This keeps large production PDFs from
+      // blocking the main thread while the user changes QC systems.
+      // The drawing canvas survives checklist/marks refreshes (it is moved
+      // back into the new markup above). Paint it only if it has not been
+      // painted or scheduled for this exact drawing yet.
+      const keptCanvas = document.querySelector('#quantityUnitContent .quantity-pdf-canvas');
+      const alreadyHandled = keptCanvas && (keptCanvas.dataset.painted === drawingKey || keptCanvas.dataset.pdfScheduled === drawingKey || quantityPdfRenderJobs.has(keptCanvas));
+      if (drawing?.type === 'application/pdf' && drawing.dataUrl && keptCanvas && !alreadyHandled) {
+        // Debounced: rapid tab clicks render only the tab the user stops on.
+        clearTimeout(quantityUnitPdfTimer);
+        keptCanvas.dataset.pdfScheduled = drawingKey;
+        quantityUnitPdfTimer = setTimeout(() => {
+          const canvas = document.querySelector('#quantityUnitContent .quantity-pdf-canvas');
+          if (!quantityCurrentUnit || canvas !== keptCanvas || canvas.dataset.drawingKey !== drawingKey) return;
+          delete canvas.dataset.pdfScheduled;
+          quantityRenderPdf(canvas, drawing.dataUrl, 1, drawing.storagePath || drawing.dataUrl);
+        }, 180);
+      }
       // Opening QC should not rebuild the dashboard and all charts. Those
       // global recalculations are deferred to edits/close and made the unit
       // feel frozen, especially with large drawings.
@@ -5580,17 +5705,19 @@ Object.assign(APP_TRANSLATIONS.en, {
       // directly to quantityRenderPdf after the board is mounted.
       const planImage = selectedPlan?.dataUrl ? (selectedPlan.type === 'application/pdf' ? `<div class="quantity-plan-media"><canvas class="quantity-pdf-canvas" aria-label="Floor plan"></canvas>${hasContourMap ? quantityPlanContourSvg(planKey, units) : ''}</div>` : `<img src="${selectedPlan.dataUrl}" alt="Floor plan">`) : `<div class="quantity-plan-empty"><div><strong>No site plan uploaded for ${officialFinalEscape(buildingSelect.value || 'this building')} / ${officialFinalEscape(select.value || 'this floor')}</strong><br>Upload the site plan for this Building/Floor combination to begin.</div></div>`;
       const pins = hasContourMap ? '' : units.map((unit, index) => { const col = index % 5; const row = Math.floor(index / 5); return `<button class="quantity-unit-pin ${String(unit.floor).toLowerCase().includes('underground') ? 'special' : ''}" style="left:${12 + col * 19}%;top:${14 + (row % 5) * 17}%;" onclick="quantityOpenUnit(${index})">${officialFinalEscape(unit.apt)}</button>`; }).join('');
+      board.querySelectorAll('canvas.quantity-pdf-canvas').forEach(quantityReleaseCanvas);
       board.innerHTML = `${planImage}${pins}`;
-      if (selectedPlan?.type === 'application/pdf') {
-        // Do not parse a large floor PDF during tab navigation.  Rendering it
-        // synchronously here blocks the main thread before the new QC tab can
-        // respond. Paint the checklist/navigation first, then render a light
-        // preview once the browser is idle.
+      if (selectedPlan?.type === 'application/pdf' && selectedPlan.dataUrl) {
+        // The floor plan is hidden behind the unit modal while a unit is open.
+        // Rendering it there competed with the unit drawing for memory and
+        // the PDF cache; render it when the modal closes instead.
         clearTimeout(quantityDeferredDrawingTimer);
-        quantityDeferredDrawingTimer = setTimeout(() => {
-          if (document.getElementById('quantityFloorPlanBoard') !== board) return;
-          quantityRenderPdf(board.querySelector('.quantity-pdf-canvas'), selectedPlan.dataUrl, 1);
-        }, 900);
+        if (quantityCurrentUnit) quantityFloorPdfPending = true;
+        else quantityDeferredDrawingTimer = setTimeout(() => {
+          if (quantityCurrentUnit) { quantityFloorPdfPending = true; return; }
+          const canvas = board.querySelector('.quantity-pdf-canvas');
+          if (canvas?.isConnected) quantityRenderPdf(canvas, selectedPlan.dataUrl, 1, selectedPlan.storagePath || selectedPlan.dataUrl);
+        }, 300);
       }
       const planNotice = document.getElementById('quantityPlanNotice');
       if (planNotice) planNotice.innerHTML = unmappedPlanUnits.length ? `<span style="color:#92400E;">⚠️ Not shown on this uploaded sheet: ${unmappedPlanUnits.map(apt => `<strong>${officialFinalEscape(apt)}</strong>`).join(', ')}. Open these units from the list below or upload the sheet that contains their contours.</span>` : '';
