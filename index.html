@@ -5522,7 +5522,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       // controls become interactive first, then render only the still-active
       // drawing during an idle period. This keeps large production PDFs from
       // blocking the main thread while the user changes QC systems.
-      if (drawing?.type === 'application/pdf' && !(previousDrawingMedia && previousDrawingKey === drawingKey)) {
+      if (drawing?.type === 'application/pdf' && !options.deferPdf && !(previousDrawingMedia && previousDrawingKey === drawingKey)) {
         clearTimeout(quantityDeferredDrawingTimer);
         const renderPdf = () => {
           if (renderToken !== quantityRenderToken || !quantityCurrentUnit) return;
