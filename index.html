@@ -4194,7 +4194,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (quantityMarksLoads.has(unitId)) return quantityMarksLoads.get(unitId);
       const promise = (async () => {
         const headers = await quantityAuthHeaders();
-        const response = await proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_installed_marks?project_id=eq.${encodeURIComponent(PROJECT_ID)}&unit_id=eq.${encodeURIComponent(unitId)}&select=id,item_index,x,y`, { headers });
+        const response = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_installed_marks?project_id=eq.${encodeURIComponent(PROJECT_ID)}&unit_id=eq.${encodeURIComponent(unitId)}&select=id,item_index,x,y`, { headers }), 12000, 'Quantity marks request');
         if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
         const rows = await response.json();
         state.markers = (rows || []).map(row => ({ id: row.id, itemIndex: Number(row.item_index), x: Number(row.x), y: Number(row.y) }));
@@ -4227,7 +4227,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (quantityRevisionLoads.has(unitId)) return quantityRevisionLoads.get(unitId);
       const promise = (async () => {
         const headers = await quantityAuthHeaders();
-        const response = await proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_revisions?project_id=eq.${encodeURIComponent(PROJECT_ID)}&unit_id=eq.${encodeURIComponent(unitId)}&select=id,unit_id,revision_number,reason,actor_name,checklist,marks,drawing_name,drawing_mime_type,drawing_storage_path,created_at&order=revision_number.desc`, { headers });
+        const response = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_revisions?project_id=eq.${encodeURIComponent(PROJECT_ID)}&unit_id=eq.${encodeURIComponent(unitId)}&select=id,unit_id,revision_number,reason,actor_name,checklist,marks,drawing_name,drawing_mime_type,drawing_storage_path,created_at&order=revision_number.desc`, { headers }), 12000, 'Quantity revisions request');
         if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
         const rows = await response.json();
         const store = quantityStore();
