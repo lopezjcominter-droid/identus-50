@@ -5518,18 +5518,21 @@ Object.assign(APP_TRANSLATIONS.en, {
       const checklistHint = document.querySelector('#quantityUnitContent .quantity-checklist .quantity-card-header span');
       if (checklistHint && quantityIsAdmin()) checklistHint.innerHTML = `Click Select, then click the drawing <button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityOpenUnitChecklist()">Edit unit checklist</button>`;
       requestAnimationFrame(quantityApplyDrawingView);
-      // A QC system-tab switch must never start PDF.js. Reuse the already
-      // rendered drawing; render only on initial/open or an explicit drawing
-      // change so large production PDFs cannot freeze the checklist controls.
-      if (drawing?.type === 'application/pdf' && !options.deferPdf && !(previousDrawingMedia && previousDrawingKey === drawingKey)) {
+      // Never render a PDF inside the tab-switch paint. Let the checklist and
+      // controls become interactive first, then render only the still-active
+      // drawing during an idle period. This keeps large production PDFs from
+      // blocking the main thread while the user changes QC systems.
+      if (drawing?.type === 'application/pdf' && !(previousDrawingMedia && previousDrawingKey === drawingKey)) {
         clearTimeout(quantityDeferredDrawingTimer);
         const renderPdf = () => {
           if (renderToken !== quantityRenderToken || !quantityCurrentUnit) return;
-          // Tab changes must stay responsive even with large production PDFs.
-          // Render a light first frame; zoom controls can request full quality later.
-          quantityRenderPdf(document.querySelector('#quantityUnitContent .quantity-pdf-canvas'), drawing.dataUrl, options.deferPdf ? 1 : Math.max(2, quantityDrawingZoom));
+          quantityRenderPdf(document.querySelector('#quantityUnitContent .quantity-pdf-canvas'), drawing.dataUrl, 1);
         };
-        requestAnimationFrame(renderPdf);
+        if (typeof requestIdleCallback === 'function') {
+          requestIdleCallback(renderPdf, { timeout: 1200 });
+        } else {
+          quantityDeferredDrawingTimer = setTimeout(renderPdf, 350);
+        }
       }
       // Opening QC should not rebuild the dashboard and all charts. Those
       // global recalculations are deferred to edits/close and made the unit
