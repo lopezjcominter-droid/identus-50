@@ -5022,7 +5022,9 @@ Object.assign(APP_TRANSLATIONS.en, {
       const renderUnitId = unit.id;
       const openSwitchGeneration = quantitySystemSwitchGeneration;
       requestAnimationFrame(() => {
-        if (quantityCurrentUnit?.id === renderUnitId) quantityRenderUnit(true);
+        if (quantityCurrentUnit?.id === renderUnitId) {
+          quantityRenderUnit(true, { deferPdf: quantitySystemSwitchGeneration !== openSwitchGeneration });
+        }
       });
       // In production, never hydrate the whole project and load this unit's
       // revisions at the same time. Both operations update the same store and
@@ -5413,6 +5415,10 @@ Object.assign(APP_TRANSLATIONS.en, {
     function quantityRenderUnit(lightweight = false, options = {}) {
       if (!quantityCurrentUnit) return;
       const renderToken = ++quantityRenderToken;
+      // Remember which QC-tab generation started this render. Supabase marks
+      // and signed-preview requests can finish later; their callbacks must not
+      // turn a lightweight tab switch back into a full PDF render.
+      const renderSystemGeneration = quantitySystemSwitchGeneration;
       // Keep the already-rendered PDF/image node when only the QC tab changes.
       // Recreating the canvas made PDF.js parse/draw the same sheet repeatedly
       // and blocked the main thread in production for several seconds.
@@ -5432,7 +5438,9 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (!state._marksLoading) {
           state._marksLoading = true;
           quantityLoadRemoteMarks(quantityCurrentUnit).then(() => {
-            if (renderToken === quantityRenderToken && quantityCurrentUnit?.id === renderUnitId) quantityRenderUnit(true);
+            if (renderToken === quantityRenderToken && quantityCurrentUnit?.id === renderUnitId) {
+              quantityRenderUnit(true, { deferPdf: options.deferPdf || quantitySystemSwitchGeneration !== renderSystemGeneration });
+            }
           }).catch(() => {}).finally(() => { state._marksLoading = false; });
         }
       }
@@ -5442,7 +5450,9 @@ Object.assign(APP_TRANSLATIONS.en, {
       // The active drawing is hydrated on initial unit open or explicit load.
       if (drawing?.storagePath && !drawing.dataUrl && !options.deferPdf) {
         quantityStoragePreviewUrl(drawing.storagePath).then(url => {
-          if (renderToken === quantityRenderToken && url && quantityCurrentUnit && quantityEffectiveDrawing(quantityCurrentUnit, quantityUnitState(quantityCurrentUnit))?.storagePath === drawing.storagePath) quantityRenderUnit(true);
+          if (renderToken === quantityRenderToken && url && quantityCurrentUnit && quantityEffectiveDrawing(quantityCurrentUnit, quantityUnitState(quantityCurrentUnit))?.storagePath === drawing.storagePath) {
+            quantityRenderUnit(true, { deferPdf: options.deferPdf || quantitySystemSwitchGeneration !== renderSystemGeneration });
+          }
         }).catch(error => console.warn('Quantity drawing preview unavailable:', error));
       }
       const installedFor = index => quantityInstalledCount(displayState, index);
