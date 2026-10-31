@@ -3147,6 +3147,17 @@ Object.assign(APP_TRANSLATIONS.en, {
       const buildingIdsByName = new Map((Array.isArray(data) ? data : []).map(unit => [String(unit.building), unit.building_id]));
       const templates = Object.entries(store.templates || {}).map(([unit_type, value]) => ({ project_id: projectId, unit_type, name: value.name || unit_type, mime_type: value.type || value.mime_type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), system_drawings: value.systemDrawings || {}, checklist: value.checklist || [], version: value.version || 1, updated_at: new Date().toISOString() }));
       const planRows = Object.entries(store.sitePlans || {}).map(([key, value]) => { const [building, floor] = key.split('::'); const buildingId = buildingIdsByName.get(building); return buildingId ? { project_id: projectId, building_id: buildingId, floor, name: value.name || 'Floor plan', mime_type: value.type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), version: value.version || 1, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
+      const contourRows = [];
+      Object.entries(store.contours || {}).forEach(([planKey, shapes]) => {
+        const plan = store.sitePlans?.[planKey]; if (!plan?.id) return;
+        const [building, floor] = planKey.split('::');
+        Object.entries(shapes || {}).forEach(([apt, points]) => {
+          const unit = (Array.isArray(data) ? data : []).find(item => String(item.apt) === String(apt) && String(item.building) === building && String(item.floor) === floor);
+          const normalized = quantityNormalizeContourPoints(points);
+          if (!unit?.id || normalized.length < 3) return;
+          contourRows.push({ project_id: projectId, floor_plan_id: plan.id, unit_id: unit.id, unit_label: String(apt), points: normalized, updated_at: new Date().toISOString() });
+        });
+      });
       const unitRows = []; const revisions = []; const unsavedSystems = new Set();
       Object.entries(store.units || {}).forEach(([key, unitState]) => {
         const u = unitsByKey.get(key); if (!u?.id) return;
@@ -3157,7 +3168,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           (state.revisions || []).forEach(rev => revisions.push(quantityRevisionRow(projectId, u.id, system, rev)));
         });
       });
-      return { templates, planRows, unitRows, revisions, unsavedSystems };
+      return { templates, planRows, unitRows, revisions, contourRows, unsavedSystems };
     }
     function quantityMarksEntry(unitId, system, state) {
       const rows = (state?.markers || []).map(marker => {
@@ -3315,7 +3326,22 @@ Object.assign(APP_TRANSLATIONS.en, {
         const headers = await quantityAuthHeaders();
         const projectId = PROJECT_ID;
         const unitsByKey = new Map((Array.isArray(data) ? data : []).map(unit => [quantityUnitKey(unit), unit]));
-        const { templates, planRows, unitRows, revisions, unsavedSystems } = quantityBuildRemoteRows(store);
+        // A floor plan uploaded in this session has no id yet; look it up so
+        // its contours can be saved.
+        if (quantityIsAdmin()) {
+          for (const [planKey, plan] of Object.entries(store.sitePlans || {})) {
+            if (plan?.id || !Object.keys(store.contours?.[planKey] || {}).length) continue;
+            const [building, floor] = planKey.split('::');
+            const buildingId = (Array.isArray(data) ? data : []).find(unit => String(unit.building) === building)?.building_id;
+            if (!buildingId) continue;
+            try {
+              const response = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_floor_plans?project_id=eq.${projectId}&building_id=eq.${encodeURIComponent(buildingId)}&floor=eq.${encodeURIComponent(floor)}&select=id`, { headers }), 10000, 'Floor plan id');
+              const rows = response.ok ? await response.json() : [];
+              if (rows?.[0]?.id) plan.id = rows[0].id;
+            } catch (_) {}
+          }
+        }
+        const { templates, planRows, unitRows, revisions, contourRows, unsavedSystems } = quantityBuildRemoteRows(store);
         if (unsavedSystems.size && !quantityLegacySystemWarningShown) {
           quantityLegacySystemWarningShown = true;
           quantitySuccessToast(`⚠️ ${[...unsavedSystems].join(', ')} changes are kept only on this screen until the Quantity system migration is applied in Supabase. Rough-In is saved normally.`, 9000);
@@ -3343,6 +3369,15 @@ Object.assign(APP_TRANSLATIONS.en, {
             if (after.rows.length) await quantityRemoteWrite('quantity_installed_marks', headers, after.rows);
           })());
         });
+        const contourKey = row => `${row.floor_plan_id}::${row.unit_id}`;
+        const contourDiff = quantityChangedRows(contourRows, 'contours', contourKey);
+        if (canManage) {
+          if (contourDiff.changed.length) writes.push(quantityRemoteWrite('quantity_contours?on_conflict=floor_plan_id,unit_id', headers, contourDiff.changed));
+          [...(quantityLastPersistedRowsBySection.contours || new Map()).keys()].filter(key => !contourDiff.current.has(key)).forEach(key => {
+            const [floorPlanId, unitId] = key.split('::');
+            writes.push(quantityRemoteDelete(`quantity_contours?project_id=eq.${projectId}&floor_plan_id=eq.${encodeURIComponent(floorPlanId)}&unit_id=eq.${encodeURIComponent(unitId)}`, headers));
+          });
+        }
         const revisionDiff = quantityChangedRows(revisions, 'revisions', quantityRevisionRowKey);
         if (canManage && revisionDiff.changed.length) writes.push(quantityRemoteWrite(`quantity_revisions?on_conflict=project_id,unit_id${quantitySystemColumns ? ',system' : ''},revision_number`, headers, revisionDiff.changed));
         await Promise.all(writes);
@@ -3353,7 +3388,8 @@ Object.assign(APP_TRANSLATIONS.en, {
           templates: canManage ? templateDiff.current : quantityLastPersistedRowsBySection.templates,
           plans: canManage ? planDiff.current : quantityLastPersistedRowsBySection.plans,
           units: canManage ? unitDiff.current : quantityLastPersistedRowsBySection.units,
-          revisions: canManage ? revisionDiff.current : quantityLastPersistedRowsBySection.revisions
+          revisions: canManage ? revisionDiff.current : quantityLastPersistedRowsBySection.revisions,
+          contours: canManage ? contourDiff.current : quantityLastPersistedRowsBySection.contours
         };
         return true;
       } catch (error) { console.error('Quantity Control Supabase save failed', error); quantitySuccessToast('❌ Quantity Control could not be saved to Supabase.'); return false; }
@@ -3370,7 +3406,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           const systemColumn = quantitySystemColumns ? ',system' : '';
           const [templates, plans, states] = await Promise.all([
             q(`quantity_templates?project_id=eq.${PROJECT_ID}&is_active=eq.true${unitTypeFilter}&select=unit_type,name,mime_type,storage_path,system_drawings,checklist,version,updated_at`),
-            unitOnly ? Promise.resolve([]) : q(`quantity_floor_plans?project_id=eq.${PROJECT_ID}&is_active=eq.true&select=building_id,floor,name,mime_type,storage_path,version,updated_at`),
+            unitOnly ? Promise.resolve([]) : q(`quantity_floor_plans?project_id=eq.${PROJECT_ID}&is_active=eq.true&select=id,building_id,floor,name,mime_type,storage_path,version,updated_at`),
             q(`quantity_unit_states?project_id=eq.${PROJECT_ID}${unitIdFilter}&select=unit_id,unit_type,checklist,checklist_mode,drawing_name,drawing_mime_type,drawing_storage_path,drawing_revision${systemColumn}`)
           ]);
           // Counts only; coordinates load per unit/system when it is opened.
@@ -3382,7 +3418,21 @@ Object.assign(APP_TRANSLATIONS.en, {
           }
           const store = { templates: {}, sitePlans: {}, unitTypes: {}, units: {} };
           (templates || []).forEach(row => { store.templates[row.unit_type] = { name: row.name, type: row.mime_type, dataUrl: '', storagePath: row.storage_path || '', systemDrawings: row.system_drawings || {}, checklist: row.checklist || [], version: row.version, updatedAt: row.updated_at }; });
-          (plans || []).forEach(row => { const b = (Array.isArray(data) ? data : []).find(u => String(u.building_id) === String(row.building_id)); if (b) store.sitePlans[`${b.building}::${row.floor}`] = { name: row.name, type: row.mime_type, dataUrl: '', storagePath: row.storage_path || '', version: row.version, updatedAt: row.updated_at }; });
+          (plans || []).forEach(row => { const b = (Array.isArray(data) ? data : []).find(u => String(u.building_id) === String(row.building_id)); if (b) store.sitePlans[`${b.building}::${row.floor}`] = { id: row.id, name: row.name, type: row.mime_type, dataUrl: '', storagePath: row.storage_path || '', version: row.version, updatedAt: row.updated_at }; });
+          // Adjusted unit contours per floor plan (only the overrides of the
+          // built-in defaults are stored).
+          if (!unitOnly) {
+            try {
+              const contourRows = await q(`quantity_contours?project_id=eq.${PROJECT_ID}&select=floor_plan_id,unit_label,points`);
+              const planKeyById = new Map(Object.entries(store.sitePlans).map(([key, plan]) => [String(plan.id), key]));
+              store.contours = {};
+              (contourRows || []).forEach(row => {
+                const planKey = planKeyById.get(String(row.floor_plan_id)); const points = quantityNormalizeContourPoints(row.points);
+                if (!planKey || !row.unit_label || points.length < 3) return;
+                (store.contours[planKey] = store.contours[planKey] || {})[String(row.unit_label)] = points;
+              });
+            } catch (error) { console.warn('Quantity contours unavailable; using the default contours.', error); }
+          }
           const unitsById = new Map((Array.isArray(data) ? data : []).map(unit => [String(unit.id), unit]));
           const systemsByKey = new Map();
           const systemOf = row => (quantitySystemColumns && QUANTITY_SYSTEMS.includes(row.system) ? row.system : 'Rough-In');
@@ -3411,7 +3461,8 @@ Object.assign(APP_TRANSLATIONS.en, {
             templates: signatures(baseline.templates, row => `${row.project_id}::${row.unit_type}`),
             plans: signatures(baseline.planRows, row => `${row.project_id}::${row.building_id}::${row.floor}`),
             units: signatures(baseline.unitRows, quantityUnitRowKey),
-            revisions: new Map()
+            revisions: new Map(),
+            contours: unitOnly ? (quantityLastPersistedRowsBySection.contours || new Map()) : signatures(baseline.contourRows, row => `${row.floor_plan_id}::${row.unit_id}`)
           };
           quantityLastPersistedMarksByUnit = new Map();
           quantityRemoteStore = quantityMergeStores(store, quantityRemotePendingStore);
@@ -4715,6 +4766,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         } else if (board?.classList.contains('quantity-contour-editor-board')) {
           board.style.aspectRatio = `${pdfRatio}`;
           board.style.margin = '12px auto';
+          canvas.dataset.boardRatio = `${pdfRatio}`;
         }
         const renderQuality = Math.max(1, Math.min(Number(qualityScale) || 1, 3));
         const maxWidth = Math.max(320, ((board?.clientWidth || 800) - 2) * renderQuality);
@@ -4923,8 +4975,15 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     function quantityRenderContourEditor() {
       const editor = quantityContourEditor; if (!editor) return;
-      const reusePlanCanvas = Boolean(editor.reusePlanCanvas);
       editor.reusePlanCanvas = false;
+      // Selecting another contour, typing a coordinate or undoing only changes
+      // the SVG overlay. Keep the already drawn plan canvas instead of
+      // rendering the whole PDF again (that was the lag in the editor).
+      const editorPlan = quantityStore().sitePlans?.[editor.planKey] || null;
+      const editorPlanKey = editorPlan?.storagePath || '';
+      const previousEditorCanvas = document.getElementById('quantityContourEditorPdf');
+      const canReuseCanvas = Boolean(previousEditorCanvas && editorPlanKey && previousEditorCanvas.dataset.pdfKey === editorPlanKey && (previousEditorCanvas.dataset.painted || quantityPdfRenderJobs.has(previousEditorCanvas)));
+      const reusePlanCanvas = canReuseCanvas;
       const points = editor.points || [];
       const polygon = points.map(point => point.join(',')).join(' ');
       const allShapes = quantityContourShapes(editor.planKey);
@@ -4952,7 +5011,18 @@ Object.assign(APP_TRANSLATIONS.en, {
           quantityRenderContourEditor();
         }).catch(error => console.warn('Contour editor base plan unavailable:', error));
       }
-      if (plan?.type === 'application/pdf' && planDataUrl && !reusePlanCanvas) requestAnimationFrame(() => quantityRenderPdf(document.getElementById('quantityContourEditorPdf'), planDataUrl));
+      if (reusePlanCanvas) {
+        const nextCanvas = document.getElementById('quantityContourEditorPdf');
+        if (nextCanvas && nextCanvas !== previousEditorCanvas) nextCanvas.replaceWith(previousEditorCanvas);
+        const overlay = document.querySelector('.quantity-contour-editor-board .quantity-contour-editor-overlay');
+        if (overlay) ['left', 'top', 'width', 'height'].forEach(prop => { if (previousEditorCanvas.style[prop]) overlay.style[prop] = previousEditorCanvas.style[prop]; });
+        if (overlay && previousEditorCanvas.style.left) { overlay.style.right = 'auto'; overlay.style.bottom = 'auto'; }
+        const board = document.querySelector('.quantity-contour-editor-board');
+        if (board && previousEditorCanvas.dataset.boardRatio) { board.style.aspectRatio = previousEditorCanvas.dataset.boardRatio; board.style.margin = '12px auto'; }
+        quantitySetContourEditorZoom(editor.zoom || 1);
+      } else if (plan?.type === 'application/pdf' && planDataUrl) {
+        requestAnimationFrame(() => quantityRenderPdf(document.getElementById('quantityContourEditorPdf'), planDataUrl, 2, plan.storagePath || planDataUrl));
+      }
     }
     function quantityEnsureContourEditorTools() {
       const content = document.getElementById('quantityContourEditorContent');
@@ -4983,39 +5053,29 @@ Object.assign(APP_TRANSLATIONS.en, {
     function quantityAdjustContourEditorZoom(delta) {
       quantitySetContourEditorZoom((quantityContourEditor?.zoom || 1) + Number(delta || 0));
     }
+    // Store the editor's contour only when it differs from what is already in
+    // effect (default or saved override), so browsing contours never writes.
+    function quantityKeepEditorContour() {
+      if (!quantityContourEditor?.apt) return false;
+      const planKey = quantityContourEditor.planKey; const apt = String(quantityContourEditor.apt);
+      const points = quantityNormalizeContourPoints(quantityContourEditor.points);
+      if (points.length < 3 || quantityContourPointsEqual(points, quantityContourShapes(planKey)[apt])) return false;
+      const store = quantityStore(); store.contours = store.contours || {};
+      const overrides = { ...(store.contours[planKey] || {}) };
+      if (quantityContourPointsEqual(points, quantityDefaultContourShapes(planKey)[apt])) delete overrides[apt]; else overrides[apt] = points;
+      if (Object.keys(overrides).length) store.contours[planKey] = overrides; else delete store.contours[planKey];
+      quantitySave(store);
+      return true;
+    }
     function quantitySelectContourInEditor(apt) {
       if (!quantityContourEditor || !apt) return;
-      const store = quantityStore();
-      store.contours = store.contours || {};
-      store.contours[quantityContourEditor.planKey] = { ...(store.contours[quantityContourEditor.planKey] || {}), [String(quantityContourEditor.apt)]: quantityNormalizeContourPoints(quantityContourEditor.points) };
-      quantitySave(store);
+      quantityKeepEditorContour();
       const points = quantityContourShapes(quantityContourEditor.planKey)[String(apt)];
       if (!Array.isArray(points) || points.length < 3) return;
       quantityContourEditor.apt = String(apt);
       quantityContourEditor.points = points.map(point => [Number(point[0]), Number(point[1])]);
       quantityContourEditor.undoStack = [];
-      const previousCanvas = document.getElementById('quantityContourEditorPdf');
-      quantityContourEditor.reusePlanCanvas = Boolean(previousCanvas);
       quantityRenderContourEditor();
-      const nextCanvas = document.getElementById('quantityContourEditorPdf');
-      if (previousCanvas && nextCanvas && previousCanvas !== nextCanvas) nextCanvas.replaceWith(previousCanvas);
-      if (previousCanvas) {
-        const board = document.querySelector('.quantity-contour-editor-board');
-        const overlay = board?.querySelector('.quantity-contour-editor-overlay');
-        if (board && overlay) {
-          overlay.style.left = previousCanvas.style.left || '36px';
-          overlay.style.top = previousCanvas.style.top || '36px';
-          overlay.style.right = 'auto';
-          overlay.style.bottom = 'auto';
-          overlay.style.width = previousCanvas.style.width || 'calc(100% - 72px)';
-          overlay.style.height = previousCanvas.style.height || 'calc(100% - 72px)';
-          overlay.style.transform = previousCanvas.style.transform || '';
-          overlay.style.transformOrigin = previousCanvas.style.transformOrigin || 'top left';
-        }
-        const plan = quantityStore().sitePlans?.[quantityContourEditor.planKey];
-        const planDataUrl = quantityResolveDrawingUrl(plan?.dataUrl, plan?.storagePath);
-        if (plan?.type === 'application/pdf' && planDataUrl) requestAnimationFrame(() => quantityRenderPdf(previousCanvas, planDataUrl));
-      }
     }
     function quantityOpenContourEditor(apt) {
       if (!quantityIsAdmin()) return;
@@ -5084,7 +5144,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (label) { label.setAttribute('x', String(x)); label.setAttribute('y', String(y)); }
         if (polygon) polygon.setAttribute('points', quantityContourEditor.points.map(point => point.join(',')).join(' '));
       };
-      const stop = () => { if (!dragging) quantityContourEditor.undoStack.pop(); if (label) { label.textContent = String(index + 1); label.setAttribute('font-size', '2.2'); } handle.setAttribute('r', '1.5'); handle.setAttribute('stroke', '#fff'); document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', stop); document.removeEventListener('pointercancel', stop); if (dragging) { const store = quantityStore(); store.contours = store.contours || {}; store.contours[quantityContourEditor.planKey] = { ...(store.contours[quantityContourEditor.planKey] || {}), [String(quantityContourEditor.apt)]: quantityNormalizeContourPoints(quantityContourEditor.points) }; quantitySave(store); } };
+      const stop = () => { if (!dragging) quantityContourEditor.undoStack.pop(); if (label) { label.textContent = String(index + 1); label.setAttribute('font-size', '2.2'); } handle.setAttribute('r', '1.5'); handle.setAttribute('stroke', '#fff'); document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', stop); document.removeEventListener('pointercancel', stop); if (dragging) quantityKeepEditorContour(); };
       document.addEventListener('pointermove', move); document.addEventListener('pointerup', stop);
       document.addEventListener('pointercancel', stop);
     }
@@ -5823,9 +5883,21 @@ Object.assign(APP_TRANSLATIONS.en, {
       // directly to quantityRenderPdf after the board is mounted.
       const planImage = selectedPlan?.dataUrl ? (selectedPlan.type === 'application/pdf' ? `<div class="quantity-plan-media"><canvas class="quantity-pdf-canvas" aria-label="Floor plan"></canvas>${hasContourMap ? quantityPlanContourSvg(planKey, units) : ''}</div>` : `<img src="${selectedPlan.dataUrl}" alt="Floor plan">`) : `<div class="quantity-plan-empty"><div><strong>No site plan uploaded for ${officialFinalEscape(buildingSelect.value || 'this building')} / ${officialFinalEscape(select.value || 'this floor')}</strong><br>Upload the site plan for this Building/Floor combination to begin.</div></div>`;
       const pins = hasContourMap ? '' : units.map((unit, index) => { const col = index % 5; const row = Math.floor(index / 5); return `<button class="quantity-unit-pin ${String(unit.floor).toLowerCase().includes('underground') ? 'special' : ''}" style="left:${12 + col * 19}%;top:${14 + (row % 5) * 17}%;" onclick="quantityOpenUnit(${index})">${officialFinalEscape(unit.apt)}</button>`; }).join('');
-      board.querySelectorAll('canvas.quantity-pdf-canvas').forEach(quantityReleaseCanvas);
+      // Reuse the floor canvas when the same plan is shown again (hydration,
+      // contour save, filters). Only the contour/pin overlay is rebuilt.
+      const floorPlanKey = selectedPlan?.storagePath || selectedPlan?.dataUrl || '';
+      const previousFloorCanvas = board.querySelector('canvas.quantity-pdf-canvas');
+      const previousFloorMedia = previousFloorCanvas?.closest('.quantity-plan-media');
+      const keepFloorCanvas = Boolean(previousFloorCanvas && floorPlanKey && previousFloorCanvas.dataset.pdfKey === floorPlanKey && (previousFloorCanvas.dataset.painted || quantityPdfRenderJobs.has(previousFloorCanvas)));
+      if (!keepFloorCanvas) board.querySelectorAll('canvas.quantity-pdf-canvas').forEach(quantityReleaseCanvas);
       board.innerHTML = `${planImage}${pins}`;
-      if (selectedPlan?.type === 'application/pdf' && selectedPlan.dataUrl) {
+      if (keepFloorCanvas) {
+        const nextCanvas = board.querySelector('canvas.quantity-pdf-canvas');
+        const nextMedia = nextCanvas?.closest('.quantity-plan-media');
+        if (nextCanvas) nextCanvas.replaceWith(previousFloorCanvas);
+        if (nextMedia && previousFloorMedia) nextMedia.style.cssText = previousFloorMedia.style.cssText;
+      }
+      if (selectedPlan?.type === 'application/pdf' && selectedPlan.dataUrl && !keepFloorCanvas) {
         // The floor plan is hidden behind the unit modal while a unit is open.
         // Rendering it there competed with the unit drawing for memory and
         // the PDF cache; render it when the modal closes instead.
@@ -5834,7 +5906,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         else quantityDeferredDrawingTimer = setTimeout(() => {
           if (quantityCurrentUnit) { quantityFloorPdfPending = true; return; }
           const canvas = board.querySelector('.quantity-pdf-canvas');
-          if (canvas?.isConnected) quantityRenderPdf(canvas, selectedPlan.dataUrl, 1, selectedPlan.storagePath || selectedPlan.dataUrl);
+          if (canvas?.isConnected && !canvas.dataset.painted && !quantityPdfRenderJobs.has(canvas)) quantityRenderPdf(canvas, selectedPlan.dataUrl, 1, selectedPlan.storagePath || selectedPlan.dataUrl);
         }, 300);
       }
       const planNotice = document.getElementById('quantityPlanNotice');
