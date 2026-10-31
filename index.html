@@ -3063,6 +3063,19 @@ Object.assign(APP_TRANSLATIONS.en, {
     function quantityUnitKey(unit) {
       return [unit?.apt, unit?.building, unit?.floor].map(v => String(v || '').trim()).join('::');
     }
+    function quantityIsStoragePath(path) { const value = String(path || ''); return !!value && !value.startsWith('localdb:') && !value.startsWith('data:') && !value.startsWith('blob:') && !/^https?:\/\//i.test(value); }
+    function quantityValidPreviewUrl(path) {
+      if (!path || !quantityPreviewUrlCache.has(path)) return '';
+      if (quantityIsStoragePath(path) && Date.now() >= (quantityPreviewUrlExpiry.get(path) || 0)) return '';
+      return quantityPreviewUrlCache.get(path);
+    }
+    // A drawing stored in Supabase Storage is always shown through a signed
+    // URL that is still valid; a signed URL kept on the object is ignored once
+    // it is older than the cache TTL. The caller requests a new one when ''.
+    function quantityResolveDrawingUrl(dataUrl, storagePath) {
+      if (quantityIsStoragePath(storagePath)) return quantityValidPreviewUrl(storagePath) || (/^https?:\/\//i.test(String(dataUrl || '')) ? '' : (dataUrl || ''));
+      return dataUrl || (storagePath ? quantityPreviewUrlCache.get(storagePath) || '' : '');
+    }
     function quantityUsesLocalStorage() { return LOCAL_PROJECT_MODE || window.location.protocol === 'file:'; }
     function quantityStore() {
       if (!quantityUsesLocalStorage()) return quantityRemoteStore;
@@ -3075,32 +3088,99 @@ Object.assign(APP_TRANSLATIONS.en, {
       });
       return merged;
     }
+    // Supabase scope per QC system. null = not checked yet. true once the
+    // additive migration (system column on unit states / marks / revisions)
+    // is present; false on the legacy schema, where only Rough-In persists.
+    let quantitySystemColumns = null;
+    let quantityLegacySystemWarningShown = false;
+    async function quantityDetectSystemColumns(headers) {
+      try {
+        const response = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_unit_states?select=system&limit=1`, { headers }), 8000, 'Quantity schema check');
+        if (response.ok) return true;
+        const body = await response.json().catch(() => ({}));
+        if (body?.code === '42703' || response.status === 400) return false;
+      } catch (error) { console.warn('Quantity schema check failed; retrying on next load.', error); }
+      return null;
+    }
+    function quantityWithSystem(system, fn) {
+      const previous = quantityCurrentSystem; quantityCurrentSystem = system;
+      try { return fn(); } finally { quantityCurrentSystem = previous; }
+    }
+    // [system, state] pairs of a stored unit. A unit that never used another
+    // QC tab keeps the legacy flat shape, which is its Rough-In state.
+    function quantitySystemEntries(unitState) {
+      if (!unitState) return [];
+      if (unitState.systemStates) return Object.entries(unitState.systemStates).filter(([system, state]) => state && QUANTITY_SYSTEMS.includes(system));
+      return [['Rough-In', unitState]];
+    }
     function quantityPersistedUnitState(state) {
       return state?.systemStates?.['Rough-In'] || state;
     }
-    function quantityMarkSignature(store) {
-      const marks = [];
-      Object.entries(store?.units || {}).forEach(([key, unitState]) => { const state = quantityPersistedUnitState(unitState); (state?.markers || []).forEach(marker => marks.push([key, Number(marker.itemIndex || 0), Number(marker.x || 0), Number(marker.y || 0)])); });
-      return JSON.stringify(marks.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+    function quantityRemoteSystemKey(system) { return quantitySystemColumns ? `::${system}` : ''; }
+    // A non-Rough-In tab that was only looked at (template checklist, no marks,
+    // drawing, notes or revisions) is not written to Supabase.
+    function quantityIsPristineSystemState(unit, system, state) {
+      if (system === 'Rough-In') return false;
+      if ((state.markers || []).length || (state.history || []).length || (state.revisions || []).length || state.drawing) return false;
+      if (state.checklistMode === 'custom') return false;
+      const template = unit ? quantityTemplateFor(unit, system) : null;
+      const items = JSON.stringify(state.items || []);
+      return items === '[]' || items === JSON.stringify(template?.checklist || []) || items === JSON.stringify(quantityDefaultItems());
+    }
+    function quantityUnitRow(projectId, unitId, unitType, system, state) {
+      const row = { project_id: projectId, unit_id: unitId, unit_type: unitType || null, checklist: state.items || [], checklist_mode: state.checklistMode || 'template', drawing_name: state.drawing?.name || null, drawing_mime_type: state.drawing?.type || null, drawing_storage_path: state.drawing?.storagePath || state.drawing?.storage_path || (String(state.drawing?.dataUrl || '').startsWith('data:') ? null : (state.drawing?.dataUrl || null)), drawing_revision: state.drawing?.revision || 0, current_revision: state.lastSavedRevisionId || null, updated_at: new Date().toISOString() };
+      if (quantitySystemColumns) row.system = system;
+      return row;
+    }
+    function quantityUnitRowKey(row) { return `${row.project_id}::${row.unit_id}${row.system ? `::${row.system}` : ''}`; }
+    function quantityRevisionRow(projectId, unitId, system, rev) {
+      const row = { project_id: projectId, unit_id: unitId, revision_number: Number(rev.revisionNumber ?? rev.number ?? rev.revision ?? 0), reason: rev.reason || 'Manual save', actor_name: rev.actor || null, drawing_name: rev.drawing?.name || null, drawing_mime_type: rev.drawing?.type || null, drawing_storage_path: rev.drawing?.storagePath || rev.drawing?.storage_path || (String(rev.drawing?.dataUrl || '').startsWith('data:') ? null : (rev.drawing?.dataUrl || null)), checklist: rev.items || [], marks: rev.markers || [], created_at: rev.savedAt || rev.createdAt || new Date().toISOString() };
+      if (quantitySystemColumns) row.system = system;
+      return row;
+    }
+    function quantityRevisionRowKey(row) { return `${row.project_id}::${row.unit_id}${row.system ? `::${row.system}` : ''}::${row.revision_number}`; }
+    // Every Supabase row the store represents, built the same way for saving
+    // and for the post-load baseline, so the first save only sends changes.
+    function quantityBuildRemoteRows(store) {
+      const projectId = PROJECT_ID;
+      const unitsByKey = new Map((Array.isArray(data) ? data : []).map(unit => [quantityUnitKey(unit), unit]));
+      const buildingIdsByName = new Map((Array.isArray(data) ? data : []).map(unit => [String(unit.building), unit.building_id]));
+      const templates = Object.entries(store.templates || {}).map(([unit_type, value]) => ({ project_id: projectId, unit_type, name: value.name || unit_type, mime_type: value.type || value.mime_type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), system_drawings: value.systemDrawings || {}, checklist: value.checklist || [], version: value.version || 1, updated_at: new Date().toISOString() }));
+      const planRows = Object.entries(store.sitePlans || {}).map(([key, value]) => { const [building, floor] = key.split('::'); const buildingId = buildingIdsByName.get(building); return buildingId ? { project_id: projectId, building_id: buildingId, floor, name: value.name || 'Floor plan', mime_type: value.type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), version: value.version || 1, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
+      const unitRows = []; const revisions = []; const unsavedSystems = new Set();
+      Object.entries(store.units || {}).forEach(([key, unitState]) => {
+        const u = unitsByKey.get(key); if (!u?.id) return;
+        quantitySystemEntries(unitState).forEach(([system, state]) => {
+          if (quantityIsPristineSystemState(u, system, state)) return;
+          if (!quantitySystemColumns && system !== 'Rough-In') { unsavedSystems.add(system); return; }
+          unitRows.push(quantityUnitRow(projectId, u.id, store.unitTypes?.[key], system, state));
+          (state.revisions || []).forEach(rev => revisions.push(quantityRevisionRow(projectId, u.id, system, rev)));
+        });
+      });
+      return { templates, planRows, unitRows, revisions, unsavedSystems };
+    }
+    function quantityMarksEntry(unitId, system, state) {
+      const rows = (state?.markers || []).map(marker => {
+        const row = { project_id: PROJECT_ID, unit_id: unitId, item_index: Number(marker.itemIndex || 0), x: Number(marker.x || 0), y: Number(marker.y || 0) };
+        if (quantitySystemColumns) row.system = system;
+        return row;
+      });
+      const signature = JSON.stringify(rows.map(row => [row.item_index, row.x, row.y]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+      return { signature, rows, unitId: String(unitId), system };
     }
     function quantityMarksByUnit(store, unitsByKey) {
       const result = new Map();
       Object.entries(store?.units || {}).forEach(([key, unitState]) => {
         const unit = unitsByKey.get(key);
         if (!unit?.id) return;
-        const state = quantityPersistedUnitState(unitState);
-        // Marks not yet loaded from Supabase are unknown, not empty: keep the
-        // last persisted value so a save can never delete them.
-        if (state?._marksLoaded === false) { result.set(String(unit.id), quantityLastPersistedMarksByUnit.get(String(unit.id)) || { signature: '[]', rows: [] }); return; }
-        const rows = (state?.markers || []).map(marker => ({
-          project_id: PROJECT_ID,
-          unit_id: unit.id,
-          item_index: Number(marker.itemIndex || 0),
-          x: Number(marker.x || 0),
-          y: Number(marker.y || 0)
-        }));
-        const signature = JSON.stringify(rows.map(row => [row.item_index, row.x, row.y]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
-        result.set(String(unit.id), { signature, rows });
+        quantitySystemEntries(unitState).forEach(([system, state]) => {
+          if (!quantitySystemColumns && system !== 'Rough-In') return;
+          const mapKey = `${unit.id}${quantityRemoteSystemKey(system)}`;
+          // Marks not yet loaded from Supabase are unknown, not empty: keep the
+          // last persisted value so a save can never delete them.
+          if (state?._marksLoaded === false) { const previous = quantityLastPersistedMarksByUnit.get(mapKey); if (previous) result.set(mapKey, previous); return; }
+          result.set(mapKey, quantityMarksEntry(unit.id, system, state));
+        });
       });
       return result;
     }
@@ -3235,52 +3315,46 @@ Object.assign(APP_TRANSLATIONS.en, {
         const headers = await quantityAuthHeaders();
         const projectId = PROJECT_ID;
         const unitsByKey = new Map((Array.isArray(data) ? data : []).map(unit => [quantityUnitKey(unit), unit]));
-        const buildingIdsByName = new Map((Array.isArray(data) ? data : []).map(unit => [String(unit.building), unit.building_id]));
-        const templates = Object.entries(store.templates || {}).map(([unit_type, value]) => ({ project_id: projectId, unit_type, name: value.name || unit_type, mime_type: value.type || value.mime_type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), system_drawings: value.systemDrawings || {}, checklist: value.checklist || [], version: value.version || 1, updated_at: new Date().toISOString() }));
+        const { templates, planRows, unitRows, revisions, unsavedSystems } = quantityBuildRemoteRows(store);
+        if (unsavedSystems.size && !quantityLegacySystemWarningShown) {
+          quantityLegacySystemWarningShown = true;
+          quantitySuccessToast(`⚠️ ${[...unsavedSystems].join(', ')} changes are kept only on this screen until the Quantity system migration is applied in Supabase. Rough-In is saved normally.`, 9000);
+        }
+        // Only administrators manage templates, plans, checklists and
+        // revisions (RLS enforces the same). Other roles only save marks.
+        const canManage = quantityIsAdmin();
         const writes = [];
         const templateDiff = quantityChangedRows(templates, 'templates', row => `${row.project_id}::${row.unit_type}`);
-        if (templateDiff.changed.length) writes.push(quantityRemoteWrite('quantity_templates?on_conflict=project_id,unit_type', headers, templateDiff.changed));
-        const planRows = Object.entries(store.sitePlans || {}).map(([key, value]) => { const [building, floor] = key.split('::'); const buildingId = buildingIdsByName.get(building); return buildingId ? { project_id: projectId, building_id: buildingId, floor, name: value.name || 'Floor plan', mime_type: value.type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), version: value.version || 1, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
+        if (canManage && templateDiff.changed.length) writes.push(quantityRemoteWrite('quantity_templates?on_conflict=project_id,unit_type', headers, templateDiff.changed));
         const planDiff = quantityChangedRows(planRows, 'plans', row => `${row.project_id}::${row.building_id}::${row.floor}`);
-        if (planDiff.changed.length) writes.push(quantityRemoteWrite('quantity_floor_plans?on_conflict=project_id,building_id,floor', headers, planDiff.changed));
-        const unitRows = Object.entries(store.units || {}).map(([key, unitState]) => { const state = quantityPersistedUnitState(unitState); const u = unitsByKey.get(key); return u?.id ? { project_id: projectId, unit_id: u.id, unit_type: store.unitTypes?.[key] || null, checklist: state.items || [], checklist_mode: state.checklistMode || 'template', drawing_name: state.drawing?.name || null, drawing_mime_type: state.drawing?.type || null, drawing_storage_path: state.drawing?.storagePath || state.drawing?.storage_path || (String(state.drawing?.dataUrl || '').startsWith('data:') ? null : (state.drawing?.dataUrl || null)), drawing_revision: state.drawing?.revision || 0, current_revision: state.lastSavedRevisionId || null, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
-        const unitDiff = quantityChangedRows(unitRows, 'units', row => `${row.project_id}::${row.unit_id}`);
-        if (unitDiff.changed.length) writes.push(quantityRemoteWrite('quantity_unit_states?on_conflict=project_id,unit_id', headers, unitDiff.changed));
-        // Installed marks are stored separately so they can be counted and
-        // restored precisely on another device. Replace only the units whose
-        // marks changed; the previous implementation deleted every mark in
-        // the project on each save, which was slow and risky.
+        if (canManage && planDiff.changed.length) writes.push(quantityRemoteWrite('quantity_floor_plans?on_conflict=project_id,building_id,floor', headers, planDiff.changed));
+        const unitDiff = quantityChangedRows(unitRows, 'units', quantityUnitRowKey);
+        if (canManage && unitDiff.changed.length) writes.push(quantityRemoteWrite(`quantity_unit_states?on_conflict=project_id,unit_id${quantitySystemColumns ? ',system' : ''}`, headers, unitDiff.changed));
+        // Installed marks: replace only the (unit, system) sets that changed.
         const marksByUnit = quantityMarksByUnit(store, unitsByKey);
-        const markSignature = quantityMarkSignature(store);
-        if (markSignature !== quantityLastPersistedMarkSignature) {
-          const changedUnitIds = new Set([
-            ...quantityLastPersistedMarksByUnit.keys(),
-            ...marksByUnit.keys()
-          ]);
-          changedUnitIds.forEach(unitId => {
-            const before = quantityLastPersistedMarksByUnit.get(unitId);
-            const after = marksByUnit.get(unitId) || { signature: '[]', rows: [] };
-            if (before?.signature === after.signature) return;
-            writes.push((async () => {
-              const encodedUnitId = encodeURIComponent(unitId);
-              await quantityRemoteDelete(`quantity_installed_marks?project_id=eq.${projectId}&unit_id=eq.${encodedUnitId}`, headers);
-              if (after.rows.length) await quantityRemoteWrite('quantity_installed_marks', headers, after.rows);
-            })());
-          });
-        }
-        const revisions = []; Object.entries(store.units || {}).forEach(([key, unitState]) => { const state = quantityPersistedUnitState(unitState); const u = unitsByKey.get(key); if (!u?.id) return; (state.revisions || []).forEach(rev => revisions.push({ project_id: projectId, unit_id: u.id, revision_number: Number(rev.revisionNumber ?? rev.number ?? rev.revision ?? 0), reason: rev.reason || 'Manual save', actor_name: rev.actor || null, drawing_name: rev.drawing?.name || null, drawing_mime_type: rev.drawing?.type || null, drawing_storage_path: rev.drawing?.storagePath || rev.drawing?.storage_path || (String(rev.drawing?.dataUrl || '').startsWith('data:') ? null : (rev.drawing?.dataUrl || null)), checklist: rev.items || [], marks: rev.markers || [], created_at: rev.savedAt || rev.createdAt || new Date().toISOString() })); });
-        const revisionDiff = quantityChangedRows(revisions, 'revisions', row => `${row.project_id}::${row.unit_id}::${row.revision_number}`);
-        if (revisionDiff.changed.length) writes.push(quantityRemoteWrite('quantity_revisions?on_conflict=project_id,unit_id,revision_number', headers, revisionDiff.changed));
+        const changedMarkKeys = new Set([...quantityLastPersistedMarksByUnit.keys(), ...marksByUnit.keys()]);
+        changedMarkKeys.forEach(mapKey => {
+          const before = quantityLastPersistedMarksByUnit.get(mapKey);
+          const after = marksByUnit.get(mapKey);
+          if (!after || before?.signature === after.signature) return;
+          writes.push((async () => {
+            const systemFilter = quantitySystemColumns ? `&system=eq.${encodeURIComponent(after.system)}` : '';
+            await quantityRemoteDelete(`quantity_installed_marks?project_id=eq.${projectId}&unit_id=eq.${encodeURIComponent(after.unitId)}${systemFilter}`, headers);
+            if (after.rows.length) await quantityRemoteWrite('quantity_installed_marks', headers, after.rows);
+          })());
+        });
+        const revisionDiff = quantityChangedRows(revisions, 'revisions', quantityRevisionRowKey);
+        if (canManage && revisionDiff.changed.length) writes.push(quantityRemoteWrite(`quantity_revisions?on_conflict=project_id,unit_id${quantitySystemColumns ? ',system' : ''},revision_number`, headers, revisionDiff.changed));
         await Promise.all(writes);
-        quantityLastPersistedMarkSignature = markSignature;
-        quantityLastPersistedMarksByUnit = marksByUnit;
+        const nextMarks = new Map(quantityLastPersistedMarksByUnit);
+        marksByUnit.forEach((entry, mapKey) => nextMarks.set(mapKey, entry));
+        quantityLastPersistedMarksByUnit = nextMarks;
         quantityLastPersistedRowsBySection = {
-          templates: templateDiff.current,
-          plans: planDiff.current,
-          units: unitDiff.current,
-          revisions: revisionDiff.current
+          templates: canManage ? templateDiff.current : quantityLastPersistedRowsBySection.templates,
+          plans: canManage ? planDiff.current : quantityLastPersistedRowsBySection.plans,
+          units: canManage ? unitDiff.current : quantityLastPersistedRowsBySection.units,
+          revisions: canManage ? revisionDiff.current : quantityLastPersistedRowsBySection.revisions
         };
-        quantityLastPersistedSectionSignatures = { marks: markSignature };
         return true;
       } catch (error) { console.error('Quantity Control Supabase save failed', error); quantitySuccessToast('❌ Quantity Control could not be saved to Supabase.'); return false; }
     }
@@ -3292,38 +3366,60 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantityRemoteLoading = (async () => {
         try {
           const headers = await quantityAuthHeaders(); const q = async path => { const r = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers }), 12000, 'Quantity Control request'); if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`); return r.json(); };
+          if (quantitySystemColumns == null) quantitySystemColumns = await quantityDetectSystemColumns(headers);
+          const systemColumn = quantitySystemColumns ? ',system' : '';
           const [templates, plans, states] = await Promise.all([
             q(`quantity_templates?project_id=eq.${PROJECT_ID}&is_active=eq.true${unitTypeFilter}&select=unit_type,name,mime_type,storage_path,system_drawings,checklist,version,updated_at`),
             unitOnly ? Promise.resolve([]) : q(`quantity_floor_plans?project_id=eq.${PROJECT_ID}&is_active=eq.true&select=building_id,floor,name,mime_type,storage_path,version,updated_at`),
-            q(`quantity_unit_states?project_id=eq.${PROJECT_ID}${unitIdFilter}&select=unit_id,unit_type,checklist,checklist_mode,drawing_name,drawing_mime_type,drawing_storage_path,drawing_revision`)
+            q(`quantity_unit_states?project_id=eq.${PROJECT_ID}${unitIdFilter}&select=unit_id,unit_type,checklist,checklist_mode,drawing_name,drawing_mime_type,drawing_storage_path,drawing_revision${systemColumn}`)
           ]);
-          // Counts are optional until the additive view migration exists. Do
-          // not fall back to every mark coordinate; selected-unit View loads
-          // coordinates through quantityLoadRemoteMarks().
+          // Counts only; coordinates load per unit/system when it is opened.
           let marks = [];
           try {
-            marks = await q(`quantity_installed_mark_counts?project_id=eq.${PROJECT_ID}${unitIdFilter}&select=unit_id,item_index,installed_count`);
+            marks = await q(`quantity_installed_mark_counts?project_id=eq.${PROJECT_ID}${unitIdFilter}&select=unit_id,item_index,installed_count${systemColumn}`);
           } catch (error) {
             console.warn('Installed mark count view unavailable; marks will load when a unit is opened.', error);
           }
-          const marksAreCounts = true;
-          const revisions = [];
           const store = { templates: {}, sitePlans: {}, unitTypes: {}, units: {} };
           (templates || []).forEach(row => { store.templates[row.unit_type] = { name: row.name, type: row.mime_type, dataUrl: '', storagePath: row.storage_path || '', systemDrawings: row.system_drawings || {}, checklist: row.checklist || [], version: row.version, updatedAt: row.updated_at }; });
           (plans || []).forEach(row => { const b = (Array.isArray(data) ? data : []).find(u => String(u.building_id) === String(row.building_id)); if (b) store.sitePlans[`${b.building}::${row.floor}`] = { name: row.name, type: row.mime_type, dataUrl: '', storagePath: row.storage_path || '', version: row.version, updatedAt: row.updated_at }; });
-          (states || []).forEach(row => { const u = (Array.isArray(data) ? data : []).find(x => String(x.id) === String(row.unit_id)); if (!u) return; const key = quantityUnitKey(u); store.unitTypes[key] = row.unit_type || ''; store.units[key] = { items: row.checklist || [], checklistMode: row.checklist_mode || 'template', markers: [], installedCounts: {}, _marksLoaded: !marksAreCounts, drawing: row.drawing_name ? { name: row.drawing_name, type: row.drawing_mime_type, dataUrl: '', storagePath: row.drawing_storage_path || '', revision: row.drawing_revision || 0 } : null, revisions: [] }; });
-          (marks || []).forEach(row => { const u = (Array.isArray(data) ? data : []).find(x => String(x.id) === String(row.unit_id)); if (!u) return; const key = quantityUnitKey(u); store.units[key] = store.units[key] || { items: quantityDefaultItems(), markers: [], installedCounts: {}, _marksLoaded: !marksAreCounts, revisions: [] }; if (marksAreCounts) store.units[key].installedCounts[Number(row.item_index)] = Number(row.installed_count || 0); else store.units[key].markers.push({ id: row.id, itemIndex: row.item_index, x: Number(row.x), y: Number(row.y) }); });
-          (revisions || []).forEach(row => { const u = (Array.isArray(data) ? data : []).find(x => String(x.id) === String(row.unit_id)); if (!u) return; const key = quantityUnitKey(u); store.units[key] = store.units[key] || { items: quantityDefaultItems(), markers: [], revisions: [] }; store.units[key].revisions.push({ id: row.id, number: row.revision_number, reason: row.reason, actor: row.actor_name, items: row.checklist || [], markers: row.marks || [], savedAt: row.created_at, drawing: row.drawing_name ? { name: row.drawing_name, type: row.drawing_mime_type, dataUrl: '', storagePath: row.drawing_storage_path || '' } : null }); });
-          // Production is Supabase-only. Never resurrect browser-local
-          // Quantity Control data when the remote project is empty; that can
-          // overwrite a newly configured project with stale test data.
+          const unitsById = new Map((Array.isArray(data) ? data : []).map(unit => [String(unit.id), unit]));
+          const systemsByKey = new Map();
+          const systemOf = row => (quantitySystemColumns && QUANTITY_SYSTEMS.includes(row.system) ? row.system : 'Rough-In');
+          const systemsFor = key => { if (!systemsByKey.has(key)) systemsByKey.set(key, {}); return systemsByKey.get(key); };
+          (states || []).forEach(row => {
+            const u = unitsById.get(String(row.unit_id)); if (!u) return;
+            const key = quantityUnitKey(u);
+            if (row.unit_type || !store.unitTypes[key]) store.unitTypes[key] = row.unit_type || '';
+            systemsFor(key)[systemOf(row)] = { items: row.checklist || [], checklistMode: row.checklist_mode || 'template', markers: [], installedCounts: {}, _marksLoaded: false, drawing: row.drawing_name ? { name: row.drawing_name, type: row.drawing_mime_type, dataUrl: '', storagePath: row.drawing_storage_path || '', revision: row.drawing_revision || 0 } : null, revisions: [] };
+          });
+          (marks || []).forEach(row => {
+            const u = unitsById.get(String(row.unit_id)); if (!u) return;
+            const system = systemOf(row); const systems = systemsFor(quantityUnitKey(u));
+            const state = systems[system] || (systems[system] = { items: system === 'Rough-In' ? quantityDefaultItems() : [], markers: [], installedCounts: {}, _marksLoaded: false, revisions: [] });
+            state.installedCounts[Number(row.item_index)] = Number(row.installed_count || 0);
+          });
+          // Units with only Rough-In data keep the legacy flat shape.
+          systemsByKey.forEach((systems, key) => {
+            const names = Object.keys(systems);
+            store.units[key] = names.length === 1 && names[0] === 'Rough-In' ? systems['Rough-In'] : { systemStates: systems };
+          });
+          // Baseline = what Supabase already has (before merging local edits).
+          const baseline = quantityBuildRemoteRows(store);
+          const signatures = (rows, keyFn) => new Map(rows.map(row => [String(keyFn(row)), quantityRowsSignature([row])]));
+          quantityLastPersistedRowsBySection = {
+            templates: signatures(baseline.templates, row => `${row.project_id}::${row.unit_type}`),
+            plans: signatures(baseline.planRows, row => `${row.project_id}::${row.building_id}::${row.floor}`),
+            units: signatures(baseline.unitRows, quantityUnitRowKey),
+            revisions: new Map()
+          };
+          quantityLastPersistedMarksByUnit = new Map();
           quantityRemoteStore = quantityMergeStores(store, quantityRemotePendingStore);
-          quantityLastPersistedMarkSignature = quantityMarkSignature(quantityRemoteStore);
-          quantityLastPersistedMarksByUnit = quantityMarksByUnit(quantityRemoteStore, new Map((Array.isArray(data) ? data : []).map(unit => [quantityUnitKey(unit), unit])));
           quantityRemotePendingStore = null;
           // State objects were replaced; cached revision promises belong to
           // the old objects and would otherwise leave the history empty.
           quantityRevisionLoads.clear();
+          quantityMarksLoads.clear();
           // A unit-only hydration is deliberately not considered a complete
           // project hydration. The dashboard/setup will perform the full load
           // later, while opening a unit avoids downloading every drawing and
@@ -3396,13 +3492,13 @@ Object.assign(APP_TRANSLATIONS.en, {
       const legacyDrawing = normalizeDrawing(template);
       if (hasSystemDrawings && !drawing && system !== 'Rough-In') return null;
       const result = drawing ? { ...template, ...legacyDrawing, ...drawing, checklist: template.checklist || [] } : { ...template, ...legacyDrawing };
-      if (!result.dataUrl && result.storagePath && quantityPreviewUrlCache.has(result.storagePath)) result.dataUrl = quantityPreviewUrlCache.get(result.storagePath);
+      result.dataUrl = quantityResolveDrawingUrl(result.dataUrl, result.storagePath);
       return result;
     }
     function quantityEffectiveDrawing(unit, state) {
       const unitDrawing = state?.drawing && (state.drawing.dataUrl || state.drawing.storagePath);
-      if (unitDrawing) return { ...state.drawing, dataUrl: state.drawing.dataUrl || quantityPreviewUrlCache.get(state.drawing.storagePath) || '', source: 'unit' };
-      if (unit?.setupDrawing?.dataUrl || unit?.setupDrawing?.storagePath) return { ...unit.setupDrawing, dataUrl: unit.setupDrawing.dataUrl || quantityPreviewUrlCache.get(unit.setupDrawing.storagePath) || '', source: 'setup' };
+      if (unitDrawing) return { ...state.drawing, dataUrl: quantityResolveDrawingUrl(state.drawing.dataUrl, state.drawing.storagePath), source: 'unit' };
+      if (unit?.setupDrawing?.dataUrl || unit?.setupDrawing?.storagePath) return { ...unit.setupDrawing, dataUrl: quantityResolveDrawingUrl(unit.setupDrawing.dataUrl, unit.setupDrawing.storagePath), source: 'setup' };
       return quantityTemplateFor(unit) ? { ...quantityTemplateFor(unit), source: 'template' } : null;
     }
     async function quantitySetUnitType(value) {
@@ -4128,7 +4224,8 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantityRenderUnit();
       if (saved) {
         const synced = await quantityFlushRemoteSave();
-        quantitySuccessToast(synced === false ? '❌ Revision could not be saved to Supabase.' : `✅ Rev ${revisionNumber} saved successfully`);
+        const keptLocally = !quantityUsesLocalStorage() && !quantitySystemColumns && quantityCurrentSystem !== 'Rough-In';
+        quantitySuccessToast(synced === false ? '❌ Revision could not be saved to Supabase.' : keptLocally ? `⚠️ Rev ${revisionNumber} is kept on this screen only: ${quantityCurrentSystem} needs the Quantity system migration in Supabase.` : `✅ Rev ${revisionNumber} saved successfully`, keptLocally ? 9000 : undefined);
       }
     }
     async function quantityUndoLastRevision() {
@@ -4221,14 +4318,19 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     async function quantityLoadRemoteMarks(unit, system = quantityCurrentSystem) {
       if (quantityUsesLocalStorage() || !unit?.id || !sbClient) return false;
-      const withSystem = fn => { const previous = quantityCurrentSystem; quantityCurrentSystem = system; try { return fn(); } finally { quantityCurrentSystem = previous; } };
+      const withSystem = fn => quantityWithSystem(system, fn);
       if (withSystem(() => quantityUnitState(unit))._marksLoaded !== false) return false;
+      // Legacy schema: Supabase marks belong to Rough-In only. Other systems
+      // start empty instead of showing Rough-In marks as their own.
+      if (!quantitySystemColumns && system !== 'Rough-In') {
+        return withSystem(() => { const store = quantityStore(); const state = quantityUnitState(unit); state.markers = []; state.installedCounts = {}; state._marksLoaded = true; quantityStoreUnitState(store, unit, state); return true; });
+      }
       const unitId = String(unit.id);
       const loadKey = `${unitId}::${system}`;
       if (quantityMarksLoads.has(loadKey)) return quantityMarksLoads.get(loadKey);
       const promise = (async () => {
         const headers = await quantityAuthHeaders();
-        const response = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_installed_marks?project_id=eq.${encodeURIComponent(PROJECT_ID)}&unit_id=eq.${encodeURIComponent(unitId)}&select=id,item_index,x,y`, { headers }), 12000, 'Quantity marks request');
+        const response = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_installed_marks?project_id=eq.${encodeURIComponent(PROJECT_ID)}&unit_id=eq.${encodeURIComponent(unitId)}${quantitySystemColumns ? `&system=eq.${encodeURIComponent(system)}` : ''}&select=id,item_index,x,y`, { headers }), 12000, 'Quantity marks request');
         if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
         const rows = await response.json();
         // Apply to the state of the system that asked for the marks, even if
@@ -4242,6 +4344,8 @@ Object.assign(APP_TRANSLATIONS.en, {
           state.installedCounts = {};
           state._marksLoaded = true;
           quantityStoreUnitState(store, unit, state);
+          // What was just read is what Supabase has: baseline for the next save.
+          quantityLastPersistedMarksByUnit.set(`${unit.id}${quantityRemoteSystemKey(system)}`, quantityMarksEntry(unit.id, system, state));
           return quantityUnitState(unit)._marksLoaded === true;
         });
       })();
@@ -4286,15 +4390,21 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (quantityRevisionLoads.has(unitId)) return quantityRevisionLoads.get(unitId);
       const promise = (async () => {
         const headers = await quantityAuthHeaders();
-        const response = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_revisions?project_id=eq.${encodeURIComponent(PROJECT_ID)}&unit_id=eq.${encodeURIComponent(unitId)}&select=id,unit_id,revision_number,reason,actor_name,checklist,marks,drawing_name,drawing_mime_type,drawing_storage_path,created_at&order=revision_number.desc`, { headers }), 12000, 'Quantity revisions request');
+        const response = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_revisions?project_id=eq.${encodeURIComponent(PROJECT_ID)}&unit_id=eq.${encodeURIComponent(unitId)}&select=id,unit_id,revision_number,reason,actor_name,checklist,marks,drawing_name,drawing_mime_type,drawing_storage_path,created_at${quantitySystemColumns ? ',system' : ''}&order=revision_number.desc`, { headers }), 12000, 'Quantity revisions request');
         if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
         const rows = await response.json();
         const store = quantityStore();
-        const state = quantityUnitState(unit);
-        if (state.revisions.length === 0) {
-          state.revisions = (rows || []).map(row => ({ id: row.id, revisionNumber: Number(row.revision_number || 0), isManual: true, reason: row.reason, actor: row.actor_name, items: row.checklist || [], markers: row.marks || [], savedAt: row.created_at, drawing: row.drawing_name ? { name: row.drawing_name, type: row.drawing_mime_type, dataUrl: '', storagePath: row.drawing_storage_path || '' } : null }));
+        const bySystem = {};
+        (rows || []).forEach(row => { const system = quantitySystemColumns && QUANTITY_SYSTEMS.includes(row.system) ? row.system : 'Rough-In'; (bySystem[system] = bySystem[system] || []).push(row); });
+        const baseline = quantityLastPersistedRowsBySection.revisions || new Map();
+        Object.entries(bySystem).forEach(([system, list]) => quantityWithSystem(system, () => {
+          const state = quantityUnitState(unit);
+          if (state.revisions.length) return;
+          state.revisions = list.map(row => ({ id: row.id, revisionNumber: Number(row.revision_number || 0), isManual: true, reason: row.reason, actor: row.actor_name, items: row.checklist || [], markers: row.marks || [], savedAt: row.created_at, drawing: row.drawing_name ? { name: row.drawing_name, type: row.drawing_mime_type, dataUrl: '', storagePath: row.drawing_storage_path || '' } : null }));
           quantityStoreUnitState(store, unit, state);
-        }
+          state.revisions.forEach(rev => { const row = quantityRevisionRow(PROJECT_ID, unit.id, system, rev); baseline.set(quantityRevisionRowKey(row), quantityRowsSignature([row])); });
+        }));
+        quantityLastPersistedRowsBySection.revisions = baseline;
       })();
       quantityRevisionLoads.set(unitId, promise);
       try { await promise; } catch (error) { quantityRevisionLoads.delete(unitId); console.warn('Quantity revision history unavailable:', error); return; }
@@ -4352,6 +4462,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const loadingMarkup = `<div style="padding:48px;text-align:center;color:#475569;">Loading drawing preview…</div>`;
       modal.innerHTML = `<div style="width:min(96vw,1100px);max-height:90vh;background:white;border-radius:10px;box-shadow:0 20px 60px rgba(15,23,42,.35);padding:14px;display:flex;flex-direction:column;gap:10px;"><div style="display:flex;justify-content:space-between;align-items:center;"><strong>${titleText}</strong><button type="button" class="btn btn-secondary" onclick="quantityClosePreview()">✕</button></div><div id="quantityPreviewBody" style="text-align:center;overflow:auto;">${loadingMarkup}</div></div>`;
       modal.style.display = 'flex';
+      if (preview) preview.dataUrl = quantityResolveDrawingUrl(preview.dataUrl, preview.storagePath);
       if (preview && !preview.dataUrl && preview.storagePath) preview.dataUrl = await quantityStoragePreviewUrl(preview.storagePath);
       if (!preview?.dataUrl) { const body = document.getElementById('quantityPreviewBody'); if (body) body.innerHTML = '<div style="padding:48px;color:#B91C1C;">No drawing file is available to preview.</div>'; return; }
       const content = preview.type === 'application/pdf' ? '<canvas id="quantityPreviewCanvas" style="max-width:100%;max-height:78vh;background:white;border-radius:6px;"></canvas>' : `<img src="${preview.dataUrl}" alt="${titleText}" style="max-width:100%;max-height:78vh;object-fit:contain;background:white;border-radius:6px;">`;
@@ -4411,6 +4522,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (error) throw error;
         const signed = await withTimeout(sbClient.storage.from(QUANTITY_STORAGE_BUCKET).createSignedUrl(path, 3600), 10000, 'Drawing preview');
         if (signed.error || !signed.data?.signedUrl) throw (signed.error || new Error('Unable to create drawing preview URL'));
+        quantityPreviewUrlCache.set(path, signed.data.signedUrl); quantityPreviewUrlExpiry.set(path, Date.now() + QUANTITY_SIGNED_URL_TTL_MS);
         await finish(signed.data.signedUrl, path);
       })().catch(error => { console.error('Quantity drawing upload failed', error); if (typeof toast === 'function') toast('❌ Drawing/PDF could not be uploaded to Storage.'); });
     }
@@ -4493,7 +4605,13 @@ Object.assign(APP_TRANSLATIONS.en, {
       let blob = quantityPdfBlobCache.get(key);
       if (blob) { quantityPdfBlobCache.delete(key); quantityPdfBlobCache.set(key, blob); }
       else {
-        const response = await fetch(source);
+        let response = await fetch(source);
+        // An expired signed URL answers 400/403: sign the Storage path again once.
+        if (!response.ok && (response.status === 400 || response.status === 403) && quantityIsStoragePath(key)) {
+          quantityPreviewUrlCache.delete(key); quantityPreviewUrlExpiry.delete(key);
+          const fresh = await quantityStoragePreviewUrl(key);
+          if (fresh) response = await fetch(fresh);
+        }
         if (!response.ok) throw new Error(`Drawing download failed (${response.status})`);
         blob = await response.blob();
         quantityPdfBlobCache.set(key, blob);
@@ -4817,7 +4935,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const vertices = points.map((point, index) => `<circle cx="${point[0]}" cy="${point[1]}" r="1.5" fill="#16A34A" stroke="#fff" stroke-width=".5" tabindex="0" aria-label="Point ${index + 1}" onpointerdown="quantityStartContourPointDrag(event,${index})"></circle><text x="${point[0]}" y="${point[1]}" dx="2" dy="-2" font-size="2.2" fill="#166534">${index + 1}</text>`).join('');
       const inputs = points.map((point, index) => `<label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#475569;">Point ${index + 1}<input type="number" min="0" max="100" step="0.1" value="${point[0]}" onchange="quantitySetContourPoint(${index},0,this.value)" style="width:72px;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"><input type="number" min="0" max="100" step="0.1" value="${point[1]}" onchange="quantitySetContourPoint(${index},1,this.value)" style="width:72px;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"></label>`).join('');
       const plan = quantityStore().sitePlans?.[editor.planKey] || null;
-      const planDataUrl = plan?.dataUrl || (plan?.storagePath ? quantityPreviewUrlCache.get(plan.storagePath) || '' : '');
+      const planDataUrl = quantityResolveDrawingUrl(plan?.dataUrl, plan?.storagePath);
       // Keep large PDF data out of innerHTML; the renderer receives planDataUrl
       // directly below and the embedded Base64 string otherwise freezes review.
       const planMarkup = planDataUrl ? (plan.type === 'application/pdf' ? `<canvas id="quantityContourEditorPdf" class="quantity-contour-editor-media" aria-label="Base floor plan"></canvas>` : `<img class="quantity-contour-editor-media" src="${planDataUrl}" alt="Base floor plan">`) : plan?.storagePath ? '<div class="quantity-contour-editor-empty">Loading base floor plan…</div>' : '<div class="quantity-contour-editor-empty">No base floor plan uploaded</div>';
@@ -4895,7 +5013,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           overlay.style.transformOrigin = previousCanvas.style.transformOrigin || 'top left';
         }
         const plan = quantityStore().sitePlans?.[quantityContourEditor.planKey];
-        const planDataUrl = plan?.dataUrl || '';
+        const planDataUrl = quantityResolveDrawingUrl(plan?.dataUrl, plan?.storagePath);
         if (plan?.type === 'application/pdf' && planDataUrl) requestAnimationFrame(() => quantityRenderPdf(previousCanvas, planDataUrl));
       }
     }
@@ -5515,6 +5633,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     async function quantityClearMarkers() {
       if (!quantityCurrentUnit) return;
+      if (!quantityIsAdmin()) { if (typeof toast === 'function') toast('Only administrators can clear all marks.'); return; }
       if (quantityRevisionCursor != null) { if (typeof toast === 'function') toast('Historical revisions are read-only.'); return; }
       const store = quantityStore(); store.units = store.units || {};
       const key = quantityUnitKey(quantityCurrentUnit); const state = quantityUnitState(quantityCurrentUnit);
@@ -5621,7 +5740,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const revisionNav = `<div class="quantity-revision-nav" style="position:relative;display:flex;align-items:center;justify-content:center;gap:8px;width:max-content;margin:8px auto 0;padding:4px 7px;background:rgba(255,255,255,.94);border:1px solid #CBD5E1;border-radius:7px;z-index:5;"><button type="button" class="btn btn-secondary" aria-label="Older plan revision" title="Older plan revision" ${olderDisabled ? 'disabled' : ''} onclick="quantityNavigateRevision(-1)" style="font-size:18px;line-height:1;padding:2px 9px;">‹</button><strong style="min-width:54px;text-align:center;font-size:11px;">${officialFinalEscape(revisionNavLabel)}</strong><button type="button" class="btn btn-secondary" aria-label="Newer plan revision" title="Newer plan revision" ${newerDisabled ? 'disabled' : ''} onclick="quantityNavigateRevision(1)" style="font-size:18px;line-height:1;padding:2px 9px;">›</button></div>`;
       const revisionStamp = `<div class="quantity-plan-revision-stamp" style="position:absolute;right:10px;top:10px;z-index:4;background:rgba(255,255,255,.92);border:1px solid #CBD5E1;border-radius:5px;padding:4px 7px;font-size:11px;color:#334155;pointer-events:none;">${officialFinalEscape(activeRevisionDate)}</div>`;
       const systemTabs = QUANTITY_SYSTEMS.map(system => `<button type="button" class="btn ${quantityCurrentSystem === system ? 'btn-primary' : 'btn-secondary'}" style="font-size:11px;padding:6px 9px;" onclick="quantitySwitchSystem('${system}')">${system}</button>`).join('');
-      document.getElementById('quantityUnitContent').innerHTML = `<div style="grid-column:1/-1;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;border:1px solid #BFDBFE;border-radius:8px;background:#EFF6FF;"><strong style="font-size:12px;color:#1E3A8A;margin-right:4px;">System / QC:</strong>${systemTabs}<span style="font-size:11px;color:#64748B;margin-left:auto;">${quantityCurrentSystem} quantities, drawing and RFI history</span></div><div class="quantity-checklist"><div class="quantity-card-header"><strong>${quantityCurrentSystem} Takeoff Checklist</strong><span>Click Select, then click the drawing</span></div><table><thead><tr><th>#</th><th>Description</th><th>Takeoff</th><th>Installed</th><th>Remaining</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div><div class="quantity-card-header" style="border:1px solid #E2E8F0;border-bottom:0;border-radius:8px 8px 0 0;"><strong>${quantityCurrentSystem} Drawing</strong><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${typeControl}${templateButton}${quantityIsAdmin() ? `<label class="btn btn-secondary" style="font-size:11px;padding:5px 8px;cursor:pointer;">Upload Drawing / RFI<input type="file" accept="image/*,.pdf" onchange="quantityHandleUnitPlan(this)" style="display:none"></label>` : ''}${quantityIsAdmin() ? `<button type="button" class="insp-btn insp-btn-success" style="font-size:11px;padding:5px 8px;" onclick="quantitySaveRevision()">Save Revision</button>` : ``}${undoRevisionButton}<button class="btn btn-danger" style="font-size:11px;padding:5px 8px;" onclick="quantityClearMarkers()">Clear All Marks</button>${quantityIsAdmin() ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityResetRevisionHistory()">Reset test history</button>` : ''}</span></div><div class="quantity-drawing-board">${drawingHtml}${drawingHitArea}${drawingUpdateStamp}${revisionStamp}${markers}</div>${revisionNav}<div class="quantity-help"><strong>${drawingSource}</strong><br>${quantityActiveItem >= 0 ? `Active item: <strong>${String(quantityActiveItem + 1).padStart(2, '0')} — ${officialFinalEscape(state.items[quantityActiveItem]?.description || '')}</strong>. Click the corresponding symbol location to add an installed mark. Click a numbered green mark to remove it.` : 'Select an item to start marking its corresponding symbol on the drawing.'}</div></div>`;
+      document.getElementById('quantityUnitContent').innerHTML = `<div style="grid-column:1/-1;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;border:1px solid #BFDBFE;border-radius:8px;background:#EFF6FF;"><strong style="font-size:12px;color:#1E3A8A;margin-right:4px;">System / QC:</strong>${systemTabs}<span style="font-size:11px;color:#64748B;margin-left:auto;">${quantityCurrentSystem} quantities, drawing and RFI history</span></div><div class="quantity-checklist"><div class="quantity-card-header"><strong>${quantityCurrentSystem} Takeoff Checklist</strong><span>Click Select, then click the drawing</span></div><table><thead><tr><th>#</th><th>Description</th><th>Takeoff</th><th>Installed</th><th>Remaining</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div><div class="quantity-card-header" style="border:1px solid #E2E8F0;border-bottom:0;border-radius:8px 8px 0 0;"><strong>${quantityCurrentSystem} Drawing</strong><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${typeControl}${templateButton}${quantityIsAdmin() ? `<label class="btn btn-secondary" style="font-size:11px;padding:5px 8px;cursor:pointer;">Upload Drawing / RFI<input type="file" accept="image/*,.pdf" onchange="quantityHandleUnitPlan(this)" style="display:none"></label>` : ''}${quantityIsAdmin() ? `<button type="button" class="insp-btn insp-btn-success" style="font-size:11px;padding:5px 8px;" onclick="quantitySaveRevision()">Save Revision</button>` : ``}${undoRevisionButton}${quantityIsAdmin() ? `<button class="btn btn-danger" style="font-size:11px;padding:5px 8px;" onclick="quantityClearMarkers()">Clear All Marks</button>` : ''}${quantityIsAdmin() ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityResetRevisionHistory()">Reset test history</button>` : ''}</span></div><div class="quantity-drawing-board">${drawingHtml}${drawingHitArea}${drawingUpdateStamp}${revisionStamp}${markers}</div>${revisionNav}<div class="quantity-help"><strong>${drawingSource}</strong><br>${quantityActiveItem >= 0 ? `Active item: <strong>${String(quantityActiveItem + 1).padStart(2, '0')} — ${officialFinalEscape(state.items[quantityActiveItem]?.description || '')}</strong>. Click the corresponding symbol location to add an installed mark. Click a numbered green mark to remove it.` : 'Select an item to start marking its corresponding symbol on the drawing.'}</div></div>`;
       const nextDrawingMedia = document.querySelector('#quantityUnitContent .quantity-pdf-canvas, #quantityUnitContent .quantity-drawing-board > img');
       if (nextDrawingMedia) {
         nextDrawingMedia.dataset.drawingKey = drawingKey;
@@ -5681,10 +5800,9 @@ Object.assign(APP_TRANSLATIONS.en, {
         quantitySave(store);
       }
       const selectedPlan = store.sitePlans?.[planKey] || null;
+      if (selectedPlan) selectedPlan.dataUrl = quantityResolveDrawingUrl(selectedPlan.dataUrl, selectedPlan.storagePath);
       if (selectedPlan?.storagePath && !selectedPlan.dataUrl) {
-        const cachedUrl = quantityPreviewUrlCache.get(selectedPlan.storagePath);
-        if (cachedUrl) selectedPlan.dataUrl = cachedUrl;
-        else quantityStoragePreviewUrl(selectedPlan.storagePath).then(url => {
+        quantityStoragePreviewUrl(selectedPlan.storagePath).then(url => {
           if (url && store.sitePlans?.[planKey] === selectedPlan) { selectedPlan.dataUrl = url; renderQuantityControl(); }
         }).catch(error => console.warn('Quantity floor plan preview unavailable:', error));
       }
