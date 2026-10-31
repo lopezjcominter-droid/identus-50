@@ -1352,6 +1352,7 @@
 .quantity-plan-contour:hover, .quantity-plan-contour:focus { fill:rgba(34,197,94,.28); stroke:#16A34A; stroke-width:.7; outline:none; }
 .quantity-plan-contour-label { font:600 2px Arial,sans-serif; fill:#1D4ED8; paint-order:stroke; stroke:#fff; stroke-width:.45px; stroke-linejoin:round; pointer-events:none; text-anchor:middle; dominant-baseline:middle; }
     .quantity-plan-board > iframe, .quantity-drawing-board > iframe { pointer-events:none; }
+    .quantity-drawing-board > iframe { display:block; width:100%; height:100%; min-height:430px; border:0; background:#fff; }
 .quantity-plan-empty { min-height:460px; display:flex; align-items:center; justify-content:center; text-align:center; padding:28px; color:#64748B; }
 .quantity-plan-empty strong { display:block; color:#334155; margin-bottom:6px; }
 .quantity-unit-pin { position:absolute; transform:translate(-50%,-50%); min-width:54px; padding:7px 9px; border:2px solid #2563EB; border-radius:7px; background:#fff; color:#1D4ED8; font-weight:700; font-size:11px; cursor:pointer; box-shadow:0 2px 5px rgba(15,23,42,.16); }
@@ -5485,7 +5486,11 @@ Object.assign(APP_TRANSLATIONS.en, {
       // every QC tab switch was causing production browsers to freeze. The
       // renderer below already receives drawing.dataUrl directly and uses its
       // parsed-page cache.
-      const drawingHtml = drawing?.dataUrl ? (drawing.type === 'application/pdf' ? `<canvas class="quantity-pdf-canvas" aria-label="Unit drawing"></canvas>` : `<img src="${drawing.dataUrl}" alt="Unit drawing">`) : `<div class="quantity-drawing-empty">No unit drawing uploaded yet.<br>Select an item, then use this drawing area when a plan is uploaded.</div>`;
+      // Unit QC uses the browser PDF viewer instead of PDF.js. The native
+      // viewer is isolated from the app's main thread, so switching systems
+      // cannot parse/render the same large drawing repeatedly. Markers remain
+      // in the independent overlay above the viewer.
+      const drawingHtml = drawing?.dataUrl ? (drawing.type === 'application/pdf' ? `<iframe class="quantity-pdf-frame" title="Unit drawing" data-pdf-source=""></iframe>` : `<img src="${drawing.dataUrl}" alt="Unit drawing">`) : `<div class="quantity-drawing-empty">No unit drawing uploaded yet.<br>Select an item, then use this drawing area when a plan is uploaded.</div>`;
       const drawingHitArea = drawing?.dataUrl ? '<div class="quantity-drawing-hitarea" onpointerdown="quantityDrawingPointerDown(event)" onpointermove="quantityDrawingPointerMove(event)" onpointerup="quantityDrawingPointerUp(event)" onpointercancel="quantityDrawingPointerUp(event)"></div>' : '';
       document.getElementById('quantityUnitTitle').textContent = `Unit ${quantityCurrentUnit.apt} — Quantity Control`;
       document.getElementById('quantityUnitSubtitle').textContent = `${quantityCurrentUnit.building} • ${quantityCurrentUnit.floor}${drawing?.name ? ` • ${drawing.name}` : ''}`;
@@ -5508,7 +5513,9 @@ Object.assign(APP_TRANSLATIONS.en, {
       const revisionStamp = `<div class="quantity-plan-revision-stamp" style="position:absolute;right:10px;top:10px;z-index:4;background:rgba(255,255,255,.92);border:1px solid #CBD5E1;border-radius:5px;padding:4px 7px;font-size:11px;color:#334155;pointer-events:none;">${officialFinalEscape(activeRevisionDate)}</div>`;
       const systemTabs = QUANTITY_SYSTEMS.map(system => `<button type="button" class="btn ${quantityCurrentSystem === system ? 'btn-primary' : 'btn-secondary'}" style="font-size:11px;padding:6px 9px;" onclick="quantitySwitchSystem('${system}')">${system}</button>`).join('');
       document.getElementById('quantityUnitContent').innerHTML = `<div style="grid-column:1/-1;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;border:1px solid #BFDBFE;border-radius:8px;background:#EFF6FF;"><strong style="font-size:12px;color:#1E3A8A;margin-right:4px;">System / QC:</strong>${systemTabs}<span style="font-size:11px;color:#64748B;margin-left:auto;">${quantityCurrentSystem} quantities, drawing and RFI history</span></div><div class="quantity-checklist"><div class="quantity-card-header"><strong>${quantityCurrentSystem} Takeoff Checklist</strong><span>Click Select, then click the drawing</span></div><table><thead><tr><th>#</th><th>Description</th><th>Takeoff</th><th>Installed</th><th>Remaining</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div><div class="quantity-card-header" style="border:1px solid #E2E8F0;border-bottom:0;border-radius:8px 8px 0 0;"><strong>${quantityCurrentSystem} Drawing</strong><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${typeControl}${templateButton}${quantityIsAdmin() ? `<label class="btn btn-secondary" style="font-size:11px;padding:5px 8px;cursor:pointer;">Upload Drawing / RFI<input type="file" accept="image/*,.pdf" onchange="quantityHandleUnitPlan(this)" style="display:none"></label>` : ''}${quantityIsAdmin() ? `<button type="button" class="insp-btn insp-btn-success" style="font-size:11px;padding:5px 8px;" onclick="quantitySaveRevision()">Save Revision</button>` : ``}${undoRevisionButton}<button class="btn btn-danger" style="font-size:11px;padding:5px 8px;" onclick="quantityClearMarkers()">Clear All Marks</button>${quantityIsAdmin() ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityResetRevisionHistory()">Reset test history</button>` : ''}</span></div><div class="quantity-drawing-board">${drawingHtml}${drawingHitArea}${drawingUpdateStamp}${revisionStamp}${markers}</div>${revisionNav}<div class="quantity-help"><strong>${drawingSource}</strong><br>${quantityActiveItem >= 0 ? `Active item: <strong>${String(quantityActiveItem + 1).padStart(2, '0')} — ${officialFinalEscape(state.items[quantityActiveItem]?.description || '')}</strong>. Click the corresponding symbol location to add an installed mark. Click a numbered green mark to remove it.` : 'Select an item to start marking its corresponding symbol on the drawing.'}</div></div>`;
-      const nextDrawingMedia = document.querySelector('#quantityUnitContent .quantity-pdf-canvas, #quantityUnitContent .quantity-drawing-board > img');
+      const nativePdfFrame = document.querySelector('#quantityUnitContent .quantity-pdf-frame');
+      if (nativePdfFrame && drawing?.dataUrl) nativePdfFrame.src = drawing.dataUrl;
+      const nextDrawingMedia = document.querySelector('#quantityUnitContent .quantity-pdf-frame, #quantityUnitContent .quantity-drawing-board > img');
       if (nextDrawingMedia) {
         nextDrawingMedia.dataset.drawingKey = drawingKey;
         if (previousDrawingMedia && previousDrawingKey && previousDrawingKey === drawingKey) {
@@ -5518,22 +5525,8 @@ Object.assign(APP_TRANSLATIONS.en, {
       const checklistHint = document.querySelector('#quantityUnitContent .quantity-checklist .quantity-card-header span');
       if (checklistHint && quantityIsAdmin()) checklistHint.innerHTML = `Click Select, then click the drawing <button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityOpenUnitChecklist()">Edit unit checklist</button>`;
       requestAnimationFrame(quantityApplyDrawingView);
-      // Never render a PDF inside the tab-switch paint. Let the checklist and
-      // controls become interactive first, then render only the still-active
-      // drawing during an idle period. This keeps large production PDFs from
-      // blocking the main thread while the user changes QC systems.
-      if (drawing?.type === 'application/pdf' && !options.deferPdf && !(previousDrawingMedia && previousDrawingKey === drawingKey)) {
-        clearTimeout(quantityDeferredDrawingTimer);
-        const renderPdf = () => {
-          if (renderToken !== quantityRenderToken || !quantityCurrentUnit) return;
-          quantityRenderPdf(document.querySelector('#quantityUnitContent .quantity-pdf-canvas'), drawing.dataUrl, 1);
-        };
-        if (typeof requestIdleCallback === 'function') {
-          requestIdleCallback(renderPdf, { timeout: 1200 });
-        } else {
-          quantityDeferredDrawingTimer = setTimeout(renderPdf, 350);
-        }
-      }
+      // Unit QC PDFs are displayed by the native viewer above. Do not invoke
+      // PDF.js here; it remains available for floor-plan contour editing.
       // Opening QC should not rebuild the dashboard and all charts. Those
       // global recalculations are deferred to edits/close and made the unit
       // feel frozen, especially with large drawings.
