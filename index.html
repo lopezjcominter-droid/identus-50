@@ -2363,6 +2363,7 @@
             <label style="display:flex;align-items:center;gap:8px;font-weight:600;"><input id="notifyEnabled" type="checkbox" checked> Send the daily summary</label>
             <label style="display:flex;align-items:center;gap:8px;">Send at <select id="notifyHour" style="padding:6px;border:1px solid #D1D5DB;border-radius:6px;"></select> Eastern Time</label>
             <div><div style="font-weight:600;margin-bottom:6px;">Include</div>
+              <label style="display:flex;align-items:center;gap:8px;"><input id="notifyPunch" type="checkbox" checked> Punch List: new items (including failed inspections) and closed items</label>
               <label style="display:flex;align-items:center;gap:8px;"><input id="notifyCompleted" type="checkbox" checked> Systems that reached 100%</label>
               <label style="display:flex;align-items:center;gap:8px;"><input id="notifyInspections" type="checkbox" checked> QA / QC inspections</label>
               <label style="display:flex;align-items:center;gap:8px;"><input id="notifyOfficialReady" type="checkbox" checked> Units ready for final inspection</label>
@@ -7912,7 +7913,7 @@ Object.assign(APP_TRANSLATIONS.en, {
 
 // ===== Daily email digest settings (Supabase: notification_settings) =====
 let notifySettingsCache = null;
-function notifyDefaults() { return { enabled: true, send_hour: 6, timezone: 'America/New_York', include_completed: true, include_inspections: true, include_official_ready: true, excluded_user_ids: [], extra_emails: [] }; }
+function notifyDefaults() { return { enabled: true, send_hour: 6, timezone: 'America/New_York', include_completed: true, include_inspections: true, include_official_ready: true, include_punch: true, excluded_user_ids: [], extra_emails: [] }; }
 async function renderNotificationSettings() {
   const panel = document.getElementById('notifySettingsPanel');
   const localPanel = document.getElementById('localNotifySettingsPanel');
@@ -7935,6 +7936,7 @@ async function renderNotificationSettings() {
   document.getElementById('notifyCompleted').checked = settings.include_completed !== false;
   document.getElementById('notifyInspections').checked = settings.include_inspections !== false;
   document.getElementById('notifyOfficialReady').checked = settings.include_official_ready !== false;
+  document.getElementById('notifyPunch').checked = settings.include_punch !== false;
   document.getElementById('notifyExtraEmails').value = (settings.extra_emails || []).join(', ');
   const membersBox = document.getElementById('notifyMembers');
   try {
@@ -7965,6 +7967,7 @@ async function saveNotificationSettings() {
     include_completed: document.getElementById('notifyCompleted').checked,
     include_inspections: document.getElementById('notifyInspections').checked,
     include_official_ready: document.getElementById('notifyOfficialReady').checked,
+    include_punch: document.getElementById('notifyPunch').checked,
     // Members not shown here (list unavailable) keep their previous choice.
     excluded_user_ids: boxes.length ? boxes.filter(b => !b.checked).map(b => b.value) : (previous.excluded_user_ids || []),
     extra_emails: extra,
@@ -9898,11 +9901,12 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         };
       });
       officialBatchRefreshFilters();
+      [0, 300, 1200].forEach(ms => setTimeout(officialClearInjectedEmail, ms));
     }
     function renderOfficialBatchPanel() {
       const requests = getOfficialRequestStore().slice().reverse();
       const requestHistory = requests.length ? requests.slice(0, 8).map(request => `<div style="padding:8px 0;border-top:1px solid #E5E7EB;font-size:12px;"><strong>${officialFinalEscape(request.status)}</strong> · ${officialFinalEscape(request.date)} · ${request.unitKeys.length} unit${request.unitKeys.length === 1 ? '' : 's'}<br><span style="color:#64748B;">${officialFinalEscape(request.building || 'All buildings')} · ${officialFinalEscape(request.floor || 'All floors')} · ${officialFinalEscape(request.inspector)}</span></div>`).join('') : '<div style="color:#64748B;padding:8px 0;">No area requests yet.</div>';
-      return `<section class="insp-card" style="margin-top:16px;"><div class="insp-card-header"><h3>Official Inspection Request — Area / Multiple Units</h3><span style="color:#1D4ED8;font-weight:700;">Batch</span></div><div style="padding:12px 16px;color:#475569;font-size:12px;">Select an area, choose several units, and create one request. Each unit keeps its own official result and history.</div><div style="padding:0 16px 16px;display:grid;gap:10px;"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;"><label>Building<select id="officialBatchBuilding" class="form-select" onchange="officialBatchRefreshFilters()"></select></label><label>Floor<select id="officialBatchFloor" class="form-select" onchange="officialBatchRefreshFilters()"></select></label><label>Area<select id="officialBatchArea" class="form-select" onchange="officialBatchRenderUnits()"></select></label><label>Search unit<input id="officialBatchSearch" class="form-input" placeholder="Unit number" oninput="officialBatchRenderUnits()"></label></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><strong>Units in selected area</strong><label style="font-size:12px;"><input type="checkbox" onchange="officialBatchToggleAll(this.checked)"> Select all</label></div><div id="officialBatchUnits" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;max-height:220px;overflow:auto;"></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;"><label>Official inspector<input id="officialBatchInspector" class="form-input" required></label><label>Company / agency<input id="officialBatchCompany" class="form-input"></label><label>Requested date<input id="officialBatchDate" class="form-input" type="date" required></label></div><label>Comments<textarea id="officialBatchComments" class="form-input" rows="2"></textarea></label><div style="display:flex;justify-content:flex-end;"><button type="button" class="btn btn-primary" onclick="saveOfficialBatchRequest()">Request official inspection</button></div><div><h4 style="margin:4px 0;">Area request history</h4>${requestHistory}</div></div></section>`;
+      return `<section class="insp-card" style="margin-top:16px;"><div class="insp-card-header"><h3>Official Inspection Request — Area / Multiple Units</h3><span style="color:#1D4ED8;font-weight:700;">Batch</span></div><div style="padding:12px 16px;color:#475569;font-size:12px;">Select an area, choose several units, and create one request. Each unit keeps its own official result and history.</div><div style="padding:0 16px 16px;display:grid;gap:10px;"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;"><label>Building<select id="officialBatchBuilding" class="form-select" onchange="officialBatchRefreshFilters()"></select></label><label>Floor<select id="officialBatchFloor" class="form-select" onchange="officialBatchRefreshFilters()"></select></label><label>Area<select id="officialBatchArea" class="form-select" onchange="officialBatchRenderUnits()"></select></label><label>Search unit<input id="officialBatchSearch" class="form-input" placeholder="Unit number" oninput="officialBatchRenderUnits()"></label></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><strong>Units in selected area</strong><label style="font-size:12px;"><input type="checkbox" onchange="officialBatchToggleAll(this.checked)"> Select all</label></div><div id="officialBatchUnits" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;max-height:220px;overflow:auto;"></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;"><label>Official inspector<input id="officialBatchInspector" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other" class="form-input" required></label><label>Company / agency<input id="officialBatchCompany" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other" class="form-input"></label><label>Requested date<input id="officialBatchDate" class="form-input" type="date" required></label></div><label>Comments<textarea id="officialBatchComments" class="form-input" rows="2"></textarea></label><div style="display:flex;justify-content:flex-end;"><button type="button" class="btn btn-primary" onclick="saveOfficialBatchRequest()">Request official inspection</button></div><div><h4 style="margin:4px 0;">Area request history</h4>${requestHistory}</div></div></section>`;
     }
     function officialFinalEscape(value) {
       return String(value == null ? '' : value).replace(/[&<>"']/g, char => ({
@@ -9915,7 +9919,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       const reportInput = document.getElementById('officialFinalReport');
       return {
         inspector: document.getElementById('officialFinalInspector')?.value.trim() || '',
-        company: document.getElementById('officialFinalCompany')?.value.trim() || '',
+        company: (v => v.toLowerCase() === String(window.authSessionUser?.email || '').toLowerCase() ? '' : v)(document.getElementById('officialFinalCompany')?.value.trim() || ''),
         date: document.getElementById('officialFinalDate')?.value || '',
         result: document.getElementById('officialFinalResult')?.value || 'Not Scheduled',
         comments: document.getElementById('officialFinalComments')?.value.trim() || '',
@@ -9924,7 +9928,17 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         reportName: reportInput?.files?.[0]?.name || ''
       };
     }
+    // Password managers sometimes fill the signed-in email into the
+    // "Company / agency" field. Clear an injected email; keep real values.
+    function officialClearInjectedEmail() {
+      const email = String(window.authSessionUser?.email || '').toLowerCase();
+      ['officialFinalCompany', 'officialFinalInspector', 'officialBatchCompany', 'officialBatchInspector'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input && email && String(input.value || '').trim().toLowerCase() === email) input.value = '';
+      });
+    }
     function renderOfficialFinalTab() {
+      [0, 300, 1200].forEach(ms => setTimeout(officialClearInjectedEmail, ms));
       const unit = currentDetailsUnit;
       if (!unit) return;
       if (officialProductionMode() && !officialRemoteReady) {
@@ -9944,11 +9958,11 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           ${latest ? `<div style="padding:0 16px 12px;color:#475569;font-size:13px;">Submitted by ${esc(latest.inspector || '—')} · ${latest.company ? esc(latest.company) + ' · ' : ''}${latest.date || 'No date'}</div>` : ''}
           <form onsubmit="saveOfficialFinalDraft(event)" style="padding:16px;display:grid;gap:12px;">
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
-              <label>Official inspector<input id="officialFinalInspector" class="form-input" value="${officialFinalEscape(value.inspector || '')}" required></label>
-              <label>Company / agency<input id="officialFinalCompany" class="form-input" value="${officialFinalEscape(value.company || '')}"></label>
+              <label>Official inspector<input id="officialFinalInspector" name="officialFinalInspector-field" class="form-input" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other" value="${officialFinalEscape(value.inspector || '')}" required></label>
+              <label>Company / agency<input id="officialFinalCompany" name="officialFinalCompany-field" class="form-input" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other" value="${officialFinalEscape(value.company || '')}"></label>
               <label>Inspection date<input id="officialFinalDate" class="form-input" type="date" value="${officialFinalEscape(value.date || '')}" required></label>
               <label>Result<select id="officialFinalResult" class="form-select"><option>Not Scheduled</option><option ${value.result === 'Passed' ? 'selected' : ''}>Passed</option><option ${value.result === 'Failed' ? 'selected' : ''}>Failed</option></select></label>
-              <label>Certificate / reference number<input id="officialFinalCertificate" class="form-input" value="${officialFinalEscape(value.certificate || '')}"></label>
+              <label>Certificate / reference number<input id="officialFinalCertificate" name="officialFinalCertificate-field" class="form-input" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other" value="${officialFinalEscape(value.certificate || '')}"></label>
             </div>
             <label>Comments / deficiencies<textarea id="officialFinalComments" class="form-input" rows="3">${officialFinalEscape(value.comments || '')}</textarea></label>
             <label>Photos<input id="officialFinalPhotos" class="form-input" type="file" accept="image/*" multiple></label>
