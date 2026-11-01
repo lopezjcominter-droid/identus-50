@@ -9801,12 +9801,18 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       });
       if (changed) saveInspectionRequiredTasks(next);
     }
+    // Units plus the special areas created in Setup (hallways, etc.), so the
+    // Official Final list always matches everything that is inspected.
+    function officialInspectableLocations() {
+      const areas = (typeof specialAreaData !== 'undefined' && Array.isArray(specialAreaData) ? specialAreaData : []).map(area => ({ ...area, apt: area.name, isSpecialArea: true, systems: area.systems || {} }));
+      return [...(data || []), ...areas];
+    }
     function officialBatchUnits() {
       const building = document.getElementById('officialBatchBuilding')?.value || '';
       const floor = document.getElementById('officialBatchFloor')?.value || '';
       const area = document.getElementById('officialBatchArea')?.value || '';
       const search = (document.getElementById('officialBatchSearch')?.value || '').trim().toLowerCase();
-      return (data || []).filter(unit => {
+      return officialInspectableLocations().filter(unit => {
         const unitArea = unit.area || unit.floor || '';
         return (!building || unit.building === building) && (!floor || unit.floor === floor) && (!area || unitArea === area) && (!search || String(unit.apt || '').toLowerCase().includes(search));
       });
@@ -9877,7 +9883,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         void hydrateOfficialRemote().then(() => renderOfficialMainTab()).catch(error => { host.innerHTML = `<div class="insp-card" style="padding:20px;color:#B91C1C;">Official inspections could not load: ${officialFinalEscape(error.message || error)}</div>`; });
         return;
       }
-      const units = (data || []).slice().sort((a, b) => String(a.building).localeCompare(String(b.building)) || String(a.floor).localeCompare(String(b.floor)) || String(a.apt).localeCompare(String(b.apt), undefined, { numeric: true }));
+      const units = officialInspectableLocations().sort((a, b) => String(a.building).localeCompare(String(b.building)) || String(a.floor).localeCompare(String(b.floor)) || String(a.apt).localeCompare(String(b.apt), undefined, { numeric: true }));
       const rows = units.map(unit => { const entry = officialFinalEntry(unit); return { unit, result: entry.current?.result || (entry.draft ? 'Draft' : 'Not Scheduled'), date: entry.current?.date || '', inspector: entry.current?.inspector || '' }; });
       const count = name => rows.filter(row => row.result === name).length;
       const color = result => result === 'Passed' ? '#15803D' : result === 'Failed' ? '#B91C1C' : result === 'Scheduled' ? '#1D4ED8' : '#64748B';
@@ -9894,9 +9900,10 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         ${renderOfficialBatchPanel()}`;
       host.querySelectorAll('[data-official-open]').forEach(button => {
         button.onclick = async event => {
-          const unit = (data || []).find(candidate => officialFinalKey(candidate) === button.dataset.officialOpen);
+          const unit = officialInspectableLocations().find(candidate => officialFinalKey(candidate) === button.dataset.officialOpen);
           if (!unit) return;
-          await openDetailsModal(unit.apt, unit.building, unit.floor, event);
+          if (unit.isSpecialArea) openSpecialAreaDetails(unit.id);
+          else await openDetailsModal(unit.apt, unit.building, unit.floor, event);
           if (typeof switchDetailsTab === 'function') switchDetailsTab('official_final');
         };
       });
@@ -13470,6 +13477,9 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         });
       }
       window.renderInspectionRequiredTasks = renderInspectionRequiredTasks;
+      // Used by the Official Final request (outside this block).
+      window.getInspectionRequiredTasks = getInspectionRequiredTasks;
+      window.saveInspectionRequiredTasks = saveInspectionRequiredTasks;
       window.startInspectionRequiredTask = function (apt, kind) {
         if (kind === 'official_ready') {
           const unit = (data || []).find(candidate => String(candidate.apt) === String(apt));
