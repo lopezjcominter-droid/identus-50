@@ -1540,6 +1540,7 @@
           <button onclick="switchMainTab('report', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📈 Report</button>
 <button onclick="switchMainTab('inspections', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">⚡ Inspections</button>
           <button onclick="switchMainTab('quantity', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📐 Quantity Control</button>
+          <button onclick="switchMainTab('official', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">🏁 Official Final</button>
         </div>
 
         <div id="dashboardTab">
@@ -1824,6 +1825,7 @@
     <!-- ============================================================ -->
     <!-- QUANTITY CONTROL TAB                                          -->
     <!-- ============================================================ -->
+    <div id="officialTab" style="display:none; width:100%;"><div id="officialTabContent"></div></div>
     <div id="quantityTab" style="display:none; width:100%;">
       <div class="quantity-shell">
         <div class="quantity-toolbar">
@@ -2354,8 +2356,32 @@
           </div>
         </div>
 
+        <!-- Daily email digest (production) -->
+        <details id="notifySettingsPanel" style="border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;">
+          <summary style="padding:12px 14px;font-size:13px;font-weight:600;cursor:pointer;background:#F9FAFB;list-style:none;">🔔 Notifications — daily email summary</summary>
+          <div style="padding:14px;display:flex;flex-direction:column;gap:12px;background:white;font-size:13px;">
+            <label style="display:flex;align-items:center;gap:8px;font-weight:600;"><input id="notifyEnabled" type="checkbox" checked> Send the daily summary</label>
+            <label style="display:flex;align-items:center;gap:8px;">Send at <select id="notifyHour" style="padding:6px;border:1px solid #D1D5DB;border-radius:6px;"></select> Eastern Time</label>
+            <div><div style="font-weight:600;margin-bottom:6px;">Include</div>
+              <label style="display:flex;align-items:center;gap:8px;"><input id="notifyCompleted" type="checkbox" checked> Systems that reached 100%</label>
+              <label style="display:flex;align-items:center;gap:8px;"><input id="notifyInspections" type="checkbox" checked> QA / QC inspections</label>
+              <label style="display:flex;align-items:center;gap:8px;"><input id="notifyOfficialReady" type="checkbox" checked> Units ready for final inspection</label>
+            </div>
+            <div><div style="font-weight:600;margin-bottom:6px;">Recipients <span style="font-weight:400;color:#6B7280;">(project members — all selected by default)</span></div>
+              <div id="notifyMembers" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto;border:1px solid #E5E7EB;border-radius:6px;padding:8px;">Loading…</div>
+            </div>
+            <label style="display:flex;flex-direction:column;gap:4px;">Other emails (optional, separated by commas)<input id="notifyExtraEmails" type="text" placeholder="name@example.com" style="padding:8px;border:1px solid #D1D5DB;border-radius:6px;"></label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button type="button" onclick="saveNotificationSettings()" style="padding:8px 12px;background:#1E40AF;color:white;border:0;border-radius:6px;cursor:pointer;">Save notifications</button>
+              <button type="button" onclick="notificationDigestAction('preview')" style="padding:8px 12px;border:1px solid #1E40AF;background:#EFF6FF;color:#1E40AF;border-radius:6px;cursor:pointer;">Preview</button>
+              <button type="button" onclick="notificationDigestAction('test')" style="padding:8px 12px;border:1px solid #1E40AF;background:#EFF6FF;color:#1E40AF;border-radius:6px;cursor:pointer;">Send test to me</button>
+            </div>
+            <div id="notifyStatus" style="font-size:12px;color:#6B7280;"></div>
+          </div>
+        </details>
+
         <!-- Local-only notification settings for testing -->
-        <details style="border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;">
+        <details id="localNotifySettingsPanel" style="border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;">
           <summary style="padding:12px 14px;font-size:13px;font-weight:600;cursor:pointer;background:#F9FAFB;list-style:none;">🔔 Notifications (local testing)</summary>
           <div style="padding:14px;display:flex;flex-direction:column;gap:10px;background:white;">
             <div style="font-size:12px;color:#6B7280;">These recipients are saved only in this browser. No emails are sent yet.</div>
@@ -5928,6 +5954,9 @@ Object.assign(APP_TRANSLATIONS.en, {
       document.getElementById('reportTab').style.display = tab === 'report' ? 'block' : 'none';
       document.getElementById('inspectionsTab').style.display = tab === 'inspections' ? 'block' : 'none';
       document.getElementById('quantityTab').style.display = tab === 'quantity' ? 'block' : 'none';
+      const officialTabEl = document.getElementById('officialTab');
+      if (officialTabEl) officialTabEl.style.display = tab === 'official' ? 'block' : 'none';
+      if (tab === 'official') renderOfficialMainTab();
 
       if (tab === 'punch') {
         renderPunchlist();
@@ -7881,6 +7910,87 @@ Object.assign(APP_TRANSLATIONS.en, {
       }
     }
 
+// ===== Daily email digest settings (Supabase: notification_settings) =====
+let notifySettingsCache = null;
+function notifyDefaults() { return { enabled: true, send_hour: 6, timezone: 'America/New_York', include_completed: true, include_inspections: true, include_official_ready: true, excluded_user_ids: [], extra_emails: [] }; }
+async function renderNotificationSettings() {
+  const panel = document.getElementById('notifySettingsPanel');
+  const localPanel = document.getElementById('localNotifySettingsPanel');
+  const localMode = LOCAL_PROJECT_MODE || window.location.protocol === 'file:';
+  if (panel) panel.style.display = localMode ? 'none' : '';
+  if (localPanel) localPanel.style.display = localMode ? '' : 'none';
+  if (localMode || !panel || !sbClient) return;
+  const status = document.getElementById('notifyStatus');
+  const hour = document.getElementById('notifyHour');
+  if (hour && !hour.options.length) hour.innerHTML = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${((h + 11) % 12) + 1}:00 ${h < 12 ? 'AM' : 'PM'}</option>`).join('');
+  let settings = notifyDefaults();
+  try {
+    const { data: row, error } = await sbClient.from('notification_settings').select('*').eq('project_id', PROJECT_ID).maybeSingle();
+    if (error) throw error;
+    settings = { ...settings, ...(row || {}) };
+  } catch (error) { if (status) status.textContent = `Notification settings unavailable: ${error.message || error}. Apply the notification migration in Supabase.`; }
+  notifySettingsCache = settings;
+  document.getElementById('notifyEnabled').checked = settings.enabled !== false;
+  hour.value = String(settings.send_hour ?? 6);
+  document.getElementById('notifyCompleted').checked = settings.include_completed !== false;
+  document.getElementById('notifyInspections').checked = settings.include_inspections !== false;
+  document.getElementById('notifyOfficialReady').checked = settings.include_official_ready !== false;
+  document.getElementById('notifyExtraEmails').value = (settings.extra_emails || []).join(', ');
+  const membersBox = document.getElementById('notifyMembers');
+  try {
+    const { data: { session } } = await sbClient.auth.getSession();
+    const response = await proxyFetch('/.netlify/functions/admin-users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action: 'list', projectId: PROJECT_ID }) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not load members');
+    const memberIds = new Set((result.memberships || []).map(m => String(m.user_id)));
+    const excluded = new Set((settings.excluded_user_ids || []).map(String));
+    const members = (result.users || []).filter(u => memberIds.has(String(u.id)));
+    membersBox.innerHTML = members.length ? members.map(u => `<label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" class="notify-member" value="${officialFinalEscape(u.id)}" ${excluded.has(String(u.id)) ? '' : 'checked'}> ${officialFinalEscape(u.name || u.email)} <span style="color:#6B7280;">${officialFinalEscape(u.email || '')}</span></label>`).join('') : '<span style="color:#6B7280;">No members in this project yet.</span>';
+  } catch (error) {
+    membersBox.innerHTML = `<span style="color:#6B7280;">All project members receive the summary. Only an administrator can choose individual recipients. (${officialFinalEscape(error.message || '')})</span>`;
+  }
+}
+async function saveNotificationSettings() {
+  const status = document.getElementById('notifyStatus');
+  const boxes = [...document.querySelectorAll('#notifyMembers .notify-member')];
+  const previous = notifySettingsCache || notifyDefaults();
+  const extra = String(document.getElementById('notifyExtraEmails').value || '').split(/[,;\s]+/).map(v => v.trim().toLowerCase()).filter(Boolean);
+  const invalid = extra.filter(v => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v));
+  if (invalid.length) { status.textContent = `Invalid email: ${invalid.join(', ')}`; return; }
+  const row = {
+    project_id: PROJECT_ID,
+    enabled: document.getElementById('notifyEnabled').checked,
+    send_hour: Number(document.getElementById('notifyHour').value || 6),
+    timezone: 'America/New_York',
+    include_completed: document.getElementById('notifyCompleted').checked,
+    include_inspections: document.getElementById('notifyInspections').checked,
+    include_official_ready: document.getElementById('notifyOfficialReady').checked,
+    // Members not shown here (list unavailable) keep their previous choice.
+    excluded_user_ids: boxes.length ? boxes.filter(b => !b.checked).map(b => b.value) : (previous.excluded_user_ids || []),
+    extra_emails: extra,
+    updated_at: new Date().toISOString()
+  };
+  status.textContent = 'Saving…';
+  const { error } = await sbClient.from('notification_settings').upsert(row, { onConflict: 'project_id' });
+  if (error) { status.textContent = `Could not save: ${error.message}`; return; }
+  notifySettingsCache = { ...previous, ...row };
+  status.textContent = '✅ Notifications saved.';
+}
+async function notificationDigestAction(action) {
+  const status = document.getElementById('notifyStatus');
+  status.textContent = action === 'test' ? 'Sending test email…' : 'Building preview…';
+  try {
+    const { data: { session } } = await sbClient.auth.getSession();
+    const response = await proxyFetch('/.netlify/functions/notify-digest', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action, projectId: PROJECT_ID }) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `Error ${response.status}`);
+    if (action === 'test') { status.textContent = `✅ Test sent to ${result.sentTo} (${result.items} updates).`; return; }
+    status.textContent = `Preview: ${result.items} updates · ${result.recipients} recipients.`;
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(`<title>${officialFinalEscape(result.subject)}</title>${result.html}`); win.document.close(); }
+  } catch (error) { status.textContent = `❌ ${error.message || error}`; }
+}
+
 function getLocalNotificationRecipients() {
   try { return JSON.parse(localStorage.getItem('cfg_notification_recipients') || '[]').filter(Boolean); } catch (e) { return []; }
 }
@@ -7979,6 +8089,7 @@ showAppModal('projectSetupModal');
       document.getElementById('setupProjectId').value = PROJECT_ID;
       loadSetupProjectSelector();
       renderLocalNotificationSettings();
+      renderNotificationSettings();
 
       if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
         setupList.innerHTML = '';
@@ -9240,8 +9351,13 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     let unitsSearchRenderTimer = null;
 
     function updateUnitsCounter() {
-      const filtered = data.filter(shouldShowUnit);
-    const visibleAreas = visibleSpecialAreas().length;
+      const shown = data.filter(shouldShowUnit);
+    // Underground levels and special buildings (Clubhouse, Parking) are
+    // areas, not apartments. Count them with the other areas.
+    const specialNames = new Set(((typeof remoteSetupConfig !== 'undefined' && remoteSetupConfig?.special_configs) || []).map(item => String(item?.name || '')));
+    const isArea = unit => String(unit.floor) === 'Underground' || specialNames.has(String(unit.building));
+    const filtered = shown.filter(unit => !isArea(unit));
+    const visibleAreas = visibleSpecialAreas().length + shown.filter(isArea).length;
     const total = data.length + specialAreaData.length;
     const counterLang = localStorage.getItem('cfg_language') || 'en';
     document.getElementById('unitsCounter').textContent = counterLang === 'es'
@@ -9745,7 +9861,43 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         if (unit) resolveOfficialReadyTask(unit.apt);
       });
       renderOfficialFinalTab();
+      if (document.getElementById('officialTab')?.style.display === 'block') renderOfficialMainTab();
       if (typeof toast === 'function') toast(`Official inspection requested for ${selected.length} unit${selected.length === 1 ? '' : 's'}`);
+    }
+    // Dashboard tab: Official Final overview for all units + batch requests.
+    // Each unit's record is still entered in View → Official Final.
+    function renderOfficialMainTab() {
+      const host = document.getElementById('officialTabContent');
+      if (!host) return;
+      if (officialProductionMode() && !officialRemoteReady) {
+        host.innerHTML = '<div class="insp-card" style="padding:20px;color:#64748B;">Loading official inspection data…</div>';
+        void hydrateOfficialRemote().then(() => renderOfficialMainTab()).catch(error => { host.innerHTML = `<div class="insp-card" style="padding:20px;color:#B91C1C;">Official inspections could not load: ${officialFinalEscape(error.message || error)}</div>`; });
+        return;
+      }
+      const units = (data || []).slice().sort((a, b) => String(a.building).localeCompare(String(b.building)) || String(a.floor).localeCompare(String(b.floor)) || String(a.apt).localeCompare(String(b.apt), undefined, { numeric: true }));
+      const rows = units.map(unit => { const entry = officialFinalEntry(unit); return { unit, result: entry.current?.result || (entry.draft ? 'Draft' : 'Not Scheduled'), date: entry.current?.date || '', inspector: entry.current?.inspector || '' }; });
+      const count = name => rows.filter(row => row.result === name).length;
+      const color = result => result === 'Passed' ? '#15803D' : result === 'Failed' ? '#B91C1C' : result === 'Scheduled' ? '#1D4ED8' : '#64748B';
+      const pending = getOfficialRequestStore().filter(request => String(request.status || '').toLowerCase() !== 'completed').length;
+      host.innerHTML = `
+        <section class="insp-card"><div class="insp-card-header"><h3>Official Final Inspection</h3><span style="color:#64748B;font-size:12px;">Record each result in Unit List → View → Official Final</span></div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;padding:12px 16px;">
+            ${[['Passed', count('Passed')], ['Failed', count('Failed')], ['Scheduled', count('Scheduled')], ['Not Scheduled', count('Not Scheduled') + count('Draft')], ['Open requests', pending]].map(([label, value]) => `<div style="min-width:120px;padding:10px 12px;border:1px solid #E5E7EB;border-radius:8px;"><div style="font-size:11px;color:#6B7280;">${label}</div><div style="font-size:20px;font-weight:700;color:${color(label)};">${value}</div></div>`).join('')}
+          </div>
+          <div style="overflow:auto;max-height:420px;padding:0 16px 16px;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="text-align:left;color:#6B7280;"><th style="padding:6px;">Unit</th><th style="padding:6px;">Building / Floor</th><th style="padding:6px;">Result</th><th style="padding:6px;">Date</th><th style="padding:6px;">Inspector</th><th></th></tr></thead><tbody>
+            ${rows.map(row => `<tr style="border-top:1px solid #E5E7EB;"><td style="padding:6px;font-weight:600;">${officialFinalEscape(row.unit.apt)}</td><td style="padding:6px;">${officialFinalEscape(row.unit.building)} · ${officialFinalEscape(row.unit.floor)}</td><td style="padding:6px;color:${color(row.result)};font-weight:600;">${officialFinalEscape(row.result)}</td><td style="padding:6px;">${officialFinalEscape(row.date)}</td><td style="padding:6px;">${officialFinalEscape(row.inspector)}</td><td style="padding:6px;"><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" data-official-open="${officialFinalEscape(officialFinalKey(row.unit))}">Open</button></td></tr>`).join('')}
+          </tbody></table></div>
+        </section>
+        ${renderOfficialBatchPanel()}`;
+      host.querySelectorAll('[data-official-open]').forEach(button => {
+        button.onclick = async event => {
+          const unit = (data || []).find(candidate => officialFinalKey(candidate) === button.dataset.officialOpen);
+          if (!unit) return;
+          await openDetailsModal(unit.apt, unit.building, unit.floor, event);
+          if (typeof switchDetailsTab === 'function') switchDetailsTab('official_final');
+        };
+      });
+      officialBatchRefreshFilters();
     }
     function renderOfficialBatchPanel() {
       const requests = getOfficialRequestStore().slice().reverse();
@@ -10244,7 +10396,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         if (!o.value) return;
         const na = !currentEventUnit.systems[o.value];
         o.disabled = na; o.style.opacity = na ? '0.35' : '';
-        o.textContent = na ? o.value + ' (not applicable)' : o.value;
+        const label = typeof systemDisplayName === 'function' ? systemDisplayName(o.value) : o.value;
+        o.textContent = na ? label + ' (not applicable)' : label;
       });
       document.getElementById('eventProgress').value = 0;
       document.getElementById('eventStatus').value = 'In Progress';
@@ -10876,7 +11029,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         const na = !!unit && !unit.systems[o.value];
         o.disabled = na;
         o.style.opacity = na ? '0.35' : '';
-        o.textContent = na ? o.value + ' (not applicable)' : o.value;
+        const label = typeof systemDisplayName === 'function' ? systemDisplayName(o.value) : o.value;
+        o.textContent = na ? label + ' (not applicable)' : label;
       });
       if (sel.value && sel.selectedOptions[0] && sel.selectedOptions[0].disabled) sel.value = '';
     }
@@ -13565,8 +13719,11 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         }
         return {
           name: p?.name || session.user.user_metadata?.name || session.user.email || '',
-          // A project membership overrides the global profile role for this project.
-          role: membership?.role || p?.role || '',
+          // Access is per project: the project role decides. Without one, only
+          // a global admin may enter (to manage the project); anyone else has
+          // no access. If the membership lookup itself failed, keep the
+          // previous behaviour instead of locking people out on a bad network.
+          role: membership?.role || (membershipError ? (p?.role || '') : (String(p?.role || '').trim().toLowerCase() === 'admin' ? 'admin' : '')),
           projectRole: membership?.role || ''
         };
       }
@@ -13593,6 +13750,15 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           window.userRole = 'viewer';
           window.userName = window.authSessionUser?.email || 'Signed-in user';
           window.authNoProjectAccess = true;
+          // Block the project screens: this user was not given access to it.
+          if (!document.getElementById('noProjectAccessOverlay')) {
+            const overlay = document.createElement('div');
+            overlay.id = 'noProjectAccessOverlay';
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:100050;background:#F8FAFC;display:flex;align-items:center;justify-content:center;padding:16px;';
+            overlay.innerHTML = '<div style="max-width:420px;background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:24px;text-align:center;font-family:inherit;"><h2 style="font-size:18px;margin:0 0 8px;color:#111827;">No project access</h2><p style="font-size:14px;color:#4B5563;margin:0 0 16px;">Your account does not have access to this project. Ask an administrator to add you.</p><button type="button" id="noProjectAccessSignOut" style="padding:9px 16px;border:none;background:#1E3A8A;color:#fff;border-radius:7px;cursor:pointer;font-weight:600;">Sign out</button></div>';
+            document.body.appendChild(overlay);
+            overlay.querySelector('#noProjectAccessSignOut').onclick = async () => { try { await sbClient.auth.signOut(); } catch (_) {} location.reload(); };
+          }
         }
         // Production identity comes from Supabase Auth/profile only. Keep
         // the browser name cache strictly inside the explicit local preview.
