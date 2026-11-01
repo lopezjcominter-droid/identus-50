@@ -6010,6 +6010,112 @@ Object.assign(APP_TRANSLATIONS.en, {
       catch (_) { return []; }
     }
 
+    // ===== Concurrent-safe unit/system history =====
+    // Several people can update the same unit. A save used to write this
+    // browser's whole copy of the history, silently removing events another
+    // user had added in the meantime. Every write now re-reads the row and
+    // merges three versions: what this browser last read (base), what it has
+    // now (local) and what Supabase has now (server). The update only succeeds
+    // if the row was not changed again in between (updated_at check).
+    const unitSystemBases = new Map();
+    function systemEventKey(event) {
+      return String(event?.id || `${event?.timestamp || event?.date || event?.createdAt || ''}|${event?.progress ?? ''}|${event?.by || ''}`);
+    }
+    function systemEventFingerprint(event) {
+      try { return JSON.stringify(event); } catch (_) { return systemEventKey(event); }
+    }
+    function systemEventTime(event) { return Date.parse(event?.timestamp || event?.date || event?.createdAt || 0) || 0; }
+    function rememberSystemBase(unitId, system, value, options = {}) {
+      if (!unitId || !system) return;
+      const key = `${unitId}|${system}`;
+      const previous = unitSystemBases.get(key);
+      const events = parseSystemEvents(value?.events);
+      unitSystemBases.set(key, {
+        events: new Map(events.map(event => [systemEventKey(event), systemEventFingerprint(event)])),
+        progress: options.eventsOnly && previous ? previous.progress : Number(value?.progress || 0),
+        status: options.eventsOnly && previous ? previous.status : (value?.status || 'Behind'),
+        photos: options.eventsOnly && previous ? previous.photos : Number(value?.photos || 0)
+      });
+    }
+    function rememberUnitSystemBases(units) {
+      (units || []).forEach(unit => { if (unit?.id) Object.entries(unit.systems || {}).forEach(([system, value]) => rememberSystemBase(unit.id, system, value)); });
+    }
+    function systemChangedSinceBase(unitId, system, local) {
+      const base = unitSystemBases.get(`${unitId}|${system}`);
+      if (!base) return true;
+      if (Number(local?.progress || 0) !== base.progress || (local?.status || 'Behind') !== base.status || Number(local?.photos || 0) !== base.photos) return true;
+      const events = parseSystemEvents(local?.events);
+      if (events.length !== base.events.size) return true;
+      return events.some(event => base.events.get(systemEventKey(event)) !== systemEventFingerprint(event));
+    }
+    function mergeSystemState(unitId, system, local, server, useBase = true) {
+      const base = useBase ? unitSystemBases.get(`${unitId}|${system}`) || null : null;
+      const baseEvents = base?.events || new Map();
+      const localEvents = parseSystemEvents(local?.events);
+      const serverEvents = parseSystemEvents(server?.events);
+      const localByKey = new Map(localEvents.map(event => [systemEventKey(event), event]));
+      const serverKeys = new Set(serverEvents.map(systemEventKey));
+      const merged = [];
+      serverEvents.forEach(event => {
+        const key = systemEventKey(event); const mine = localByKey.get(key);
+        if (!mine) { if (!baseEvents.has(key)) merged.push(event); return; } // removed here (undo) vs. new elsewhere
+        const editedHere = baseEvents.has(key) && baseEvents.get(key) !== systemEventFingerprint(mine);
+        merged.push(editedHere ? mine : event);
+      });
+      localEvents.forEach(event => {
+        const key = systemEventKey(event);
+        if (serverKeys.has(key) || baseEvents.has(key)) return; // already merged, or removed elsewhere
+        merged.push(event);
+      });
+      merged.sort((a, b) => systemEventTime(a) - systemEventTime(b));
+      const localProgress = Number(local?.progress || 0); const localStatus = local?.status || 'Behind';
+      const progressChangedHere = !base || !server || localProgress !== base.progress || localStatus !== base.status;
+      const progressChangedThere = !!(base && server && (Number(server.progress || 0) !== base.progress || (server.status || 'Behind') !== base.status));
+      // Both sides moved the progress: the most recent update wins.
+      const latest = merged[merged.length - 1];
+      const useLatest = progressChangedHere && progressChangedThere && latest && latest.progress != null;
+      const serverPhotos = Number(server?.photos || 0);
+      return {
+        events: merged,
+        progress: useLatest ? Number(latest.progress || 0) : progressChangedHere ? localProgress : Number(server.progress || 0),
+        status: useLatest ? (latest.status || progressToStatus(Number(latest.progress || 0))) : progressChangedHere ? localStatus : (server.status || 'Behind'),
+        photos: server ? Math.max(0, serverPhotos + (Number(local?.photos || 0) - (base ? base.photos : serverPhotos))) : Number(local?.photos || 0)
+      };
+    }
+    function systemIdAliases(system) {
+      const names = new Set([system]);
+      Object.entries(typeof SYSTEM_ALIASES === 'object' ? SYSTEM_ALIASES : {}).forEach(([alias, canonical]) => { if (canonical === system) names.add(alias); });
+      return [...names];
+    }
+    // Writes one unit/system row safely. `local` is this browser's version.
+    // useBase=false (offline outbox) never treats a missing event as removed.
+    async function writeUnitSystemMerged(unitId, system, local, options = {}) {
+      if (!unitId || !local || !sbClient) return null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const { data: rows, error } = await sbClient.from('unit_systems_status')
+          .select('id,system_id,progress,status,photos,events,updated_at')
+          .eq('unit_id', unitId).in('system_id', systemIdAliases(system)).limit(1);
+        if (error) throw error;
+        const server = rows?.[0] || null;
+        const merged = mergeSystemState(unitId, system, local, server, options.useBase !== false);
+        const payload = { progress: merged.progress, status: merged.status, photos: merged.photos, events: JSON.stringify(merged.events), updated_at: new Date().toISOString() };
+        if (!server) {
+          const { error: insertError } = await sbClient.from('unit_systems_status').insert(withUnitStatusProjectId({ unit_id: unitId, system_id: system, ...payload }));
+          if (insertError) throw insertError;
+        } else {
+          let update = sbClient.from('unit_systems_status').update(payload).eq('id', server.id);
+          update = server.updated_at ? update.eq('updated_at', server.updated_at) : update.is('updated_at', null);
+          const { data: updated, error: updateError } = await update.select('id');
+          if (updateError) throw updateError;
+          if (!updated || !updated.length) { await new Promise(resolve => setTimeout(resolve, 150 + Math.random() * 250)); continue; }
+        }
+        if (options.target) Object.assign(options.target, merged);
+        rememberSystemBase(unitId, system, merged);
+        return merged;
+      }
+      throw new Error('This unit is being updated by someone else right now. Please try again.');
+    }
+
     let data = [];
     let specialAreaData = [];
     let remoteSetupConfig = null;
@@ -6727,11 +6833,18 @@ Object.assign(APP_TRANSLATIONS.en, {
         // Preserve local quick-add events while restoring older remote history.
         const seen = new Set(remote.map(event => String(event?.id || `${event?.timestamp || event?.date || ''}|${event?.progress ?? ''}|${event?.by || ''}`)));
         const merged = [...remote];
+        // Keep only local events that were never saved. An event this browser
+        // already saw in Supabase but that is gone now was removed by someone
+        // else and must not come back.
+        const priorBase = unitSystemBases.get(`${unit.id}|${system}`);
         local.forEach(event => {
           const key = String(event?.id || `${event?.timestamp || event?.date || ''}|${event?.progress ?? ''}|${event?.by || ''}`);
-          if (!seen.has(key)) { seen.add(key); merged.push(event); }
+          if (!seen.has(key) && !priorBase?.events?.has(systemEventKey(event))) { seen.add(key); merged.push(event); }
         });
         value.events = merged.sort((a, b) => Date.parse(a?.timestamp || a?.date || a?.createdAt || 0) - Date.parse(b?.timestamp || b?.date || b?.createdAt || 0));
+        // Only what Supabase returned is "already saved"; local quick-add
+        // events stay new so a later save keeps them.
+        rememberSystemBase(unit.id, system, { events: remote }, { eventsOnly: true });
       });
       unit._eventsLoaded = true;
     }
@@ -6943,6 +7056,8 @@ Object.assign(APP_TRANSLATIONS.en, {
         window.data = data;
         lastSyncedUnitSnapshots = new Map();
         rememberSyncedUnits(data);
+        unitSystemBases.clear();
+        rememberUnitSystemBases(data);
         saveRemoteDataCache();
 
         console.log('✅ Loaded', data.length, 'units from Supabase');
@@ -7125,16 +7240,20 @@ Object.assign(APP_TRANSLATIONS.en, {
               // Do not resurrect a deleted system as a fake Behind row.
               delete unit.systems[changed.system_id];
             } else {
-              let events = changed.events || [];
-              if (typeof events === 'string') {
-                try { events = JSON.parse(events || '[]'); } catch (e) { events = []; }
-              }
+              // Large unchanged JSON columns can be left out of a Realtime
+              // UPDATE payload. Keep the history already in memory then.
+              const hasEvents = Object.prototype.hasOwnProperty.call(changed, 'events') && changed.events != null;
+              const previous = unit.systems[changed.system_id] || {};
+              const events = hasEvents ? parseSystemEvents(changed.events) : (previous.events || []);
               unit.systems[changed.system_id] = {
+                ...previous,
                 progress: changed.progress || 0,
                 status: changed.status || 'Behind',
                 photos: changed.photos || 0,
-                events: Array.isArray(events) ? events : []
+                events
               };
+              rememberSystemBase(unit.id, changed.system_id, unit.systems[changed.system_id], { eventsOnly: !hasEvents });
+              if (!hasEvents) { const base = unitSystemBases.get(`${unit.id}|${changed.system_id}`); if (base) { base.progress = Number(changed.progress || 0); base.status = changed.status || 'Behind'; base.photos = Number(changed.photos || 0); } }
             }
             renderUnits();
             updateMetrics();
@@ -7390,12 +7509,12 @@ Object.assign(APP_TRANSLATIONS.en, {
           const active = activeSystemsOf(u);
           await Promise.all(active.map(async sys => {
             const sd = u.systems[sys] || {};
-            const events = sd.events || [];
-            const payload = { progress: sd.progress || 0, status: sd.status || 'Behind', photos: sd.photos || 0, events: JSON.stringify(events) };
             const ex = existingMap.get(u.id + '|' + sys);
-            if (!ex) { toInsert.push(withUnitStatusProjectId({ unit_id: u.id, system_id: sys, ...payload })); return; }
-            const { error: upErr } = await sbClient.from('unit_systems_status').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', ex.id);
-            if (upErr) throw upErr;
+            if (!ex) { toInsert.push(withUnitStatusProjectId({ unit_id: u.id, system_id: sys, progress: sd.progress || 0, status: sd.status || 'Behind', photos: sd.photos || 0, events: JSON.stringify(sd.events || []) })); return; }
+            // Systems this browser did not change are left untouched, so a
+            // Setup or unit edit can never overwrite someone else's update.
+            if (!systemChangedSinceBase(u.id, sys, sd)) return;
+            await writeUnitSystemMerged(u.id, sys, sd, { target: sd });
           }));
           // remove rows only for systems that are no longer active on this unit
           const extra = (rowsByUnit.get(u.id) || []).filter(r => !active.includes(r.system_id)).map(r => r.id);
@@ -12847,17 +12966,17 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           if (error) throw error;
           unitId = inserted.id; u.id = unitId; u.building_id = buildingId;
         }
-        const systems = activeSystemsOf(u).map(system => {
-          const value = u.systems?.[system] || {};
-          return withUnitStatusProjectId({ unit_id: unitId, system_id: system, progress: value.progress || 0, status: value.status || 'Behind', photos: value.photos || 0, events: JSON.stringify(value.events || []), updated_at: new Date().toISOString() });
-        });
-        await Promise.all(systems.map(upsertSystemRow));
+        await Promise.all(activeSystemsOf(u).map(system => {
+          const value = u.systems?.[system] || (u.systems[system] = { progress: 0, status: 'Behind', photos: 0, events: [] });
+          if (unitSystemBases.has(`${unitId}|${system}`) && !systemChangedSinceBase(unitId, system, value)) return null;
+          return writeUnitSystemMerged(unitId, system, value, { target: value });
+        }));
         if (typeof rememberSyncedUnits === 'function') rememberSyncedUnits([u]);
         return unitId;
       };
       window.syncUnitSystemSafe = async function (u, system) {
         const sd = u.systems[system]; if (!u.id || !sd) return;
-        await upsertSystemRow(withUnitStatusProjectId({ unit_id: u.id, system_id: system, progress: sd.progress || 0, status: sd.status || 'Behind', photos: sd.photos || 0, events: JSON.stringify(sd.events || []), updated_at: new Date().toISOString() }));
+        await writeUnitSystemMerged(u.id, system, sd, { target: sd });
         if (typeof rememberSyncedUnits === 'function') rememberSyncedUnits([u]);
       };
       const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -12930,7 +13049,10 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
                   if (String(ev.images[i]).startsWith('data:')) ev.images[i] = await uploadToStorage(ev.images[i], `photos/${PROJECT_ID}/${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}.jpg`, 'image/jpeg');
                 }
               }
-              await upsertSystemRow(withUnitStatusProjectId({ unit_id: e.unit_id, system_id: e.system_id, progress: e.progress, status: e.status, photos: e.photos, events: JSON.stringify(evs), updated_at: new Date().toISOString() }));
+              // Offline edits are merged too; a missing event is never treated
+              // as deleted here because the offline copy may be older.
+              const unitInMemory = (data || []).find(x => x.id === e.unit_id);
+              await writeUnitSystemMerged(e.unit_id, e.system_id, { progress: e.progress, status: e.status, photos: e.photos, events: evs }, { useBase: false, target: unitInMemory?.systems?.[e.system_id] });
               outbox = outbox.filter(x => entryKey(x) !== entryKey(e)); done++;
             } catch (err) { console.warn('flush failed', err); break; }
           }
