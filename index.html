@@ -8161,6 +8161,9 @@ async function openProjectSetup() {
       const setupList = document.getElementById('setupBuildingsList');
       setupList.innerHTML = '<div style="padding:12px;text-align:center;color:#6B7280;font-size:13px;">⏳ Loading from Supabase...</div>';
 showAppModal('projectSetupModal');
+      // Unit drawings / floor plans come from Quantity Control data: load it if
+      // Setup is opened before the QC tab (it re-renders both lists when done).
+      try { if (!quantityUsesLocalStorage() && !quantityRemoteReady) (quantityRemoteLoading || quantityHydrateRemote()).then(() => { if (document.getElementById('setupDrawingModelsList')) renderSetupDrawingModels(); if (document.getElementById('setupFloorPlansList')) renderSetupFloorPlans(); }).catch(() => {}); } catch (_) {}
       // Keep drawing/RFI libraries visible near the top of Setup. They used to
       // sit below the full buildings list, making them appear to disappear.
       const setupBody = document.querySelector('#projectSetupModal .modal-content > div[style*="padding:20px"]');
