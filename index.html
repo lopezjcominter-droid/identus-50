@@ -3977,7 +3977,25 @@ Object.assign(APP_TRANSLATIONS.en, {
       content.innerHTML = `<div style="font-size:12px;color:#475569;margin-bottom:10px;">Add or edit the standard checklist for this model. Saving can update every assigned unit, while units with a custom checklist remain unchanged.</div><div id="quantityTemplateChecklistRows" style="display:flex;flex-direction:column;gap:8px;"></div><div style="font-size:11px;color:#64748B;margin-top:10px;">Installed marks are reset for units receiving the changed checklist; previous revisions remain in history.</div>`;
       const rows = Array.isArray(template.checklist) && template.checklist.length ? template.checklist : quantityDefaultItems();
       quantityRenderChecklistTemplateRows(rows);
+      const hasDrawing = !!(template.dataUrl || template.storagePath || Object.values(template.systemDrawings || {}).some(d => d?.dataUrl || d?.storagePath));
+      if (!hasDrawing) {
+        const systems = (typeof QUANTITY_SYSTEMS !== 'undefined' ? QUANTITY_SYSTEMS : ['Rough-In']);
+        const bar = document.createElement('div');
+        bar.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px;margin-bottom:10px;border:1px solid #BFDBFE;border-radius:8px;background:#EFF6FF;font-size:12px;';
+        bar.innerHTML = `<strong style="color:#1E3A8A;">This model has no drawing yet.</strong><select id="quantityChecklistDrawingSystem" style="padding:6px;border:1px solid #CBD5E1;border-radius:6px;">${systems.map(sys => `<option value="${officialFinalEscape(sys)}">${officialFinalEscape(sys)}</option>`).join('')}</select><label class="btn btn-primary" style="font-size:11px;padding:6px 10px;cursor:pointer;">📎 Save checklist & upload drawing<input type="file" accept="image/*,.pdf" onchange="quantityChecklistUploadDrawing(this)" style="display:none"></label><span style="color:#475569;">Uploads as the initial drawing (Rev 1), not an RFI.</span>`;
+        content.prepend(bar);
+      }
       modal.style.display = 'flex';
+    }
+    async function quantityChecklistUploadDrawing(input) {
+      const type = quantityChecklistTemplateType; const system = document.getElementById('quantityChecklistDrawingSystem')?.value || 'Rough-In';
+      if (!type || !input?.files?.[0]) return;
+      await quantitySaveChecklistTemplate();
+      if (quantityChecklistTemplateType) { input.value = ''; return; } // checklist not saved: keep the modal open
+      const typeInput = document.getElementById('setupDrawingModelType'); const systemSelect = document.getElementById('setupDrawingModelSystem');
+      if (typeInput) typeInput.value = type;
+      if (systemSelect) systemSelect.value = system;
+      saveSetupDrawingModel(input);
     }
     function quantityOpenChecklistTemplateFromInput() {
       const type = String(document.getElementById('setupDrawingModelType')?.value || '').trim().toUpperCase();
@@ -4111,7 +4129,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (hasPreviousDrawing && !confirm(`Update ${type} / ${system}? Assigned units will use the new system drawing. Unit-specific RFI drawings will remain unchanged.`)) { if (input) input.value = ''; return; }
         if (hasPreviousDrawing) quantityCaptureTemplateUpdate(type, store);
         if (hasPreviousDrawing) { store.templateHistory[type] = Array.isArray(store.templateHistory[type]) ? store.templateHistory[type] : []; store.templateHistory[type].unshift({ ...previous, archivedAt: new Date().toISOString() }); }
-        const next = { ...previous, name, type: mime, dataUrl: (mime.startsWith('image/') || mime === 'application/pdf') ? dataUrl : '', storagePath, updatedAt: new Date().toISOString(), version: (previous?.version || 0) + 1 };
+        const next = { ...previous, name, type: mime, dataUrl: (mime.startsWith('image/') || mime === 'application/pdf') ? dataUrl : '', storagePath, updatedAt: new Date().toISOString(), version: hasPreviousDrawing ? (previous?.version || 0) + 1 : 1 };
         next.systemDrawings = { ...(previous?.systemDrawings || {}), [system]: { name, type: mime, dataUrl: (mime.startsWith('image/') || mime === 'application/pdf') ? dataUrl : '', storagePath, updatedAt: next.updatedAt, version: next.version } };
         store.templates[type] = next;
         quantitySave(store); const synced = await quantityFlushRemoteSave();
@@ -4596,10 +4614,13 @@ Object.assign(APP_TRANSLATIONS.en, {
       const items = Array.isArray(state.items) ? state.items : [];
       const totalTakeoff = items.reduce((sum, item) => sum + Math.max(0, Number(item?.takeoff) || 0), 0);
       if (!items.length || totalTakeoff <= 0) return 'not-started';
+      // Nothing installed yet = Not Started; Pending only once work begins.
+      // Lines with a 0 takeoff do not block completion.
+      const installedTotal = items.reduce((sum, item, index) => sum + Math.max(0, Number(quantityInstalledCount(state, index)) || 0), 0);
+      if (installedTotal <= 0) return 'not-started';
       const complete = items.every((item, index) => {
-        const takeoff = Number(item.takeoff || 0);
-        const installed = quantityInstalledCount(state, index);
-        return takeoff > 0 && takeoff === installed;
+        const takeoff = Math.max(0, Number(item.takeoff || 0));
+        return takeoff === 0 || quantityInstalledCount(state, index) >= takeoff;
       });
       return complete ? 'completed' : 'pending';
     }
