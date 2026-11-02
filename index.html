@@ -4878,7 +4878,34 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (cacheEntry) { cacheEntry.users = Math.max(0, cacheEntry.users - 1); quantityEvictPdfCache(''); }
       }
     }
+    // Starter contours for any plan without saved ones: the floor's units laid
+    // out as two rows (even / odd numbers, like a double-loaded corridor), so
+    // every building and project is clickable and editable from the start.
+    function quantityStarterContourShapes(planKey) {
+      const [building, floor] = String(planKey || '').split('::');
+      if (!building || !floor || typeof quantityAllUnits !== 'function') return {};
+      const units = quantityAllUnits().filter(unit => !unit.isSpecialArea && !unit.specialAreaKind && String(unit.building) === building && String(unit.floor) === floor).map(unit => String(unit.apt || '')).filter(Boolean);
+      const unique = [...new Set(units)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      if (!unique.length) return {};
+      const digit = apt => { const m = apt.match(/(\d)\D*$/); return m ? Number(m[1]) : NaN; };
+      let top = unique.filter(apt => digit(apt) % 2 === 0); let bottom = unique.filter(apt => !(digit(apt) % 2 === 0));
+      if (!top.length || !bottom.length) { const half = Math.ceil(unique.length / 2); top = unique.slice(0, half); bottom = unique.slice(half); }
+      const shapes = {};
+      const row = (list, y1, y2) => { const width = 88 / Math.max(1, list.length); list.forEach((apt, i) => { const x1 = Number((6 + i * width + 0.4).toFixed(2)); const x2 = Number((6 + (i + 1) * width - 0.4).toFixed(2)); shapes[apt] = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]; }); };
+      row(top, 22, 44); row(bottom, 48, 70);
+      return shapes;
+    }
     function quantityDefaultContourShapes(planKey) {
+      // Hand-traced sheets belong only to the original project and are used
+      // only when they match the floor's real units; otherwise starter shapes.
+      const starter = quantityStarterContourShapes(planKey);
+      if (typeof DEFAULT_PROJECT_ID !== 'undefined' && String(PROJECT_ID) !== String(DEFAULT_PROJECT_ID)) return starter;
+      const traced = quantityTracedContourShapes(planKey);
+      const tracedKeys = Object.keys(traced);
+      if (!tracedKeys.length || !Object.keys(starter).some(apt => tracedKeys.includes(apt))) return Object.keys(starter).length ? starter : traced;
+      return traced;
+    }
+    function quantityTracedContourShapes(planKey) {
       if (planKey === 'Building 1::Floor 2') {
         return {
           // B1/F2 — normalized to the uploaded A021 sheet.
