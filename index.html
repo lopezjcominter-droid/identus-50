@@ -3175,19 +3175,32 @@ Object.assign(APP_TRANSLATIONS.en, {
       const templates = Object.entries(store.templates || {}).map(([unit_type, value]) => ({ project_id: projectId, unit_type, name: value.name || unit_type, mime_type: value.type || value.mime_type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), system_drawings: value.systemDrawings || {}, checklist: value.checklist || [], version: value.version || 1, updated_at: new Date().toISOString() }));
       const planRows = Object.entries(store.sitePlans || {}).map(([key, value]) => { const [building, floor] = key.split('::'); const buildingId = buildingIdsByName.get(building); return buildingId ? { project_id: projectId, building_id: buildingId, floor, name: value.name || 'Floor plan', mime_type: value.type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), version: value.version || 1, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
       const contourRows = [];
+      // Special areas (hallways…) are not rows of the units table, so their
+      // Quantity Control data and contours are saved in quantity_area_states.
+      const quantityAreaByKey = new Map(quantitySpecialAreasForSave().map(area => [`${area.building}::${area.floor}::${area.apt}`, area]));
+      const areaPayloads = new Map();
       Object.entries(store.contours || {}).forEach(([planKey, shapes]) => {
         const plan = store.sitePlans?.[planKey]; if (!plan?.id) return;
         const [building, floor] = planKey.split('::');
         Object.entries(shapes || {}).forEach(([apt, points]) => {
           const unit = (Array.isArray(data) ? data : []).find(item => String(item.apt) === String(apt) && String(item.building) === building && String(item.floor) === floor);
           const normalized = quantityNormalizeContourPoints(points);
+          if (!unit?.id && normalized.length >= 3) {
+            const area = quantityAreaByKey.get(`${building}::${floor}::${apt}`);
+            if (area) { const entry = areaPayloads.get(area.key) || { contours: {} }; entry.contours[planKey] = normalized; areaPayloads.set(area.key, entry); }
+          }
           if (!unit?.id || normalized.length < 3) return;
           contourRows.push({ project_id: projectId, floor_plan_id: plan.id, unit_id: unit.id, unit_label: String(apt), points: normalized, updated_at: new Date().toISOString() });
         });
       });
       const unitRows = []; const revisions = []; const unsavedSystems = new Set();
       Object.entries(store.units || {}).forEach(([key, unitState]) => {
-        const u = unitsByKey.get(key); if (!u?.id) return;
+        const u = unitsByKey.get(key);
+        if (!u?.id) {
+          const area = quantitySpecialAreasForSave().find(item => item.unitKey === key);
+          if (area && unitState) { const entry = areaPayloads.get(area.key) || { contours: {} }; entry.state = JSON.parse(JSON.stringify(unitState, (k, v) => (k === '_marksLoaded' || k === 'dataUrl') ? undefined : v)); entry.unitType = store.unitTypes?.[key] || ''; areaPayloads.set(area.key, entry); }
+          return;
+        }
         quantitySystemEntries(unitState).forEach(([system, state]) => {
           if (quantityIsPristineSystemState(u, system, state)) return;
           if (!quantitySystemColumns && system !== 'Rough-In') { unsavedSystems.add(system); return; }
@@ -3195,8 +3208,13 @@ Object.assign(APP_TRANSLATIONS.en, {
           (state.revisions || []).forEach(rev => revisions.push(quantityRevisionRow(projectId, u.id, system, rev)));
         });
       });
-      return { templates, planRows, unitRows, revisions, contourRows, unsavedSystems };
+      const areaRows = [...areaPayloads.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([areaKey, payload]) => ({ project_id: projectId, area_key: areaKey, payload: { state: payload.state || null, unitType: payload.unitType || '', contours: payload.contours || {} }, updated_at: new Date().toISOString() }));
+      return { templates, planRows, unitRows, revisions, contourRows, areaRows, unsavedSystems };
     }
+    function quantitySpecialAreasForSave() {
+      return (typeof quantityAllUnits === 'function' ? quantityAllUnits() : []).filter(unit => unit.isSpecialArea).map(unit => ({ ...unit, key: `${unit.building}::${unit.floor}::${unit.apt}`, unitKey: quantityUnitKey(unit) }));
+    }
+    let quantityAreaTableMissing = false;
     function quantityMarksEntry(unitId, system, state) {
       const rows = (state?.markers || []).map(marker => {
         const row = { project_id: PROJECT_ID, unit_id: unitId, item_index: Number(marker.itemIndex || 0), x: Number(marker.x || 0), y: Number(marker.y || 0) };
@@ -3368,7 +3386,7 @@ Object.assign(APP_TRANSLATIONS.en, {
             } catch (_) {}
           }
         }
-        const { templates, planRows, unitRows, revisions, contourRows, unsavedSystems } = quantityBuildRemoteRows(store);
+        const { templates, planRows, unitRows, revisions, contourRows, areaRows, unsavedSystems } = quantityBuildRemoteRows(store);
         if (unsavedSystems.size && !quantityLegacySystemWarningShown) {
           quantityLegacySystemWarningShown = true;
           quantitySuccessToast(`⚠️ ${[...unsavedSystems].join(', ')} changes are kept only on this screen until the Quantity system migration is applied in Supabase. Rough-In is saved normally.`, 9000);
@@ -3405,6 +3423,8 @@ Object.assign(APP_TRANSLATIONS.en, {
             writes.push(quantityRemoteDelete(`quantity_contours?project_id=eq.${projectId}&floor_plan_id=eq.${encodeURIComponent(floorPlanId)}&unit_id=eq.${encodeURIComponent(unitId)}`, headers));
           });
         }
+        const areaDiff = quantityChangedRows(areaRows || [], 'areas', row => row.area_key);
+        if (areaDiff.changed.length && !quantityAreaTableMissing) writes.push(quantityRemoteWrite('quantity_area_states?on_conflict=project_id,area_key', headers, areaDiff.changed).catch(error => { if (/quantity_area_states|PGRST205|42P01/.test(String(error?.message || error))) { quantityAreaTableMissing = true; quantitySuccessToast('❌ Hallway/area data needs the quantity_area_states table in Supabase.'); } throw error; }));
         const revisionDiff = quantityChangedRows(revisions, 'revisions', quantityRevisionRowKey);
         if (canManage && revisionDiff.changed.length) writes.push(quantityRemoteWrite(`quantity_revisions?on_conflict=project_id,unit_id${quantitySystemColumns ? ',system' : ''},revision_number`, headers, revisionDiff.changed));
         await Promise.all(writes);
@@ -3416,7 +3436,8 @@ Object.assign(APP_TRANSLATIONS.en, {
           plans: canManage ? planDiff.current : quantityLastPersistedRowsBySection.plans,
           units: canManage ? unitDiff.current : quantityLastPersistedRowsBySection.units,
           revisions: canManage ? revisionDiff.current : quantityLastPersistedRowsBySection.revisions,
-          contours: canManage ? contourDiff.current : quantityLastPersistedRowsBySection.contours
+          contours: canManage ? contourDiff.current : quantityLastPersistedRowsBySection.contours,
+          areas: areaDiff.current
         };
         return true;
       } catch (error) { console.error('Quantity Control Supabase save failed', error); quantitySuccessToast('❌ Quantity Control could not be saved to Supabase.'); return false; }
@@ -3481,6 +3502,26 @@ Object.assign(APP_TRANSLATIONS.en, {
             const names = Object.keys(systems);
             store.units[key] = names.length === 1 && names[0] === 'Rough-In' ? systems['Rough-In'] : { systemStates: systems };
           });
+          // Special areas (hallways…): checklist, marks, revisions and contours.
+          if (!quantityAreaTableMissing) {
+            try {
+              const areaRows = await q(`quantity_area_states?project_id=eq.${PROJECT_ID}&select=area_key,payload`);
+              const areasByKey = new Map(quantitySpecialAreasForSave().map(area => [area.key, area]));
+              (areaRows || []).forEach(row => {
+                const area = areasByKey.get(String(row.area_key)); const payload = row.payload || {};
+                if (!area) return;
+                if (payload.state) store.units[area.unitKey] = payload.state;
+                if (payload.unitType) store.unitTypes[area.unitKey] = payload.unitType;
+                Object.entries(payload.contours || {}).forEach(([planKey, points]) => {
+                  const normalized = quantityNormalizeContourPoints(points);
+                  if (normalized.length >= 3) { store.contours = store.contours || {}; (store.contours[planKey] = store.contours[planKey] || {})[String(area.apt)] = normalized; }
+                });
+              });
+            } catch (error) {
+              if (/quantity_area_states|PGRST205|42P01|404/.test(String(error?.message || error))) quantityAreaTableMissing = true;
+              console.warn('Special area Quantity data unavailable.', error);
+            }
+          }
           // Baseline = what Supabase already has (before merging local edits).
           const baseline = quantityBuildRemoteRows(store);
           const signatures = (rows, keyFn) => new Map(rows.map(row => [String(keyFn(row)), quantityRowsSignature([row])]));
@@ -3489,7 +3530,8 @@ Object.assign(APP_TRANSLATIONS.en, {
             plans: signatures(baseline.planRows, row => `${row.project_id}::${row.building_id}::${row.floor}`),
             units: signatures(baseline.unitRows, quantityUnitRowKey),
             revisions: new Map(),
-            contours: unitOnly ? (quantityLastPersistedRowsBySection.contours || new Map()) : signatures(baseline.contourRows, row => `${row.floor_plan_id}::${row.unit_id}`)
+            contours: unitOnly ? (quantityLastPersistedRowsBySection.contours || new Map()) : signatures(baseline.contourRows, row => `${row.floor_plan_id}::${row.unit_id}`),
+            areas: unitOnly ? (quantityLastPersistedRowsBySection.areas || new Map()) : signatures(baseline.areaRows || [], row => row.area_key)
           };
           quantityLastPersistedMarksByUnit = new Map();
           quantityRemoteStore = quantityMergeStores(store, quantityRemotePendingStore);
@@ -4395,7 +4437,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       setTimeout(() => toastMessage.remove(), ms || 5000);
     }
     async function quantityLoadRemoteMarks(unit, system = quantityCurrentSystem) {
-      if (quantityUsesLocalStorage() || !unit?.id || !sbClient) return false;
+      if (quantityUsesLocalStorage() || !unit?.id || !sbClient || unit.isSpecialArea) return false;
       const withSystem = fn => quantityWithSystem(system, fn);
       if (withSystem(() => quantityUnitState(unit))._marksLoaded !== false) return false;
       // Legacy schema: Supabase marks belong to Rough-In only. Other systems
@@ -4463,7 +4505,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantityLoadRevision(next, false);
     }
     async function quantityLoadRemoteRevisions(unit) {
-      if (quantityUsesLocalStorage() || !unit?.id || !sbClient) return;
+      if (quantityUsesLocalStorage() || !unit?.id || !sbClient || unit.isSpecialArea) return;
       const unitId = String(unit.id);
       if (quantityRevisionLoads.has(unitId)) return quantityRevisionLoads.get(unitId);
       const promise = (async () => {
@@ -9623,7 +9665,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     }
 
     function openQuantityFromUnit(apt, building, floor, system) {
-      const unit = data.find(item => item.apt === apt && item.building === building && item.floor === floor);
+      const unit = quantityAllUnits().find(item => String(item.apt) === String(apt) && String(item.building) === String(building) && String(item.floor) === String(floor));
       if (!unit) return;
       quantityCurrentSystem = QUANTITY_SYSTEMS.includes(system) ? system : 'Rough-In';
       closeDetailsModal();
@@ -17124,7 +17166,9 @@ function inspOpenUnitInspectionSummary(apt, typeId) {
   const records = inspGetInspections().filter(r => String(r.apt) === String(apt) && String(r.typeId) === String(typeId));
   const latest = records.sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0))[0];
   if (latest) return inspOpenInspectionRecord(latest.id);
-  const unit = (Array.isArray(window.data) ? window.data : []).find(u => String(u.apt || u.unit_number || '') === String(apt))
+  const openUnit = (typeof currentDetailsUnit !== 'undefined' && currentDetailsUnit && String(currentDetailsUnit.apt) === String(apt)) ? currentDetailsUnit : null;
+  const unit = openUnit || (Array.isArray(window.data) ? window.data : []).find(u => String(u.apt || u.unit_number || '') === String(apt))
+    || (typeof findInspectionEntity === 'function' ? findInspectionEntity(apt) : null)
     || INSP_DEMO_UNITS.find(u => String(u.apt) === String(apt)) || { apt, building: '', floor: '' };
   const type = INSP_INSPECTION_TYPES.find(t => String(t.id) === String(typeId));
   if (!type) return;
