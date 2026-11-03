@@ -5134,8 +5134,10 @@ Object.assign(APP_TRANSLATIONS.en, {
         const maxCanvasPixels = 16_000_000;
         const safeRatio = Math.sqrt(maxCanvasPixels / Math.max(1, viewport.width * viewport.height));
         const ratio = Math.max(1, Math.min(requestedRatio, safeRatio));
-        canvas.width = Math.ceil(viewport.width * ratio);
-        canvas.height = Math.ceil(viewport.height * ratio);
+        // Resizing a canvas clears it, so the visible canvas keeps showing the
+        // previous image until the new one is fully drawn (no flicker on zoom).
+        const targetWidth = Math.ceil(viewport.width * ratio);
+        const targetHeight = Math.ceil(viewport.height * ratio);
         // Keep the PDF aspect ratio in CSS. The backing canvas can be larger
         // for sharpness, but stretching it to 100% x 100% makes architectural
         // lines look soft and can misalign the drawing overlay.
@@ -5155,7 +5157,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (raster) {
           // The board can be resized between visits; re-render if the cached
           // raster no longer matches the requested backing size.
-          const close = Math.abs(raster.bitmap.width - canvas.width) / Math.max(1, canvas.width) < 0.12 && Math.abs(raster.bitmap.height - canvas.height) / Math.max(1, canvas.height) < 0.12;
+          const close = Math.abs(raster.bitmap.width - targetWidth) / Math.max(1, targetWidth) < 0.12 && Math.abs(raster.bitmap.height - targetHeight) / Math.max(1, targetHeight) < 0.12;
           if (!close) {
             quantityPdfRasterCache.delete(pdfKey); try { raster.bitmap.close(); } catch (_) {}
             quantityPdfRenderJobs.delete(canvas);
@@ -5165,9 +5167,23 @@ Object.assign(APP_TRANSLATIONS.en, {
           context.setTransform(1, 0, 0, 1, 0, 0);
           context.drawImage(raster.bitmap, 0, 0);
         } else {
-        context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        job.task = page.render({ canvasContext: context, viewport });
+        const paintSeq = (window.__quantityPaintSeq = (window.__quantityPaintSeq || 0) + 1);
+        const offscreen = document.createElement('canvas');
+        offscreen.width = targetWidth; offscreen.height = targetHeight;
+        const offscreenContext = offscreen.getContext('2d', { alpha: false });
+        offscreenContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+        job.task = page.render({ canvasContext: offscreenContext, viewport });
         await job.task.promise;
+        // A finished render is still a correct image even if a newer job was
+        // started meanwhile; paint it unless a newer render already painted.
+        if (!canvas.isConnected || (canvas.__quantityPaintedSeq || 0) > paintSeq) { offscreen.width = 0; offscreen.height = 0; return; }
+        canvas.__quantityPaintedSeq = paintSeq;
+        if (canvas.width !== targetWidth) canvas.width = targetWidth;
+        if (canvas.height !== targetHeight) canvas.height = targetHeight;
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.drawImage(offscreen, 0, 0);
+        offscreen.width = 0; offscreen.height = 0;
+        canvas.dataset.renderedQuality = String(renderQuality);
         // Drop PDF.js operator lists / decoded images kept for this page; the
         // pixels are already on the canvas.
         try { page.cleanup(); } catch (_) {}
@@ -5835,8 +5851,11 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantityPdfQualityTimer = setTimeout(() => {
         const canvas = document.querySelector('#quantityUnitContent .quantity-pdf-canvas');
         const source = canvas?.dataset?.pdf;
-        if (canvas && source) quantityRenderPdf(canvas, source, Math.max(2, quantityDrawingZoom), canvas.dataset.pdfKey || '');
-      }, 140);
+        // Re-render only when more sharpness is actually needed (quality caps at 3).
+        const needed = Math.min(3, Math.max(2, quantityDrawingZoom));
+        if (Number(canvas?.dataset?.renderedQuality || 0) >= needed - 0.05) return;
+        if (canvas && source) quantityRenderPdf(canvas, source, needed, canvas.dataset.pdfKey || '');
+      }, 260);
     }
     function quantityAdjustDrawingZoom(delta) {
       quantityDrawingZoom = Math.max(.5, Math.min(5, quantityDrawingZoom + delta));
@@ -5876,7 +5895,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         quantityDrawingZoom = Math.max(.5, Math.min(5, quantityPinch.z0 * dist(event.touches) / quantityPinch.d0));
         quantityDrawingPanX = m.x - quantityPinch.lx * quantityDrawingZoom;
         quantityDrawingPanY = m.y - quantityPinch.ly * quantityDrawingZoom;
-        quantityApplyDrawingView();
+        if (!quantityPinch.frame) quantityPinch.frame = requestAnimationFrame(() => { if (quantityPinch) quantityPinch.frame = 0; quantityApplyDrawingView(); });
       }, { passive: false, capture: true });
       const end = event => { if (quantityPinch && event.touches.length < 2) { quantityPinch = null; quantityScheduleDrawingPdfQuality(); } };
       document.addEventListener('touchend', end, { capture: true }); document.addEventListener('touchcancel', end, { capture: true });
