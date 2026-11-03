@@ -1377,7 +1377,12 @@
 .quantity-modal-header h3 { margin:0; color:#0F172A; font-size:18px; }
 .quantity-modal-header p { margin:3px 0 0; color:#64748B; font-size:12px; }
 .quantity-modal-body { display:grid; grid-template-columns:minmax(400px,1.15fr) minmax(300px,1fr); gap:16px; padding:16px; }
-.quantity-checklist td.quantity-item-desc { min-width:230px; line-height:1.4; color:#1E293B; }
+.quantity-checklist td.quantity-item-desc { min-width:170px; width:auto; line-height:1.35; color:#1E293B; }
+.quantity-checklist th:nth-child(n+3), .quantity-checklist td:nth-child(n+3) { font-size:11px; padding:6px 4px; white-space:nowrap; width:1%; }
+.quantity-checklist th:nth-child(4), .quantity-checklist td:nth-child(4), .quantity-checklist th:nth-child(5), .quantity-checklist td:nth-child(5) { text-align:center; }
+.quantity-checklist td:nth-child(3) input[type=number] { width:46px; padding:4px 5px; font-size:11px; }
+.quantity-checklist td:nth-child(6) span, .quantity-checklist td:nth-child(6) > * { font-size:10px; padding:2px 6px; }
+.quantity-checklist td:last-child button { font-size:11px; padding:4px 7px; }
 .quantity-checklist td.quantity-item-desc b { font-weight:700; color:#0F172A; }
 .quantity-checklist td.quantity-item-desc b.ckt { color:#1D4ED8; }
 .quantity-checklist { overflow:auto; border:1px solid #E2E8F0; border-radius:8px; }
