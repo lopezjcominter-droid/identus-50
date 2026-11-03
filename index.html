@@ -1376,7 +1376,10 @@
 .quantity-modal-header { position:sticky; top:0; z-index:2; padding:14px 18px; background:#EFF6FF; border-bottom:1px solid #BFDBFE; display:flex; justify-content:space-between; align-items:center; gap:12px; }
 .quantity-modal-header h3 { margin:0; color:#0F172A; font-size:18px; }
 .quantity-modal-header p { margin:3px 0 0; color:#64748B; font-size:12px; }
-.quantity-modal-body { display:grid; grid-template-columns:minmax(320px,1fr) minmax(300px,1.15fr); gap:16px; padding:16px; }
+.quantity-modal-body { display:grid; grid-template-columns:minmax(400px,1.15fr) minmax(300px,1fr); gap:16px; padding:16px; }
+.quantity-checklist td.quantity-item-desc { min-width:230px; line-height:1.4; color:#1E293B; }
+.quantity-checklist td.quantity-item-desc b { font-weight:700; color:#0F172A; }
+.quantity-checklist td.quantity-item-desc b.ckt { color:#1D4ED8; }
 .quantity-checklist { overflow:auto; border:1px solid #E2E8F0; border-radius:8px; }
 .quantity-checklist table { width:100%; border-collapse:collapse; font-size:12px; }
 .quantity-checklist th { padding:9px 8px; text-align:left; background:#F8FAFC; color:#475569; white-space:nowrap; }
@@ -4537,6 +4540,15 @@ Object.assign(APP_TRANSLATIONS.en, {
         return Math.max(0, Math.min(100, Math.round((installed / takeoff) * 100)));
       } finally { quantityCurrentSystem = previous; }
     }
+    // Bold the circuit number (CKT #5/7) and the cable size (NM-B 12/2 + G,
+    // MC 10/3, #12 AWG…) so long circuit descriptions are easy to scan.
+    function quantityFormatItemDescription(text) {
+      let html = officialFinalEscape(String(text || ''));
+      html = html.replace(/^(\s*CKT\s*#?\s*[0-9][0-9\/,&\s-]*?)(?=\s*[—–-]\s|\s*$|\s+[A-Z])/i, '<b class="ckt">$1</b>');
+      html = html.replace(/\b((?:NM-?B|MC|AC|UF|SER|SEU|THHN|THWN(?:-2)?|XHHW(?:-2)?|USE(?:-2)?|ROMEX)\s*#?\s*\d{1,2}(?:\/0)?\s*\/\s*\d(?:\s*\+\s*G(?:ND)?)?)/gi, '<b>$1</b>');
+      html = html.replace(/(#\s*\d{1,2}(?:\/0)?\s*AWG)/gi, '<b>$1</b>');
+      return html;
+    }
     function quantityApplyComputedProgress(unit) {
       if (!unit?.systems) return;
       QUANTITY_SYSTEMS.forEach(system => {
@@ -6132,7 +6144,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         const installed = installedFor(index); const remaining = Number(item.takeoff || 0) - installed;
         const status = Number(item.takeoff || 0) <= 0 ? 'NOT STARTED' : remaining === 0 ? 'COMPLETED' : 'PENDING';
         const itemNumber = String(index + 1);
-        return `<tr class="${quantityActiveItem === index ? 'active' : ''}"><td class="quantity-item-number">${itemNumber}</td><td>${officialFinalEscape(item.description || 'Item')}</td><td>${quantityIsAdmin() ? `<input type="number" min="0" value="${Number(item.takeoff || 0)}" onchange="quantitySetTakeoff(${index},this.value)">` : Number(item.takeoff || 0)}</td><td>${installed}</td><td>${remaining}</td><td><span class="insp-badge ${status === 'COMPLETED' ? 'insp-badge-pass' : status === 'PENDING' ? 'insp-badge-fail' : 'insp-badge-na'}">${status}</span></td><td><button class="quantity-select-item ${quantityActiveItem === index ? 'active' : ''}" onclick="quantitySelectItem(${index})">${quantityActiveItem === index ? 'Selected' : 'Select'}</button></td></tr>`;
+        return `<tr class="${quantityActiveItem === index ? 'active' : ''}"><td class="quantity-item-number">${itemNumber}</td><td class="quantity-item-desc">${quantityFormatItemDescription(item.description || 'Item')}</td><td>${quantityIsAdmin() ? `<input type="number" min="0" value="${Number(item.takeoff || 0)}" onchange="quantitySetTakeoff(${index},this.value)">` : Number(item.takeoff || 0)}</td><td>${installed}</td><td>${remaining}</td><td><span class="insp-badge ${status === 'COMPLETED' ? 'insp-badge-pass' : status === 'PENDING' ? 'insp-badge-fail' : 'insp-badge-na'}">${status}</span></td><td><button class="quantity-select-item ${quantityActiveItem === index ? 'active' : ''}" onclick="quantitySelectItem(${index})">${quantityActiveItem === index ? 'Selected' : 'Select'}</button></td></tr>`;
       }).join('');
       const markers = displayState.markers.map(marker => `<button class="quantity-marker" data-marker-id="${officialFinalEscape(marker.id)}" style="left:${marker.x}%;top:${marker.y}%;" title="Remove mark ${marker.itemIndex + 1}" onclick="quantityRemoveMarker('${marker.id}',event)">${marker.itemIndex + 1}</button>`).join('');
       // Do not put the complete PDF data URL into innerHTML. Architectural
