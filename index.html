@@ -3156,8 +3156,16 @@ Object.assign(APP_TRANSLATIONS.en, {
       const items = JSON.stringify(state.items || []);
       return items === '[]' || items === JSON.stringify(template?.checklist || []) || items === JSON.stringify(quantityDefaultItems());
     }
+    // current_revision is an integer column: store the revision number, never
+    // the client-side revision id (a timestamp that overflows the column).
+    function quantityCurrentRevisionNumber(state) {
+      const id = state?.lastSavedRevisionId; if (id == null) return null;
+      const rev = (state.revisions || []).find(r => String(r.id) === String(id));
+      const num = Number(rev ? rev.revisionNumber : id);
+      return Number.isInteger(num) && num >= 0 && num <= 2147483647 ? num : null;
+    }
     function quantityUnitRow(projectId, unitId, unitType, system, state) {
-      const row = { project_id: projectId, unit_id: unitId, unit_type: unitType || null, checklist: state.items || [], checklist_mode: state.checklistMode || 'template', drawing_name: state.drawing?.name || null, drawing_mime_type: state.drawing?.type || null, drawing_storage_path: state.drawing?.storagePath || state.drawing?.storage_path || (String(state.drawing?.dataUrl || '').startsWith('data:') ? null : (state.drawing?.dataUrl || null)), drawing_revision: state.drawing?.revision || 0, current_revision: state.lastSavedRevisionId || null, updated_at: new Date().toISOString() };
+      const row = { project_id: projectId, unit_id: unitId, unit_type: unitType || null, checklist: state.items || [], checklist_mode: state.checklistMode || 'template', drawing_name: state.drawing?.name || null, drawing_mime_type: state.drawing?.type || null, drawing_storage_path: state.drawing?.storagePath || state.drawing?.storage_path || (String(state.drawing?.dataUrl || '').startsWith('data:') ? null : (state.drawing?.dataUrl || null)), drawing_revision: state.drawing?.revision || 0, current_revision: quantityCurrentRevisionNumber(state), updated_at: new Date().toISOString() };
       if (quantitySystemColumns) row.system = system;
       return row;
     }
@@ -3174,7 +3182,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const projectId = PROJECT_ID;
       const unitsByKey = new Map((Array.isArray(data) ? data : []).map(unit => [quantityUnitKey(unit), unit]));
       const buildingIdsByName = new Map((Array.isArray(data) ? data : []).map(unit => [String(unit.building), unit.building_id]));
-      const templates = Object.entries(store.templates || {}).map(([unit_type, value]) => ({ project_id: projectId, unit_type, name: value.name || unit_type, mime_type: value.type || value.mime_type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), system_drawings: value.systemDrawings || {}, checklist: value.checklist || [], version: value.version || 1, updated_at: new Date().toISOString() }));
+      const templates = Object.entries(store.templates || {}).map(([unit_type, value]) => ({ project_id: projectId, unit_type, name: value.name || unit_type, mime_type: value.type || value.mime_type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), system_drawings: Object.fromEntries(Object.entries(value.systemDrawings || {}).map(([sys, d]) => [sys, d && typeof d === 'object' ? { ...d, dataUrl: String(d.dataUrl || '').startsWith('data:') || String(d.dataUrl || '').includes('token=') ? '' : (d.dataUrl || '') } : d])), checklist: value.checklist || [], version: value.version || 1, updated_at: new Date().toISOString() }));
       const planRows = Object.entries(store.sitePlans || {}).map(([key, value]) => { const [building, floor] = key.split('::'); const buildingId = buildingIdsByName.get(building); return buildingId ? { project_id: projectId, building_id: buildingId, floor, name: value.name || 'Floor plan', mime_type: value.type || null, storage_path: value.storagePath || value.storage_path || (String(value.dataUrl || '').startsWith('data:') ? null : (value.dataUrl || null)), version: value.version || 1, updated_at: new Date().toISOString() } : null; }).filter(Boolean);
       const contourRows = [];
       // Special areas (hallways…) are not rows of the units table, so their
@@ -3426,7 +3434,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           });
         }
         const areaDiff = quantityChangedRows(areaRows || [], 'areas', row => row.area_key);
-        if (areaDiff.changed.length && !quantityAreaTableMissing) writes.push(quantityRemoteWrite('quantity_area_states?on_conflict=project_id,area_key', headers, areaDiff.changed).catch(error => { if (/quantity_area_states|PGRST205|42P01/.test(String(error?.message || error))) { quantityAreaTableMissing = true; quantitySuccessToast('❌ Hallway/area data needs the quantity_area_states table in Supabase.'); } throw error; }));
+        if (areaDiff.changed.length && !quantityAreaTableMissing) writes.push(quantityRemoteWrite('quantity_area_states?on_conflict=project_id,area_key', headers, areaDiff.changed).catch(error => { if (/quantity_area_states|PGRST205|42P01/.test(String(error?.message || error))) { quantityAreaTableMissing = true; quantitySuccessToast('⚠️ Hallway/area data needs the quantity_area_states table in Supabase (run the SQL). Everything else was saved.'); return; } throw error; }));
         const revisionDiff = quantityChangedRows(revisions, 'revisions', quantityRevisionRowKey);
         if (canManage && revisionDiff.changed.length) writes.push(quantityRemoteWrite(`quantity_revisions?on_conflict=project_id,unit_id${quantitySystemColumns ? ',system' : ''},revision_number`, headers, revisionDiff.changed));
         await Promise.all(writes);
@@ -3442,7 +3450,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           areas: areaDiff.current
         };
         return true;
-      } catch (error) { console.error('Quantity Control Supabase save failed', error); quantitySuccessToast('❌ Quantity Control could not be saved to Supabase.'); return false; }
+      } catch (error) { console.error('Quantity Control Supabase save failed', error); quantitySuccessToast(`❌ Quantity Control could not be saved to Supabase: ${String(error?.message || error || 'connection error').slice(0, 220)}`); return false; }
     }
     async function quantityHydrateRemote(options = {}) {
       if (quantityUsesLocalStorage() || quantityRemoteLoading) return quantityRemoteLoading;
