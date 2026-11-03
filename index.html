@@ -5852,13 +5852,50 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantityDrawingHand = !quantityDrawingHand;
       quantityApplyDrawingView();
     }
+    // Two-finger pinch zoom / pan on touch screens (iPad). A single finger
+    // still places a mark, but only after a short wait so the first finger of
+    // a pinch never drops a mark.
+    let quantityPendingTouchMark = null; let quantityPinch = null;
+    function quantityCancelPendingTouchMark() { if (quantityPendingTouchMark) { clearTimeout(quantityPendingTouchMark.timer); quantityPendingTouchMark = null; } }
+    function quantityInstallPinchZoom() {
+      if (window.__quantityPinchInstalled) return; window.__quantityPinchInstalled = true;
+      const boardOf = target => target?.closest?.('#quantityUnitContent .quantity-drawing-board');
+      const mid = (t, rect) => ({ x: (t[0].clientX + t[1].clientX) / 2 - rect.left, y: (t[0].clientY + t[1].clientY) / 2 - rect.top });
+      const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1;
+      document.addEventListener('touchstart', event => {
+        const board = boardOf(event.target); if (!board || event.touches.length < 2) return;
+        quantityCancelPendingTouchMark(); quantityDrawingDrag = null;
+        event.preventDefault();
+        const rect = board.getBoundingClientRect(); const m = mid(event.touches, rect);
+        quantityPinch = { d0: dist(event.touches), z0: quantityDrawingZoom, lx: (m.x - quantityDrawingPanX) / quantityDrawingZoom, ly: (m.y - quantityDrawingPanY) / quantityDrawingZoom, rect };
+      }, { passive: false, capture: true });
+      document.addEventListener('touchmove', event => {
+        if (!quantityPinch || event.touches.length < 2) return;
+        event.preventDefault();
+        const m = mid(event.touches, quantityPinch.rect);
+        quantityDrawingZoom = Math.max(.5, Math.min(5, quantityPinch.z0 * dist(event.touches) / quantityPinch.d0));
+        quantityDrawingPanX = m.x - quantityPinch.lx * quantityDrawingZoom;
+        quantityDrawingPanY = m.y - quantityPinch.ly * quantityDrawingZoom;
+        quantityApplyDrawingView();
+      }, { passive: false, capture: true });
+      const end = event => { if (quantityPinch && event.touches.length < 2) { quantityPinch = null; quantityScheduleDrawingPdfQuality(); } };
+      document.addEventListener('touchend', end, { capture: true }); document.addEventListener('touchcancel', end, { capture: true });
+      ['gesturestart', 'gesturechange'].forEach(type => document.addEventListener(type, event => { if (boardOf(event.target)) event.preventDefault(); }, { passive: false }));
+    }
     function quantityDrawingPointerDown(event) {
+      quantityInstallPinchZoom();
+      if (event?.pointerType === 'touch' && (quantityPinch || quantityPendingTouchMark)) { quantityCancelPendingTouchMark(); event.preventDefault?.(); return; }
       if (!quantityDrawingHand) {
         // Mark immediately on the first touch/click. Waiting for a later
         // click event can lose the event after the checklist re-render.
         if (event?.button == null || event.button === 0) {
           event.preventDefault();
           event.stopPropagation();
+          if (event.pointerType === 'touch') {
+            const snapshot = { clientX: event.clientX, clientY: event.clientY, pageX: event.pageX, pageY: event.pageY, button: 0, pointerType: 'touch', currentTarget: event.currentTarget, target: event.target, preventDefault() {}, stopPropagation() {} };
+            quantityPendingTouchMark = { x: event.clientX, y: event.clientY, timer: setTimeout(() => { quantityPendingTouchMark = null; if (!quantityPinch) quantityPlaceMarker(snapshot); }, 220) };
+            return;
+          }
           quantityPlaceMarker(event);
         }
         return;
@@ -5868,6 +5905,12 @@ Object.assign(APP_TRANSLATIONS.en, {
       document.querySelector('#quantityUnitContent .quantity-drawing-board')?.classList.add('is-dragging');
     }
     function quantityDrawingPointerMove(event) {
+      // One finger that slides (instead of tapping) moves the plan, like the hand.
+      if (!quantityDrawingDrag && quantityPendingTouchMark && event.pointerType === 'touch' && Math.hypot(event.clientX - quantityPendingTouchMark.x, event.clientY - quantityPendingTouchMark.y) > 8) {
+        const start = quantityPendingTouchMark; quantityCancelPendingTouchMark();
+        quantityDrawingDrag = { x: start.x, y: start.y, moved: true };
+        document.querySelector('#quantityUnitContent .quantity-drawing-board')?.classList.add('is-dragging');
+      }
       if (!quantityDrawingDrag) return;
       const dx = event.clientX - quantityDrawingDrag.x; const dy = event.clientY - quantityDrawingDrag.y;
       if (Math.abs(dx) + Math.abs(dy) > 2) quantityDrawingDrag.moved = true;
