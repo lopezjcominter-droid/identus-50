@@ -4003,6 +4003,20 @@ Object.assign(APP_TRANSLATIONS.en, {
         bar.innerHTML = `<strong style="color:#1E3A8A;">No ${officialFinalEscape(tplSystem)} drawing for this model yet.</strong><select id="quantityChecklistDrawingSystem" style="padding:6px;border:1px solid #CBD5E1;border-radius:6px;">${systems.map(sys => `<option value="${officialFinalEscape(sys)}">${officialFinalEscape(sys)}</option>`).join('')}</select><label class="btn btn-primary" style="font-size:11px;padding:6px 10px;cursor:pointer;">📎 Save checklist & upload drawing<input type="file" accept="image/*,.pdf" onchange="quantityChecklistUploadDrawing(this)" style="display:none"></label>${quantityModelSystemDrawing(template, 'Rough-In') ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:6px 10px;" onclick='quantityUseRoughDrawing(${JSON.stringify(quantityChecklistTemplateType)},${JSON.stringify(tplSystem)})'>Use the same drawing as Rough-In</button>` : ''}<span style="color:#475569;">Either way it is the initial drawing (Rev 1), not an RFI.</span>`;
         content.prepend(bar);
       }
+      const sharedNow = template.systemDrawings?.[tplSystem]?.sharedFrom === 'Rough-In' && hasDrawing;
+      if (sharedNow) {
+        const sharedBar = document.createElement('div');
+        sharedBar.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 10px;margin-bottom:10px;border:1px solid #BBF7D0;border-radius:8px;background:#F0FDF4;font-size:12px;';
+        sharedBar.innerHTML = `<span style="color:#166534;">${officialFinalEscape(tplSystem)} uses the same drawing as Rough-In.</span><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 9px;" onclick='quantityUndoRoughDrawing(${JSON.stringify(quantityChecklistTemplateType)},${JSON.stringify(tplSystem)})'>Undo · stop using it</button>`;
+        content.prepend(sharedBar);
+      }
+      const ownSaved = tplSystem === 'Rough-In' || (Array.isArray(template.systemDrawings?.[tplSystem]?.checklist) && template.systemDrawings[tplSystem].checklist.length);
+      if (!ownSaved) {
+        const note = document.createElement('div');
+        note.style.cssText = 'padding:8px 10px;margin-bottom:10px;border:1px solid #FCD34D;border-radius:8px;background:#FFFBEB;color:#92400E;font-size:12px;';
+        note.innerHTML = `<strong>Not saved yet.</strong> These lines are a copy of the Rough-In checklist to get you started. Nothing is applied to ${officialFinalEscape(tplSystem)} until you press <strong>Save checklist</strong>.`;
+        content.prepend(note);
+      }
       content.prepend(systemPicker);
       modal.style.display = 'flex';
     }
@@ -4138,6 +4152,10 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     // Drawing of one system of a model. Rough-In may still live in the legacy
     // top-level fields; every other system lives in systemDrawings[system].
+    function quantityModelOwnSystemDrawing(template, system) {
+      const d = quantityModelSystemDrawing(template, system);
+      return d && d.sharedFrom === 'Rough-In' && system !== 'Rough-In' ? null : d;
+    }
     function quantityModelSystemDrawing(template, system) {
       if (!template) return null;
       const own = template.systemDrawings?.[system];
@@ -4159,7 +4177,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     function quantityApplyModelDrawing(store, type, system, file) {
       store.templates = store.templates || {}; store.templateHistory = store.templateHistory || {};
       const previous = store.templates[type];
-      const sysPrev = quantityModelSystemDrawing(previous, system);
+      const sysPrev = quantityModelOwnSystemDrawing(previous, system);
       const hasPreviousDrawing = !!sysPrev;
       if (hasPreviousDrawing) quantityCaptureTemplateUpdate(type, store);
       if (hasPreviousDrawing) { store.templateHistory[type] = Array.isArray(store.templateHistory[type]) ? store.templateHistory[type] : []; store.templateHistory[type].unshift({ ...previous, archivedAt: new Date().toISOString(), archivedSystem: system }); }
@@ -4213,7 +4231,32 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantitySave(store); const synced = await quantityFlushRemoteSave();
       if (synced === false) return;
       renderSetupDrawingModels(); quantityOpenChecklistTemplate(type, system);
-      quantitySuccessToast(`✅ ${type} / ${system} now uses the Rough-In drawing (Rev 1)`);
+      quantitySuccessToast(`✅ ${type} / ${system} now uses the Rough-In drawing (Rev 1) · use "Undo" in the checklist to revert`);
+    }
+    // Undo a reuse: the system goes back to "no drawing" and keeps its checklist.
+    function quantityUnshareRoughDrawing(store, type, system) {
+      const template = store.templates?.[type]; const d = template?.systemDrawings?.[system];
+      if (!d || d.sharedFrom !== 'Rough-In') return false;
+      template.systemDrawings = { ...template.systemDrawings };
+      template.systemDrawings[system] = Array.isArray(d.checklist) && d.checklist.length ? { checklist: d.checklist } : undefined;
+      if (!template.systemDrawings[system]) delete template.systemDrawings[system];
+      return true;
+    }
+    function quantitySystemMarksCount(type, system) {
+      return quantityModelAssignedUnits(type).reduce((sum, unit) => sum + quantityWithSystem(system, () => (quantityUnitState(unit).markers || []).length), 0);
+    }
+    async function quantityUndoRoughDrawing(types, system) {
+      if (!quantityIsAdmin()) return;
+      const list = (Array.isArray(types) ? types : [types]).filter(t => quantityStore().templates?.[t]?.systemDrawings?.[system]?.sharedFrom === 'Rough-In');
+      if (!list.length) { quantitySuccessToast('Nothing to undo.'); return; }
+      const marks = list.reduce((sum, t) => sum + quantitySystemMarksCount(t, system), 0);
+      if (!confirm(`Stop using the Rough-In drawing for ${system} in: ${list.join(', ')}?${marks ? `\n\n${marks} ${system} mark(s) already placed on units will stay saved, but there will be no drawing to show them until you upload one.` : ''}\n\nThe ${system} checklist is kept.`)) return;
+      const store = quantityStore(); list.forEach(t => quantityUnshareRoughDrawing(store, t, system));
+      quantitySave(store); const synced = await quantityFlushRemoteSave(); if (synced === false) return;
+      renderSetupDrawingModels();
+      if (quantityChecklistTemplateType && list.includes(quantityChecklistTemplateType)) quantityOpenChecklistTemplate(quantityChecklistTemplateType, system);
+      const message = document.getElementById('setupDrawingModelMessage'); if (message) { message.textContent = `↩ ${system} no longer uses the Rough-In drawing: ${list.join(', ')}`; message.style.color = '#1D4ED8'; }
+      quantitySuccessToast(`↩ Undone for ${list.length} model(s)`);
     }
     async function quantityUseRoughDrawingAll() {
       if (!quantityIsAdmin()) return;
@@ -4226,6 +4269,8 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantitySave(store); const synced = await quantityFlushRemoteSave();
       if (synced === false) return;
       renderSetupDrawingModels();
+      const message = document.getElementById('setupDrawingModelMessage');
+      if (message) { message.innerHTML = `✓ ${types.length} models use their Rough-In drawing for ${officialFinalEscape(system)}. <button type="button" class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick='quantityUndoRoughDrawing(${JSON.stringify(types)},${JSON.stringify(system)})'>Undo</button>`; message.style.color = '#15803D'; }
       quantitySuccessToast(`✅ ${types.length} models now use their Rough-In drawing for ${system}`);
     }
     function quantityReadFileAsync(file) {
@@ -4238,7 +4283,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       if (!file || !type) { if (message) { message.textContent = 'Enter a model name first.'; message.style.color = '#B91C1C'; } if (input) input.value = ''; return; }
       const store0 = quantityStore();
       const systems = quantitySelectedUploadSystems();
-      const replacing = systems.filter(sys => quantityModelSystemDrawing(store0.templates?.[type], sys));
+      const replacing = systems.filter(sys => quantityModelOwnSystemDrawing(store0.templates?.[type], sys));
       if (replacing.length && !confirm(`Replace the ${type} drawing for ${replacing.join(', ')}? This is an RFI revision. Assigned units will use the new drawing; unit-specific RFI drawings remain unchanged.`)) { if (input) input.value = ''; return; }
       quantityReadFile(file, async (dataUrl, name, mime, storagePath) => {
         const store = quantityStore();
@@ -4299,7 +4344,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       return quantityBulkResultLabelOne(type, system);
     }
     function quantityBulkResultLabelOne(type, system) {
-      const current = quantityModelSystemDrawing(quantityStore().templates?.[type], system);
+      const current = quantityModelOwnSystemDrawing(quantityStore().templates?.[type], system);
       return current ? `<span style="color:#B91C1C;">Replaces Rev ${system === 'Rough-In' ? (quantityStore().templates[type].version || 1) : (current.version || 1)} (RFI)</span>` : `<span style="color:#15803D;">${officialFinalEscape(system)} Rev 1</span>`;
     }
     function quantityBulkSetType(index, type) {
@@ -4319,7 +4364,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const types = items.map(item => item.type);
       const dup = types.find((t, i) => types.indexOf(t) !== i);
       if (dup) { if (status) { status.textContent = `${dup} is selected for two files. Choose one.`; status.style.color = '#B91C1C'; } return; }
-      const replacing = items.flatMap(item => systems.filter(sys => quantityModelSystemDrawing(quantityStore().templates?.[item.type], sys)).map(sys => `${item.type} / ${sys}`));
+      const replacing = items.flatMap(item => systems.filter(sys => quantityModelOwnSystemDrawing(quantityStore().templates?.[item.type], sys)).map(sys => `${item.type} / ${sys}`));
       if (replacing.length && !confirm(`${replacing.length} drawing(s) replace an existing one (RFI revision): ${replacing.join(', ')}. Continue?`)) return;
       if (button) button.disabled = true;
       let done = 0;
