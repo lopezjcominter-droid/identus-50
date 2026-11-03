@@ -2301,8 +2301,10 @@
             <div style="font-size:12px;color:#475569;">Create a fixed model such as C1, A1, or B1. Inspectors will see the assigned model read-only. PMs and administrators can later add a unit-specific RFI drawing.</div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <input id="setupDrawingModelType" type="text" placeholder="Model: C1" style="width:105px;padding:7px 9px;border:1px solid #BFDBFE;border-radius:6px;text-transform:uppercase;">
-              <select id="setupDrawingModelSystem" style="padding:7px;border:1px solid #BFDBFE;border-radius:6px;min-width:125px;" aria-label="System for this drawing"><option value="Rough-In">Rough-In</option><option value="Trim-Out">Trim-Out</option><option value="Fire Alarm">Fire Alarm</option><option value="Data">Data</option><option value="Wiring">Wiring</option></select>
+              <select id="setupDrawingModelSystem" onchange="quantityRenderExtraSystems()" style="padding:7px;border:1px solid #BFDBFE;border-radius:6px;min-width:125px;" aria-label="System for this drawing"><option value="Rough-In">Rough-In</option><option value="Trim-Out">Trim-Out</option><option value="Fire Alarm">Fire Alarm</option><option value="Data">Data</option><option value="Wiring">Wiring</option></select>
+              <span id="setupDrawingExtraSystems" style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;color:#475569;"></span>
               <label class="btn btn-secondary" style="font-size:11px;padding:6px 9px;cursor:pointer;">📎 Upload model<input id="setupDrawingModelInput" type="file" accept="image/*,.pdf" onchange="saveSetupDrawingModel(this)" style="display:none"></label>
+              <label class="btn btn-secondary" style="font-size:11px;padding:6px 9px;cursor:pointer;" title="Select every drawing of the chosen system at once; models are matched by file name">📎 Upload several<input id="setupDrawingBulkInput" type="file" multiple accept="image/*,.pdf" onchange="quantityBulkUploadPick(this)" style="display:none"></label>
               <button type="button" class="btn btn-secondary" style="font-size:11px;padding:6px 9px;" onclick="quantityOpenChecklistTemplateFromInput()">Checklist</button>
               <span id="setupDrawingModelMessage" style="font-size:11px;color:#15803D;"></span>
             </div>
@@ -3611,7 +3613,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       // model was migrated to system drawings, so keep that compatible.
       const legacyDrawing = normalizeDrawing(template);
       if (hasSystemDrawings && !drawing && system !== 'Rough-In') return null;
-      const result = drawing ? { ...template, ...legacyDrawing, ...drawing, checklist: template.checklist || [] } : { ...template, ...legacyDrawing };
+      const result = drawing ? { ...template, ...legacyDrawing, ...drawing, checklist: (system !== 'Rough-In' && Array.isArray(drawing.checklist) && drawing.checklist.length) ? drawing.checklist : (template.checklist || []) } : { ...template, ...legacyDrawing };
       result.dataUrl = quantityResolveDrawingUrl(result.dataUrl, result.storagePath);
       return result;
     }
@@ -3778,6 +3780,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       buildingSelect.innerHTML = buildings.map(building => `<option value="${officialFinalEscape(building)}">${officialFinalEscape(building)}</option>`).join('');
       if (buildings.includes(previousBuilding)) buildingSelect.value = previousBuilding;
       renderSetupDrawingModelFloors();
+      quantityRenderExtraSystems();
       list.innerHTML = types.length ? types.map(type => {
         const model = templates[type];
         const assignedUnits = quantityModelAssignedUnits(type);
@@ -3790,7 +3793,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         const historyCount = Array.isArray(store.templateHistory?.[type]) ? store.templateHistory[type].length : 0;
         const updateHistoryCount = Array.isArray(store.templateUpdateHistory?.[type]) ? store.templateUpdateHistory[type].length : 0;
         const undoButton = updateHistoryCount ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityUndoTemplateUpdate(${JSON.stringify(type)})'>Undo</button>` : '';
-        return `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(460px,44%);align-items:center;gap:14px;padding:9px 11px;border:1px solid #E2E8F0;border-radius:7px;background:#F8FAFC;font-size:12px;"><div style="display:grid;grid-template-columns:72px minmax(0,1fr) 145px 100px 58px;align-items:center;gap:8px;min-width:0;line-height:1.3;"><strong style="color:#1E3A8A;min-width:0;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(type)}</strong><span style="min-width:0;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(model.name || 'Drawing')}</span><span style="min-width:0;color:#64748B;white-space:normal;overflow-wrap:anywhere;">Rev ${model.version || 1} · ${assigned} assigned${historyCount ? ` · ${historyCount} previous` : ''}</span>${scope ? `<span style="display:block;min-width:0;max-width:100px;font-size:10px;color:#64748B;line-height:1.25;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(scope)}${assignedUnits.length > 3 ? '…' : ''}</span>` : '<span></span>'}<span style="color:#15803D;font-weight:600;white-space:normal;overflow-wrap:anywhere;">Active</span></div><div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;min-width:0;"><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenModelAssignments(${JSON.stringify(type)})'>Assigned units</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityPreviewDrawing(${JSON.stringify(type)},quantityStore().templates[${JSON.stringify(type)}])'>View</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityCopyTemplate(${JSON.stringify(type)})'>Copy</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenTemplateRfi(${JSON.stringify(type)})'>RFI / Update</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenChecklistTemplate(${JSON.stringify(type)})'>Checklist / RFI</button>${undoButton}<button type="button" class="btn btn-danger" style="font-size:11px;padding:4px 8px;" onclick='quantityDeleteTemplate(${JSON.stringify(type)})'>Remove</button></div></div>`;
+        return `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(460px,44%);align-items:center;gap:14px;padding:9px 11px;border:1px solid #E2E8F0;border-radius:7px;background:#F8FAFC;font-size:12px;"><div style="display:grid;grid-template-columns:72px minmax(0,1fr) 145px 100px 58px;align-items:center;gap:8px;min-width:0;line-height:1.3;"><strong style="color:#1E3A8A;min-width:0;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(type)}</strong><span style="min-width:0;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(model.name || 'Drawing')}</span><span style="min-width:0;color:#64748B;white-space:normal;overflow-wrap:anywhere;">Rev ${model.version || 1} · ${assigned} assigned${historyCount ? ` · ${historyCount} previous` : ''}</span>${scope ? `<span style="display:block;min-width:0;max-width:100px;font-size:10px;color:#64748B;line-height:1.25;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(scope)}${assignedUnits.length > 3 ? '…' : ''}</span>` : '<span></span>'}<span style="color:#15803D;font-weight:600;white-space:normal;overflow-wrap:anywhere;">Active</span><div style="grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px;">${quantitySetupSystems().map(sys => { const d = quantityModelSystemDrawing(model, sys); const rev = d ? (sys === 'Rough-In' ? (model.version || 1) : (d.version || 1)) : 0; return `<button type="button" onclick='quantityOpenChecklistTemplate(${JSON.stringify(type)},${JSON.stringify(sys)})' title="Open the ${officialFinalEscape(sys)} checklist" style="font-size:10px;padding:2px 7px;border-radius:999px;cursor:pointer;border:1px solid ${d ? '#86EFAC' : '#E2E8F0'};background:${d ? '#F0FDF4' : '#fff'};color:${d ? '#166534' : '#94A3B8'};">${officialFinalEscape(sys)} ${d ? `Rev ${rev} ✓` : '—'}</button>`; }).join('')}</div></div><div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;min-width:0;"><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenModelAssignments(${JSON.stringify(type)})'>Assigned units</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityPreviewDrawing(${JSON.stringify(type)},quantityStore().templates[${JSON.stringify(type)}])'>View</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityCopyTemplate(${JSON.stringify(type)})'>Copy</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenTemplateRfi(${JSON.stringify(type)})'>RFI / Update</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenChecklistTemplate(${JSON.stringify(type)})'>Checklist / RFI</button>${undoButton}<button type="button" class="btn btn-danger" style="font-size:11px;padding:4px 8px;" onclick='quantityDeleteTemplate(${JSON.stringify(type)})'>Remove</button></div></div>`;
       }).join('') : '<div style="font-size:12px;color:#94A3B8;padding:6px 0;">No drawing models saved yet.</div>';
     }
     function quantityOpenTemplateRfi(type) {
@@ -3958,9 +3961,11 @@ Object.assign(APP_TRANSLATIONS.en, {
       const saved = store.templates?.[String(type || '').toUpperCase()]?.checklist;
       return Array.isArray(saved) && saved.length ? quantityClone(saved) : quantityDefaultItems();
     }
-    function quantityOpenChecklistTemplate(type) {
+    let quantityChecklistTemplateSystem = 'Rough-In';
+    function quantityOpenChecklistTemplate(type, system) {
       if (!quantityIsAdmin()) return;
       quantityChecklistTemplateType = String(type || '').trim().toUpperCase();
+      quantityChecklistTemplateSystem = QUANTITY_SYSTEMS.includes(system) ? system : 'Rough-In';
       quantityChecklistTemplateMode = 'template';
       if (!quantityChecklistTemplateType) { quantitySuccessToast('Enter a model name first.'); return; }
       const store = quantityStore(); store.templates = store.templates || {};
@@ -3972,23 +3977,28 @@ Object.assign(APP_TRANSLATIONS.en, {
       const modal = document.getElementById('quantityChecklistTemplateModal');
       const content = document.getElementById('quantityChecklistTemplateContent');
       if (!modal || !content) return;
-      document.getElementById('quantityChecklistTemplateTitle').textContent = `${quantityChecklistTemplateType} Takeoff Checklist`;
+      const tplSystem = quantityChecklistTemplateSystem;
+      document.getElementById('quantityChecklistTemplateTitle').textContent = `${quantityChecklistTemplateType} · ${tplSystem} Takeoff Checklist`;
       document.getElementById('quantityChecklistTemplateSubtitle').textContent = 'These standard lines and quantities will be used by assigned units.';
       content.innerHTML = `<div style="font-size:12px;color:#475569;margin-bottom:10px;">Add or edit the standard checklist for this model. Saving can update every assigned unit, while units with a custom checklist remain unchanged.</div><div id="quantityTemplateChecklistRows" style="display:flex;flex-direction:column;gap:8px;"></div><div style="font-size:11px;color:#64748B;margin-top:10px;">Installed marks are reset for units receiving the changed checklist; previous revisions remain in history.</div>`;
-      const rows = Array.isArray(template.checklist) && template.checklist.length ? template.checklist : quantityDefaultItems();
+      const rows = quantityModelSystemChecklist(template, tplSystem);
       quantityRenderChecklistTemplateRows(rows);
-      const hasDrawing = !!(template.dataUrl || template.storagePath || Object.values(template.systemDrawings || {}).some(d => d?.dataUrl || d?.storagePath));
+      const systemPicker = document.createElement('div');
+      systemPicker.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;';
+      systemPicker.innerHTML = quantitySetupSystems().map(sys => { const on = sys === tplSystem; const has = !!quantityModelSystemDrawing(template, sys); return `<button type="button" class="btn ${on ? 'btn-primary' : 'btn-secondary'}" style="font-size:11px;padding:4px 9px;" onclick='quantityOpenChecklistTemplate(${JSON.stringify(quantityChecklistTemplateType)},${JSON.stringify(sys)})'>${officialFinalEscape(sys)} ${has ? '✓' : '—'}</button>`; }).join('');
+      const hasDrawing = !!quantityModelSystemDrawing(template, tplSystem);
       if (!hasDrawing) {
-        const systems = (typeof QUANTITY_SYSTEMS !== 'undefined' ? QUANTITY_SYSTEMS : ['Rough-In']);
+        const systems = [tplSystem];
         const bar = document.createElement('div');
         bar.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px;margin-bottom:10px;border:1px solid #BFDBFE;border-radius:8px;background:#EFF6FF;font-size:12px;';
-        bar.innerHTML = `<strong style="color:#1E3A8A;">This model has no drawing yet.</strong><select id="quantityChecklistDrawingSystem" style="padding:6px;border:1px solid #CBD5E1;border-radius:6px;">${systems.map(sys => `<option value="${officialFinalEscape(sys)}">${officialFinalEscape(sys)}</option>`).join('')}</select><label class="btn btn-primary" style="font-size:11px;padding:6px 10px;cursor:pointer;">📎 Save checklist & upload drawing<input type="file" accept="image/*,.pdf" onchange="quantityChecklistUploadDrawing(this)" style="display:none"></label><span style="color:#475569;">Uploads as the initial drawing (Rev 1), not an RFI.</span>`;
+        bar.innerHTML = `<strong style="color:#1E3A8A;">No ${officialFinalEscape(tplSystem)} drawing for this model yet.</strong><select id="quantityChecklistDrawingSystem" style="padding:6px;border:1px solid #CBD5E1;border-radius:6px;">${systems.map(sys => `<option value="${officialFinalEscape(sys)}">${officialFinalEscape(sys)}</option>`).join('')}</select><label class="btn btn-primary" style="font-size:11px;padding:6px 10px;cursor:pointer;">📎 Save checklist & upload drawing<input type="file" accept="image/*,.pdf" onchange="quantityChecklistUploadDrawing(this)" style="display:none"></label><span style="color:#475569;">Uploads as the initial drawing (Rev 1), not an RFI.</span>`;
         content.prepend(bar);
       }
+      content.prepend(systemPicker);
       modal.style.display = 'flex';
     }
     async function quantityChecklistUploadDrawing(input) {
-      const type = quantityChecklistTemplateType; const system = document.getElementById('quantityChecklistDrawingSystem')?.value || 'Rough-In';
+      const type = quantityChecklistTemplateType; const system = document.getElementById('quantityChecklistDrawingSystem')?.value || quantityChecklistTemplateSystem || 'Rough-In';
       if (!type || !input?.files?.[0]) return;
       await quantitySaveChecklistTemplate();
       if (quantityChecklistTemplateType) { input.value = ''; return; } // checklist not saved: keep the modal open
@@ -3999,7 +4009,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     function quantityOpenChecklistTemplateFromInput() {
       const type = String(document.getElementById('setupDrawingModelType')?.value || '').trim().toUpperCase();
-      quantityOpenChecklistTemplate(type);
+      quantityOpenChecklistTemplate(type, document.getElementById('setupDrawingModelSystem')?.value || 'Rough-In');
     }
     function quantityOpenUnitChecklist() {
       if (!quantityIsAdmin() || !quantityCurrentUnit) return;
@@ -4090,56 +4100,202 @@ Object.assign(APP_TRANSLATIONS.en, {
       const assigned = (Array.isArray(data) ? data : []).filter(unit => quantityUnitType(unit) === quantityChecklistTemplateType && !(store.units?.[quantityUnitKey(unit)]?.checklistMode === 'custom'));
       if (assigned.length && !confirm(`Apply this checklist to ${assigned.length} assigned unit${assigned.length === 1 ? '' : 's'}? Custom unit checklists will remain unchanged.`)) return;
       quantityCaptureTemplateUpdate(quantityChecklistTemplateType, store);
-      template.checklist = quantityClone(checklist); template.checklistUpdatedAt = new Date().toISOString();
+      const tplSystem = quantityChecklistTemplateSystem || 'Rough-In';
+      if (tplSystem === 'Rough-In') { template.checklist = quantityClone(checklist); }
+      else { template.systemDrawings = { ...(template.systemDrawings || {}) }; template.systemDrawings[tplSystem] = { ...(template.systemDrawings[tplSystem] || {}), checklist: quantityClone(checklist) }; }
+      template.checklistUpdatedAt = new Date().toISOString();
       store.templates[quantityChecklistTemplateType] = template;
       store.units = store.units || {};
-      assigned.forEach(unit => {
+      assigned.forEach(unit => quantityWithSystem(tplSystem, () => {
         const state = quantityUnitState(unit);
         const revisionNumbers = state.revisions.map(revision => Number(revision.revisionNumber)).filter(Number.isFinite);
         const nextRevisionNumber = revisionNumbers.length ? Math.max(...revisionNumbers) + 1 : 0;
-        if (state.items?.length && (state.items.some(item => Number(item.takeoff || 0) > 0) || state.markers?.length || state.drawing)) {
+        const hadWork = tplSystem === 'Rough-In' ? (state.items?.length && (state.items.some(item => Number(item.takeoff || 0) > 0) || state.markers?.length || state.drawing)) : (state.markers?.length || state.revisions?.length);
+        if (hadWork) {
           state.revisions.unshift(quantityRevisionSnapshot(state, 'Previous revision before model update', nextRevisionNumber));
         }
-        const systemDrawing = template.systemDrawings?.[quantityCurrentSystem] || template;
+        const systemDrawing = quantityModelSystemDrawing(template, tplSystem);
         state.items = quantityClone(checklist); state.markers = []; state.installedCounts = {}; state._marksLoaded = true;
-        state.drawing = systemDrawing ? { ...quantityClone(systemDrawing), source: 'template', revision: template.version || 1 } : state.drawing;
+        if (systemDrawing) { const copy = quantityClone(systemDrawing); delete copy.checklist; delete copy.systemDrawings; state.drawing = { ...copy, source: 'template', revision: tplSystem === 'Rough-In' ? (template.version || 1) : (systemDrawing.version || 1) }; }
         state.checklistMode = 'template';
         quantityAddHistory(state, 'Checklist model updated', `${quantityChecklistTemplateType} standard checklist applied; installed marks reset`);
         const updatedRevision = quantityRevisionSnapshot(state, 'New model revision', nextRevisionNumber + 1);
         state.revisions.unshift(updatedRevision); state.lastSavedRevisionId = updatedRevision.id;
-        store.units[quantityUnitKey(unit)] = state;
-      });
+        quantityStoreUnitState(store, unit, state);
+      }));
       quantitySave(store); const saved = await quantityFlushRemoteSave(); if (!saved) return; quantityCloseChecklistTemplate(); renderSetupDrawingModels();
       if (quantityCurrentUnit && quantityUnitType(quantityCurrentUnit) === quantityChecklistTemplateType) quantityRenderUnit();
-      quantitySuccessToast(`✅ ${quantityChecklistTemplateType} checklist saved${assigned.length ? ` · applied to ${assigned.length} units` : ''}`);
+      quantitySuccessToast(`✅ ${quantityChecklistTemplateType} / ${tplSystem} checklist saved${assigned.length ? ` · applied to ${assigned.length} units` : ''}`);
+    }
+    // Drawing of one system of a model. Rough-In may still live in the legacy
+    // top-level fields; every other system lives in systemDrawings[system].
+    function quantityModelSystemDrawing(template, system) {
+      if (!template) return null;
+      const own = template.systemDrawings?.[system];
+      if (own && (own.dataUrl || own.storagePath || own.storage_path)) return own;
+      if (system === 'Rough-In' && (template.dataUrl || template.storagePath || template.storage_path)) return template;
+      return null;
+    }
+    function quantityModelSystemChecklist(template, system) {
+      if (!template) return quantityDefaultItems();
+      if (system !== 'Rough-In') { const own = template.systemDrawings?.[system]?.checklist; if (Array.isArray(own) && own.length) return own; }
+      return Array.isArray(template.checklist) && template.checklist.length ? template.checklist : quantityDefaultItems();
+    }
+    function quantitySetupSystems() {
+      return Array.from(document.querySelectorAll('#setupDrawingModelSystem option')).map(o => o.value).filter(Boolean).concat(QUANTITY_SYSTEMS).filter((v, i, a) => a.indexOf(v) === i);
+    }
+    // Stores one uploaded file as the drawing of type/system. The first drawing
+    // of a system is Rev 1 (not an RFI); only replacing that same system's
+    // drawing is a revision. Assignments and other systems are untouched.
+    function quantityApplyModelDrawing(store, type, system, file) {
+      store.templates = store.templates || {}; store.templateHistory = store.templateHistory || {};
+      const previous = store.templates[type];
+      const sysPrev = quantityModelSystemDrawing(previous, system);
+      const hasPreviousDrawing = !!sysPrev;
+      if (hasPreviousDrawing) quantityCaptureTemplateUpdate(type, store);
+      if (hasPreviousDrawing) { store.templateHistory[type] = Array.isArray(store.templateHistory[type]) ? store.templateHistory[type] : []; store.templateHistory[type].unshift({ ...previous, archivedAt: new Date().toISOString(), archivedSystem: system }); }
+      const now = new Date().toISOString();
+      const keepData = (file.mime.startsWith('image/') || file.mime === 'application/pdf') ? file.dataUrl : '';
+      const base = previous || { name: type, type: '', dataUrl: '', storagePath: '', checklist: quantityDefaultItems(), version: 1 };
+      let next; let version;
+      if (system === 'Rough-In') {
+        version = hasPreviousDrawing ? (previous?.version || 0) + 1 : 1;
+        next = { ...base, name: file.name, type: file.mime, dataUrl: keepData, storagePath: file.storagePath, updatedAt: now, version };
+      } else {
+        version = hasPreviousDrawing ? (Number(sysPrev.version) || 1) + 1 : 1;
+        next = { ...base, updatedAt: now };
+      }
+      const priorSystem = previous?.systemDrawings?.[system] || {};
+      const drawing = { name: file.name, type: file.mime, dataUrl: keepData, storagePath: file.storagePath, updatedAt: now, version };
+      if (system !== 'Rough-In') drawing.checklist = quantityClone(Array.isArray(priorSystem.checklist) && priorSystem.checklist.length ? priorSystem.checklist : quantityModelSystemChecklist(previous, 'Rough-In'));
+      next.systemDrawings = { ...(previous?.systemDrawings || {}), [system]: drawing };
+      store.templates[type] = next;
+      return { hasPreviousDrawing, version };
+    }
+    // One drawing sheet can cover several systems (e.g. Fire Alarm + Data +
+    // Wiring). The file is uploaded once and stored for each checked system;
+    // checklists, marks and revisions stay separate per system.
+    function quantityRenderExtraSystems() {
+      const host = document.getElementById('setupDrawingExtraSystems'); if (!host) return;
+      const primary = document.getElementById('setupDrawingModelSystem')?.value || 'Rough-In';
+      const checked = new Set(Array.from(host.querySelectorAll('input:checked')).map(i => i.value));
+      host.innerHTML = '<span>Same drawing also for:</span>' + quantitySetupSystems().filter(sys => sys !== primary).map(sys => `<label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;"><input type="checkbox" value="${officialFinalEscape(sys)}" ${checked.has(sys) ? 'checked' : ''}>${officialFinalEscape(sys)}</label>`).join('');
+    }
+    function quantitySelectedUploadSystems() {
+      const primary = document.getElementById('setupDrawingModelSystem')?.value || 'Rough-In';
+      const extras = Array.from(document.querySelectorAll('#setupDrawingExtraSystems input:checked')).map(i => i.value).filter(v => v && v !== primary);
+      return [primary, ...extras];
+    }
+    function quantityReadFileAsync(file) {
+      return new Promise(resolve => quantityReadFile(file, (dataUrl, name, mime, storagePath) => resolve({ dataUrl, name, mime, storagePath })));
     }
     function saveSetupDrawingModel(input) {
       if (!quantityIsAdmin()) return;
       const file = input?.files?.[0]; const typeInput = document.getElementById('setupDrawingModelType');
       const system = String(document.getElementById('setupDrawingModelSystem')?.value || 'Rough-In'); const type = String(typeInput?.value || '').trim().toUpperCase(); const message = document.getElementById('setupDrawingModelMessage');
       if (!file || !type) { if (message) { message.textContent = 'Enter a model name first.'; message.style.color = '#B91C1C'; } if (input) input.value = ''; return; }
+      const store0 = quantityStore();
+      const systems = quantitySelectedUploadSystems();
+      const replacing = systems.filter(sys => quantityModelSystemDrawing(store0.templates?.[type], sys));
+      if (replacing.length && !confirm(`Replace the ${type} drawing for ${replacing.join(', ')}? This is an RFI revision. Assigned units will use the new drawing; unit-specific RFI drawings remain unchanged.`)) { if (input) input.value = ''; return; }
       quantityReadFile(file, async (dataUrl, name, mime, storagePath) => {
-        const store = quantityStore(); store.templates = store.templates || {}; store.templateHistory = store.templateHistory || {};
-        const previous = store.templates[type];
-        const previousSystemDrawings = previous?.systemDrawings && typeof previous.systemDrawings === 'object' ? Object.values(previous.systemDrawings) : [];
-        const hasPreviousDrawing = !!(previous?.dataUrl || previous?.storagePath || previousSystemDrawings.some(drawing => drawing?.dataUrl || drawing?.storagePath));
-        // A copied model intentionally starts with its checklist but no drawing.
-        // Its first upload is the initial drawing, not an RFI revision. Only a
-        // replacement of an actual drawing creates history and updates units.
-        if (hasPreviousDrawing && !confirm(`Update ${type} / ${system}? Assigned units will use the new system drawing. Unit-specific RFI drawings will remain unchanged.`)) { if (input) input.value = ''; return; }
-        if (hasPreviousDrawing) quantityCaptureTemplateUpdate(type, store);
-        if (hasPreviousDrawing) { store.templateHistory[type] = Array.isArray(store.templateHistory[type]) ? store.templateHistory[type] : []; store.templateHistory[type].unshift({ ...previous, archivedAt: new Date().toISOString() }); }
-        const next = { ...previous, name, type: mime, dataUrl: (mime.startsWith('image/') || mime === 'application/pdf') ? dataUrl : '', storagePath, updatedAt: new Date().toISOString(), version: hasPreviousDrawing ? (previous?.version || 0) + 1 : 1 };
-        next.systemDrawings = { ...(previous?.systemDrawings || {}), [system]: { name, type: mime, dataUrl: (mime.startsWith('image/') || mime === 'application/pdf') ? dataUrl : '', storagePath, updatedAt: next.updatedAt, version: next.version } };
-        store.templates[type] = next;
+        const store = quantityStore();
+        const results = systems.map(sys => ({ sys, ...quantityApplyModelDrawing(store, type, sys, { dataUrl, name, mime, storagePath }) }));
+        const { hasPreviousDrawing, version } = results[0];
         quantitySave(store); const synced = await quantityFlushRemoteSave();
         if (synced === false) { if (message) { message.textContent = 'Could not save to Supabase'; message.style.color = '#B91C1C'; } return; }
         if (typeInput) typeInput.value = ''; if (input) input.value = ''; renderSetupDrawingModels();
-        setTimeout(() => quantityOpenChecklistTemplate(type), 40);
+        setTimeout(() => quantityOpenChecklistTemplate(type, system), 40);
         const saveLabel = hasPreviousDrawing ? 'RFI revision' : 'Initial drawing';
-        if (message) { message.textContent = `✓ ${type} / ${system} ${saveLabel.toLowerCase()} saved successfully · Rev ${store.templates[type].version}`; message.style.color = '#15803D'; }
-        if (typeof toast === 'function') toast(`${type} / ${system} ${saveLabel} saved successfully`);
+        const summary = results.map(r => `${r.sys} Rev ${r.version}`).join(' · ');
+        if (message) { message.textContent = `✓ ${type} saved · ${summary}`; message.style.color = '#15803D'; }
+        if (typeof toast === 'function') toast(`${type} ${saveLabel} saved · ${summary}`);
       });
+    }
+    // ---- Bulk upload: many drawings of one system, matched to models by file name.
+    function quantityMatchModelForFile(fileName, types) {
+      const up = String(fileName || '').toUpperCase().replace(/\.[A-Z0-9]+$/, '');
+      const tok = up.replace(/[^A-Z0-9]+/g, '-');
+      const has = word => new RegExp(`(^|-)${word}(-|$)`).test(tok);
+      const flags = { ADA: has('ADA'), HIU: has('HIU') || /HEARING|VISUAL/.test(up) };
+      const scored = types.map(type => {
+        const parts = String(type).toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+        const baseOk = parts.length && has(parts[0]);
+        if (!baseOk) return null;
+        const suffix = parts.slice(1);
+        const needAda = suffix.includes('ADA'); const needHiu = suffix.includes('HIU');
+        const others = suffix.filter(x => x !== 'ADA' && x !== 'HIU');
+        if (needAda !== flags.ADA || needHiu !== flags.HIU) return null;
+        if (!others.every(has)) return null;
+        return { type, score: parts.length };
+      }).filter(Boolean).sort((a, b) => b.score - a.score);
+      return scored.length === 1 || (scored.length > 1 && scored[0].score > scored[1].score) ? scored[0].type : '';
+    }
+    let quantityBulkFiles = [];
+    function quantityBulkUploadPick(input) {
+      if (!quantityIsAdmin()) return;
+      const files = Array.from(input?.files || []); if (input) input.value = '';
+      if (!files.length) return;
+      const systems = quantitySelectedUploadSystems(); const system = systems[0];
+      const store = quantityStore(); const types = Object.keys(store.templates || {}).sort();
+      quantityBulkFiles = files.map(file => ({ file, type: quantityMatchModelForFile(file.name, types) }));
+      let modal = document.getElementById('quantityBulkUploadModal');
+      if (!modal) { modal = document.createElement('div'); modal.id = 'quantityBulkUploadModal'; modal.style.cssText = 'position:fixed;inset:0;z-index:10060;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:16px;'; document.body.appendChild(modal); }
+      modal.dataset.system = system; modal.dataset.systems = JSON.stringify(systems);
+      const options = type => `<option value="">— skip —</option>` + types.map(t => `<option value="${officialFinalEscape(t)}" ${t === type ? 'selected' : ''}>${officialFinalEscape(t)}</option>`).join('');
+      const rows = quantityBulkFiles.map((item, i) => {
+        const template = store.templates[item.type];
+        return `<tr id="quantityBulkRow${i}" style="background:${item.type ? '#fff' : '#FEF9C3'};"><td style="padding:6px;border-bottom:1px solid #E2E8F0;word-break:break-all;">${officialFinalEscape(item.file.name)}</td><td style="padding:6px;border-bottom:1px solid #E2E8F0;"><select data-bulk-index="${i}" onchange="quantityBulkSetType(${i},this.value)" style="padding:5px;border:1px solid #CBD5E1;border-radius:5px;">${options(item.type)}</select></td><td style="padding:6px;border-bottom:1px solid #E2E8F0;text-align:right;">${item.type ? quantityModelAssignedUnits(item.type).length : ''}</td><td id="quantityBulkResult${i}" style="padding:6px;border-bottom:1px solid #E2E8F0;">${quantityBulkResultLabel(item.type, system)}</td></tr>`;
+      }).join('');
+      modal.innerHTML = `<div style="background:#fff;border-radius:10px;max-width:860px;width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;font-size:12px;"><div style="padding:12px 14px;border-bottom:1px solid #E2E8F0;display:flex;justify-content:space-between;align-items:center;"><strong style="font-size:14px;color:#1E3A8A;">Upload ${officialFinalEscape(systems.join(' + '))} drawings · ${files.length} files</strong><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="quantityBulkClose()">Cancel</button></div><div style="padding:10px 14px;color:#1E3A8A;background:#EFF6FF;border-bottom:1px solid #BFDBFE;font-size:13px;"><strong>Check that each drawing has the correct model.</strong> Rows in yellow were not recognized: choose the model from the list, or leave "— skip —". Nothing is saved until you press <strong>Save all</strong>. Assigned units stay the same; each new drawing starts with a copy of that model's Rough-In checklist.</div><div style="overflow:auto;padding:0 14px;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="text-align:left;color:#64748B;"><th style="padding:6px;">File</th><th style="padding:6px;">Model</th><th style="padding:6px;text-align:right;">Units</th><th style="padding:6px;">Result</th></tr></thead><tbody>${rows}</tbody></table></div><div style="padding:12px 14px;border-top:1px solid #E2E8F0;display:flex;justify-content:flex-end;gap:8px;align-items:center;"><span id="quantityBulkStatus" style="color:#475569;margin-right:auto;"></span><button type="button" id="quantityBulkSaveButton" class="btn btn-primary" style="font-size:12px;padding:6px 12px;" onclick="quantityBulkSaveAll()">Save all</button></div></div>`;
+      modal.style.display = 'flex';
+    }
+    function quantityBulkResultLabel(type, system) {
+      if (!type) return '<span style="color:#B45309;">Choose a model</span>';
+      const systems = (() => { try { return JSON.parse(document.getElementById('quantityBulkUploadModal')?.dataset.systems || 'null'); } catch (_) { return null; } })();
+      if (Array.isArray(systems) && systems.length > 1) return systems.map(sys => quantityBulkResultLabelOne(type, sys)).join('<br>');
+      return quantityBulkResultLabelOne(type, system);
+    }
+    function quantityBulkResultLabelOne(type, system) {
+      const current = quantityModelSystemDrawing(quantityStore().templates?.[type], system);
+      return current ? `<span style="color:#B91C1C;">Replaces Rev ${system === 'Rough-In' ? (quantityStore().templates[type].version || 1) : (current.version || 1)} (RFI)</span>` : `<span style="color:#15803D;">${officialFinalEscape(system)} Rev 1</span>`;
+    }
+    function quantityBulkSetType(index, type) {
+      const modal = document.getElementById('quantityBulkUploadModal'); if (!quantityBulkFiles[index]) return;
+      quantityBulkFiles[index].type = type;
+      const row = document.getElementById(`quantityBulkRow${index}`); if (row) row.style.background = type ? '#fff' : '#FEF9C3';
+      const cell = document.getElementById(`quantityBulkResult${index}`); if (cell) cell.innerHTML = quantityBulkResultLabel(type, modal?.dataset.system || 'Rough-In');
+    }
+    function quantityBulkClose() { const modal = document.getElementById('quantityBulkUploadModal'); if (modal) modal.style.display = 'none'; quantityBulkFiles = []; }
+    async function quantityBulkSaveAll() {
+      if (!quantityIsAdmin()) return;
+      const modal = document.getElementById('quantityBulkUploadModal'); const system = modal?.dataset.system || 'Rough-In';
+      let systems = [system]; try { const parsed = JSON.parse(modal?.dataset.systems || 'null'); if (Array.isArray(parsed) && parsed.length) systems = parsed; } catch (_) {}
+      const items = quantityBulkFiles.filter(item => item.type);
+      const status = document.getElementById('quantityBulkStatus'); const button = document.getElementById('quantityBulkSaveButton');
+      if (!items.length) { if (status) status.textContent = 'Choose a model for at least one file.'; return; }
+      const types = items.map(item => item.type);
+      const dup = types.find((t, i) => types.indexOf(t) !== i);
+      if (dup) { if (status) { status.textContent = `${dup} is selected for two files. Choose one.`; status.style.color = '#B91C1C'; } return; }
+      const replacing = items.flatMap(item => systems.filter(sys => quantityModelSystemDrawing(quantityStore().templates?.[item.type], sys)).map(sys => `${item.type} / ${sys}`));
+      if (replacing.length && !confirm(`${replacing.length} drawing(s) replace an existing one (RFI revision): ${replacing.join(', ')}. Continue?`)) return;
+      if (button) button.disabled = true;
+      let done = 0;
+      for (const item of items) {
+        if (status) { status.textContent = `Uploading ${done + 1} of ${items.length}…`; status.style.color = '#475569'; }
+        const file = await quantityReadFileAsync(item.file);
+        if (!file?.storagePath && !file?.dataUrl) { const cell = document.getElementById(`quantityBulkResult${quantityBulkFiles.indexOf(item)}`); if (cell) cell.innerHTML = '<span style="color:#B91C1C;">Upload failed</span>'; continue; }
+        const results = systems.map(sys => ({ sys, ...quantityApplyModelDrawing(quantityStore(), item.type, sys, file) }));
+        const cell = document.getElementById(`quantityBulkResult${quantityBulkFiles.indexOf(item)}`); if (cell) cell.innerHTML = results.map(r => `<span style="color:#15803D;">✓ ${officialFinalEscape(r.sys)} Rev ${r.version}</span>`).join('<br>');
+        done++;
+      }
+      quantitySave(quantityStore()); const synced = await quantityFlushRemoteSave();
+      if (button) button.disabled = false;
+      if (synced === false) { if (status) { status.textContent = '❌ Could not save to Supabase. Nothing was lost locally; try Save all again.'; status.style.color = '#B91C1C'; } return; }
+      renderSetupDrawingModels();
+      if (status) { status.textContent = `✓ ${done} drawing(s) saved for ${systems.join(' + ')}.`; status.style.color = '#15803D'; }
+      if (button) { button.textContent = 'Close'; button.onclick = quantityBulkClose; }
+      if (typeof toast === 'function') toast(`✅ ${done} ${system} drawings saved`);
     }
     async function assignSetupDrawingModel() {
       if (!quantityIsAdmin()) return;
@@ -4254,7 +4410,9 @@ Object.assign(APP_TRANSLATIONS.en, {
         store.units[key] = state;
         return;
       }
-      const base = current?.systemStates ? current : { systemStates: { 'Rough-In': quantityClone(current || state) } };
+      // A unit with no stored state must not get this system's state copied
+      // into Rough-In; Rough-In is rebuilt from its model when opened.
+      const base = current?.systemStates ? current : { systemStates: current ? { 'Rough-In': quantityClone(current) } : {} };
       if (base.systemStates['Rough-In']) delete base.systemStates['Rough-In'].systemStates;
       base.systemStates[quantityCurrentSystem] = state;
       store.units[key] = base;
