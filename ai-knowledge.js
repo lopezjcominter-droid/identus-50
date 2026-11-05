@@ -65,7 +65,7 @@
     if (busy && document.getElementById('aiKnowledgeBaseHost')?.offsetParent) pollTimer = setTimeout(() => refresh().catch(() => {}), 15000);
   }
   function metaLine(d) {
-    const bits = [d.sheet_number && `<b>${esc(d.sheet_number)}</b>`, d.title && esc(d.title), d.discipline && esc(d.discipline), d.revision && `Rev ${esc(d.revision)}`, d.building && esc(d.building), d.floor && esc(d.floor)].filter(Boolean);
+    const bits = [d.sheet_number && `<b>${esc(d.sheet_number)}</b>`, d.title && esc(d.title), d.discipline && esc(d.discipline), d.revision && `Rev ${esc(String(d.revision).replace(/^\s*rev(ision)?\.?\s*/i, ''))}`, d.building && esc(d.building), d.floor && esc(d.floor)].filter(Boolean);
     return bits.length ? `<div style="flex-basis:100%;font-size:11px;color:#334155;">${bits.join(' · ')}${d.metadata_confirmed ? ' <span style="color:#15803D;">✓ confirmed</span>' : (d.status === 'ready' || d.status === 'needs_review' ? ' <span style="color:#B45309;">· AI suggestion, not confirmed</span>' : '')}${d.is_current_revision ? ' <span style="color:#1D4ED8;font-weight:600;">· CURRENT REVISION</span>' : ''}</div>` : '';
   }
   function progress(d) {
@@ -228,4 +228,98 @@
   window.aiKbUpload = input => upload(input).catch(error => console.error(error));
   window.aiKbOpen = id => openDoc(id);
   window.aiKbDelete = id => removeDoc(id);
+
+  // ---------------- Floating AI assistant (stage 3) ----------------
+  let chatConversationId = null; let chatBusy = false; let chatRecognition = null;
+  function chatContext() {
+    const ctx = { tab: (document.querySelector('.tab-main.active')?.textContent || '').trim().slice(0, 40) };
+    try { if (typeof quantityCurrentUnit !== 'undefined' && quantityCurrentUnit) { ctx.unit = quantityCurrentUnit.apt; ctx.building = quantityCurrentUnit.building; ctx.floor = quantityCurrentUnit.floor; ctx.system = quantityCurrentSystem; } } catch (_) {}
+    return ctx;
+  }
+  function chatEnsure() {
+    if (document.getElementById('aiChatFab')) return;
+    const style = document.createElement('style');
+    style.textContent = `#aiChatFab{position:fixed;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:10080;width:54px;height:54px;border-radius:50%;border:0;background:#3730A3;color:#fff;font-size:24px;cursor:pointer;box-shadow:0 6px 18px rgba(15,23,42,.3)}
+#aiChatPanel{position:fixed;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:10080;width:min(410px,calc(100vw - 36px));height:min(600px,calc(100vh - 120px));background:#fff;border:1px solid #C7D2FE;border-radius:12px;box-shadow:0 14px 36px rgba(15,23,42,.25);display:flex;flex-direction:column;overflow:hidden;font-size:13px}
+#aiChatPanel[hidden]{display:none}
+#aiChatPanel .h{padding:10px 12px;background:#EEF2FF;border-bottom:1px solid #C7D2FE;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+#aiChatPanel .h small{display:block;color:#64748B;font-size:11px;margin-top:2px}
+#aiChatMsgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.aic-m{max-width:90%;padding:8px 11px;border-radius:10px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.aic-u{align-self:flex-end;background:#3730A3;color:#fff}.aic-a{align-self:flex-start;background:#F1F5F9;color:#0F172A}
+.aic-cite{display:inline-block;margin:4px 4px 0 0;padding:2px 7px;border:1px solid #C7D2FE;border-radius:5px;background:#fff;color:#3730A3;font-size:11px;cursor:pointer}
+#aiChatForm{display:flex;gap:6px;padding:9px;border-top:1px solid #E2E8F0}
+#aiChatInput{flex:1;min-width:0;padding:9px 10px;border:1px solid #CBD5E1;border-radius:8px;font:inherit}
+#aiChatForm button{border:0;border-radius:8px;padding:0 12px;cursor:pointer;font-weight:600}
+@media (max-width:520px){#aiChatPanel{right:0;left:0;bottom:0;width:100%;height:100%;border-radius:0}}`;
+    document.head.appendChild(style);
+    const fab = document.createElement('button'); fab.id = 'aiChatFab'; fab.type = 'button'; fab.title = 'AI assistant'; fab.setAttribute('aria-label', 'Open the AI assistant'); fab.textContent = '💬';
+    const panel = document.createElement('section'); panel.id = 'aiChatPanel'; panel.hidden = true;
+    panel.innerHTML = `<div class="h"><div><strong style="color:#3730A3;">AI Assistant</strong><small id="aiChatCtx"></small></div><div style="display:flex;gap:4px;"><button type="button" title="New conversation" onclick="aiChatNew()" style="border:0;background:none;cursor:pointer;font-size:15px;">🗒️</button><button type="button" aria-label="Close" onclick="aiChatToggle(false)" style="border:0;background:none;cursor:pointer;font-size:20px;color:#64748B;">×</button></div></div>
+      <div id="aiChatMsgs"></div>
+      <form id="aiChatForm"><button type="button" id="aiChatMic" title="Speak" style="background:#EEF2FF;color:#3730A3;">🎤</button><input id="aiChatInput" autocomplete="off" placeholder="Ask about drawings, specs, RFIs, code…"><button type="submit" style="background:#3730A3;color:#fff;">Send</button></form>`;
+    document.body.appendChild(fab); document.body.appendChild(panel);
+    fab.onclick = () => aiChatToggle();
+    panel.querySelector('#aiChatForm').onsubmit = event => { event.preventDefault(); chatAsk(); };
+    panel.querySelector('#aiChatMic').onclick = chatMic;
+    chatAdd('a', 'Hi! Ask me about this project’s drawings, specifications, RFIs or electrical code. I cite the sheet, revision and page I use.');
+  }
+  function chatAdd(who, text, citations) {
+    const box = document.getElementById('aiChatMsgs'); if (!box) return null;
+    const el = document.createElement('div'); el.className = `aic-m aic-${who}`; el.textContent = text;
+    if (citations?.length) {
+      const wrap = document.createElement('div');
+      citations.forEach(c => { const b = document.createElement('span'); b.className = 'aic-cite'; b.title = 'Open document'; b.textContent = `[${c.ref}] ${c.sheet || c.file || ''}${c.revision ? ` · Rev ${String(c.revision).replace(/^\s*rev(ision)?\.?\s*/i, '')}` : ''} · p.${c.page || 1}${c.current ? ' · current' : ''}`; b.onclick = () => chatOpenCitation(c); wrap.appendChild(b); });
+      el.appendChild(wrap);
+    }
+    box.appendChild(el); box.scrollTop = box.scrollHeight; return el;
+  }
+  async function chatOpenCitation(c) {
+    const sb = client(); if (!sb || !c.documentId) return;
+    let path = documents.find(d => d.id === c.documentId)?.storage_path;
+    if (!path) { const r = await sb.from('ai_documents').select('storage_path').eq('id', c.documentId).maybeSingle(); path = r.data?.storage_path; }
+    if (!path) return;
+    const { data } = await sb.storage.from(BUCKET).createSignedUrl(path, 600);
+    if (data?.signedUrl) window.open(`${data.signedUrl}#page=${c.page || 1}`, '_blank', 'noopener');
+  }
+  async function chatAsk() {
+    const input = document.getElementById('aiChatInput'); const question = String(input?.value || '').trim();
+    if (!question || chatBusy) return;
+    chatBusy = true; input.value = ''; chatAdd('u', question); const waiting = chatAdd('a', '…');
+    try {
+      const token = window.getAccessToken ? await window.getAccessToken() : null;
+      if (!token) throw new Error('Your session expired. Sign in again.');
+      const response = await fetch('/.netlify/functions/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') }, body: JSON.stringify({ projectId: projectId(), question, conversationId: chatConversationId, context: chatContext() }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `Error ${response.status}`);
+      chatConversationId = body.conversationId || chatConversationId;
+      waiting.remove(); chatAdd('a', body.answer, body.citations);
+    } catch (error) { waiting.textContent = `⚠️ ${error.message}`; }
+    finally { chatBusy = false; }
+  }
+  function chatMic() {
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Rec) { chatAdd('a', 'Voice input is not available in this browser. Use the keyboard dictation button instead.'); return; }
+    if (chatRecognition) { chatRecognition.stop(); return; }
+    const rec = new Rec(); chatRecognition = rec;
+    rec.lang = (document.documentElement.lang || navigator.language || 'es-US').startsWith('en') ? 'en-US' : 'es-US';
+    rec.interimResults = true; const input = document.getElementById('aiChatInput'); const mic = document.getElementById('aiChatMic');
+    mic.textContent = '⏺️';
+    rec.onresult = e => { input.value = Array.from(e.results).map(r => r[0].transcript).join(' '); };
+    rec.onend = () => { chatRecognition = null; mic.textContent = '🎤'; if (input.value.trim()) chatAsk(); };
+    rec.onerror = () => { chatRecognition = null; mic.textContent = '🎤'; };
+    rec.start();
+  }
+  window.aiChatToggle = force => {
+    chatEnsure(); const panel = document.getElementById('aiChatPanel');
+    panel.hidden = force === undefined ? !panel.hidden : !force;
+    if (!panel.hidden) { const c = chatContext(); document.getElementById('aiChatCtx').textContent = [c.tab, c.unit && `Unit ${c.unit}`, c.system].filter(Boolean).join(' · '); document.getElementById('aiChatInput').focus(); }
+  };
+  window.aiChatNew = () => { chatConversationId = null; const box = document.getElementById('aiChatMsgs'); if (box) box.innerHTML = ''; chatAdd('a', 'New conversation. What do you need?'); };
+  // Show the button only to Admin / PM, once the session role is known.
+  function chatBoot(tries = 0) {
+    if (canManage()) { chatEnsure(); return; }
+    if (tries < 40) setTimeout(() => chatBoot(tries + 1), 1500);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => chatBoot()); else chatBoot();
 })();
