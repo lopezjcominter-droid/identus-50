@@ -313,6 +313,7 @@
 .aic-cite{display:inline-block;margin:4px 4px 0 0;padding:2px 7px;border:1px solid #C7D2FE;border-radius:5px;background:#fff;color:#3730A3;font-size:11px;cursor:pointer}
 #aiChatForm{display:flex;gap:6px;padding:9px;border-top:1px solid #E2E8F0}
 #aiChatInput{flex:1;min-width:0;padding:9px 10px;border:1px solid #CBD5E1;border-radius:8px;font:inherit;font-size:16px}
+#aiChatRec{flex:1;display:none;align-items:center;justify-content:space-between;gap:10px}#aiChatRec span{flex:1;font-weight:600;color:#B91C1C;font-variant-numeric:tabular-nums}#aiChatRecDel{background:#F1F5F9!important}#aiChatRecSend{background:#0084FF!important;color:#fff;min-width:44px;min-height:40px;border-radius:50%!important}
 #aiChatForm button{border:0;border-radius:8px;padding:0 12px;cursor:pointer;font-weight:600}
 .aic-hbtn{border:1px solid #C7D2FE;background:#fff;color:#3730A3;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer}
 .aic-h{display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;cursor:pointer;background:#fff}
@@ -389,27 +390,42 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     } catch (error) { waiting.textContent = `⚠️ ${error.message}`; }
     finally { chatBusy = false; }
   }
-  // Voice note: tap 🎤 to record, tap ⏹ to send (max 60 s). Transcribed on the server.
-  let chatRecorder = null;
+  // Voice note (WhatsApp style): 🎤 starts recording; 🗑 discards, ➤ transcribes
+  // the note into the text box so it can be checked/edited and sent as text.
+  let chatRecorder = null; let chatRecDiscard = false;
+  function chatRecUi(on) {
+    const f = document.getElementById('aiChatForm'); if (!f) return;
+    f.querySelectorAll(':scope > *:not(#aiChatRec)').forEach(el => { el.style.display = on ? 'none' : ''; });
+    let bar = document.getElementById('aiChatRec');
+    if (!bar) { bar = document.createElement('div'); bar.id = 'aiChatRec'; bar.innerHTML = '<button type="button" id="aiChatRecDel" title="Delete">🗑</button><span id="aiChatRecTime">🔴 0:00</span><button type="button" id="aiChatRecSend" title="Send">➤</button>'; f.appendChild(bar); bar.querySelector('#aiChatRecDel').onclick = () => { chatRecDiscard = true; chatRecorder?.stop(); }; bar.querySelector('#aiChatRecSend').onclick = () => { chatRecDiscard = false; chatRecorder?.stop(); }; }
+    bar.style.display = on ? 'flex' : 'none';
+  }
   async function chatMic() {
-    const mic = document.getElementById('aiChatMic');
-    if (chatRecorder) { chatRecorder.stop(); return; }
-    if (chatBusy) return;
+    if (chatRecorder || chatBusy) return;
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { chatAdd('a', 'Voice notes are not available in this browser.'); return; }
-    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (_) { chatAdd('a', 'Microphone permission denied.'); return; }
-    const type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find(t => MediaRecorder.isTypeSupported?.(t)) || '';
-    const rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined); const parts = []; chatRecorder = rec;
-    const started = Date.now(); mic.textContent = '⏹'; mic.style.background = '#FEE2E2';
-    const timer = setInterval(() => { const s = Math.round((Date.now() - started) / 1000); mic.title = `${s}s`; if (s >= 60) rec.stop(); }, 500);
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } }); } catch (_) { chatAdd('a', 'Microphone permission denied.'); return; }
+    const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find(t => MediaRecorder.isTypeSupported?.(t)) || '';
+    const rec = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 64000 } : undefined); const parts = []; chatRecorder = rec; chatRecDiscard = false;
+    const started = Date.now(); chatRecUi(true);
+    const timer = setInterval(() => { const s = Math.floor((Date.now() - started) / 1000); const t = document.getElementById('aiChatRecTime'); if (t) t.textContent = `🔴 ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; if (s >= 60) rec.stop(); }, 300);
     rec.ondataavailable = e => { if (e.data?.size) parts.push(e.data); };
     rec.onstop = async () => {
-      clearInterval(timer); stream.getTracks().forEach(t => t.stop()); chatRecorder = null; mic.textContent = '🎤'; mic.style.background = '#EEF2FF';
-      if (Date.now() - started < 700 || !parts.length) return;
-      const blob = new Blob(parts, { type: rec.mimeType || type || 'audio/webm' });
-      const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.readAsDataURL(blob); });
-      chatAsk({ audio: b64, audioType: blob.type });
+      clearInterval(timer); stream.getTracks().forEach(t => t.stop()); chatRecorder = null; chatRecUi(false);
+      if (chatRecDiscard || Date.now() - started < 700 || !parts.length) return;
+      const input = document.getElementById('aiChatInput'); const blob = new Blob(parts, { type: rec.mimeType || type || 'audio/webm' });
+      input.value = ''; input.placeholder = 'Transcribing…'; input.disabled = true;
+      try {
+        const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.readAsDataURL(blob); });
+        const token = window.getAccessToken ? await window.getAccessToken() : null;
+        const sheets = [...new Set(documents.map(d => d.metadata?.sheet_number || d.sheet_number || String(d.file_name || '').split(/[-_ .]/)[0]).filter(Boolean))].slice(0, 120).join(', ');
+        const response = await fetch('/.netlify/functions/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') }, body: JSON.stringify({ projectId: projectId(), audio: b64, audioType: blob.type, transcribeOnly: true, sheets, lang: document.documentElement.lang || navigator.language }) });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || `Error ${response.status}`);
+        input.value = body.question || '';
+      } catch (error) { chatAdd('a', `⚠️ ${error.message}`); }
+      finally { input.disabled = false; input.placeholder = 'Ask about drawings, specs, RFIs, code…'; }
     };
-    rec.start();
+    rec.start(1000);
   }
   // Phone: keep the chat exactly the size of the visible screen (keyboard open or not).
   if (window.visualViewport) { const fit = () => { const v = window.visualViewport; document.documentElement.style.setProperty('--aic-vh', `${v.height}px`); document.documentElement.style.setProperty('--aic-top', `${v.offsetTop}px`); const m = document.getElementById('aiChatMsgs'); if (m) m.scrollTop = m.scrollHeight; }; visualViewport.addEventListener('resize', fit); visualViewport.addEventListener('scroll', fit); fit(); }
