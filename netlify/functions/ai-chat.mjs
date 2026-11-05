@@ -54,6 +54,10 @@ Rules:
 - Never state that a revision is current unless the source is marked CURRENT REVISION. If a source is marked "not confirmed", say it is an AI reading pending review.
 - Do not count devices or symbols.
 Trade conventions (do not flag these as conflicts): "4 wire" range/dryer circuits = 3 conductors plus ground; "3W" panels = 2 hots + neutral; AFF = above finished floor; MLO = main lugs only.
+QUESTION SCOPE:
+- When the user names the basis ("según NEC", "per code", "según spec", "según planos"), answer from THAT basis first. For "según NEC/código": give the NEC rule with its article (e.g. NEC 440.14: AC/refrigeration disconnect within sight of and readily accessible from the equipment; within sight = visible and not more than 50 ft, NEC 100), then add what the project documents say if they cover it. For "según spec": answer only from specification sources; if none covers it, say "No está en la spec cargada".
+- Answer the exact quantity asked: a distance is not a height; a disconnect is not a receptacle.
+- FOLLOW-UPS keep the SAME SUBJECT as the previous question unless the user names a new one. Example: "según NEC distancia del disconnect del HVAC" then "y según spec" = the HVAC disconnect distance according to the spec. Never switch to another device.
 If the user's message is feedback or a follow-up ("revisa bien", "¿seguro?", "check again"), re-check your previous answer against the SOURCES and correct it if needed; do not treat it as a new topic.`;
 
 export default async (request) => {
@@ -105,7 +109,7 @@ export default async (request) => {
     let rewritten = '';
     try {
       const rw = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 90, messages: [
-        { role: 'system', content: 'Rewrite the electrical-construction question as a short search query using the words drawings and specs use (English terms as on the sheets, e.g. "receptacle mounting height AFF", plus key Spanish words). Resolve follow-ups using the previous questions. Output only the query.' },
+        { role: 'system', content: 'Rewrite the electrical-construction question as a short search query using the words drawings and specs use (English terms as on the sheets, e.g. "receptacle mounting height AFF", plus key Spanish words). Resolve follow-ups using the previous questions: a short follow-up ("y según spec", "¿y el dryer?") keeps the previous subject and only changes what it names. Output only the query.' },
         { role: 'user', content: `${recentQuestions.length ? `Previous questions:\n${recentQuestions.join('\n')}\n\n` : ''}Question: ${question}` }
       ] }, 2500);
       rewritten = String(rw.choices?.[0]?.message?.content || '').trim().slice(0, 300);
@@ -145,7 +149,7 @@ export default async (request) => {
         { role: 'system', content: SYSTEM },
         ...history.map(m => ({ role: m.role, content: String(m.content).slice(0, 1500) })),
         // Earlier [S#] numbers referred to earlier sources; tell the model the numbering restarts.
-        { role: 'user', content: `${history.length ? 'This is a follow-up in the same conversation: interpret the question using the previous messages (same unit, panel, sheet or topic unless the user changes it). Source numbers below are new for this answer.\n\n' : ''}SOURCES:\n${sourceText}\n\nQUESTION: ${question}` }
+        { role: 'user', content: `${history.length ? `This is a follow-up in the same conversation. Previous question: "${String(recentQuestions.at(-1) || '').slice(0, 300)}". Keep that same subject (same device, unit, panel or sheet) unless this message names a new one. Interpreted as: "${rewritten.replace(/"/g, "'")}". Source numbers below are new for this answer.\n\n` : ''}SOURCES:\n${sourceText}\n\nQUESTION: ${question}` }
       ]
     });
     let answer = completion.choices?.[0]?.message?.content?.trim() || 'No answer.';
