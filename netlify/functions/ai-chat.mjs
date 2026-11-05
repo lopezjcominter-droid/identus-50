@@ -72,7 +72,16 @@ export default async (request) => {
     const role = String(member?.[0]?.role || '').toLowerCase();
     if (!['admin', 'pm'].includes(role)) return json(403, { error: 'The AI assistant is available to Admin and PM users of this project.' });
 
-    const embedding = (await openai('embeddings', { model: EMBED_MODEL, input: question })).data?.[0]?.embedding;
+    // Follow-up questions ("¿y el dryer?", "¿en qué hoja?") only make sense with
+    // the conversation: search with the recent questions too, and keep the
+    // documents cited in the last answers as candidate sources.
+    let conversationId = input.conversationId && /^[0-9a-f-]{36}$/i.test(input.conversationId) ? input.conversationId : null;
+    let history = [];
+    if (conversationId) history = (await sb(`/rest/v1/ai_messages?conversation_id=eq.${conversationId}&select=role,content,citations&order=created_at.desc&limit=8`, auth).catch(() => [])).reverse();
+    const recentQuestions = history.filter(m => m.role === 'user').slice(-2).map(m => m.content);
+    const searchText = [...recentQuestions, question].join('\n').slice(-1500);
+    const citedDocIds = [...new Set(history.filter(m => m.role === 'assistant').slice(-2).flatMap(m => (Array.isArray(m.citations) ? m.citations : []).map(c => c.documentId)).filter(Boolean))].slice(0, 4);
+    const embedding = (await openai('embeddings', { model: EMBED_MODEL, input: searchText })).data?.[0]?.embedding;
     const matches = await sb('/rest/v1/rpc/ai_match_chunks', auth, { method: 'POST', body: JSON.stringify({ p_project_id: projectId, p_query: `[${embedding.join(',')}]`, p_count: 8 }) });
     // Also pull pages of sheets named explicitly in the question (e.g. "E600").
     const named = [...new Set((question.toUpperCase().match(/\b[A-Z]{1,3}-?\d{2,4}(?:\.\d+)?\b/g) || []))].slice(0, 5);
@@ -81,7 +90,13 @@ export default async (request) => {
       const docs = await sb(`/rest/v1/ai_documents?project_id=eq.${projectId}&sheet_number=in.(${named.map(n => `"${n}"`).join(',')})&select=id`, auth).catch(() => []);
       if (docs?.length) namedChunks = await sb(`/rest/v1/ai_chunks?project_id=eq.${projectId}&document_id=in.(${docs.map(d => d.id).join(',')})&select=id,document_id,page_number,content&limit=6`, auth).catch(() => []);
     }
-    const seen = new Set(); const chunks = [...namedChunks, ...(matches || [])].filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, 12);
+    let followChunks = [];
+    if (citedDocIds.length) {
+      const qEmb = `[${embedding.join(',')}]`;
+      // The best chunks of the documents already under discussion.
+      followChunks = (await sb('/rest/v1/rpc/ai_match_chunks', auth, { method: 'POST', body: JSON.stringify({ p_project_id: projectId, p_query: qEmb, p_count: 20 }) }).catch(() => [])).filter(c => citedDocIds.includes(c.document_id)).slice(0, 4);
+    }
+    const seen = new Set(); const chunks = [...namedChunks, ...followChunks, ...(matches || [])].filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, 12);
     const docIds = [...new Set(chunks.map(c => c.document_id))];
     const docs = docIds.length ? await sb(`/rest/v1/ai_documents?id=in.(${docIds.join(',')})&select=id,file_name,category,sheet_number,title,revision,is_current_revision,metadata_confirmed,storage_path`, auth) : [];
     const docById = new Map((docs || []).map(d => [d.id, d]));
@@ -91,16 +106,15 @@ export default async (request) => {
     const sourceText = sources.length ? sources.map(s => `[${s.ref}] ${s.file || ''} · ${s.category || ''}${s.sheet ? ` · sheet ${s.sheet}` : ''}${s.revision ? ` · rev ${s.revision}` : ''} · page ${s.page || 1}${s.current ? ' · CURRENT REVISION' : ''}${s.confirmed ? '' : ' · not confirmed'}\n${s.content}`).join('\n\n---\n\n') : '(no project documents matched)';
 
     // Short history for follow-up questions.
-    let conversationId = input.conversationId && /^[0-9a-f-]{36}$/i.test(input.conversationId) ? input.conversationId : null;
-    let history = [];
-    if (conversationId) history = (await sb(`/rest/v1/ai_messages?conversation_id=eq.${conversationId}&select=role,content&order=created_at.desc&limit=6`, auth).catch(() => [])).reverse();
+
     const ctx = input.context && typeof input.context === 'object' ? JSON.stringify(input.context).slice(0, 400) : '';
     const completion = await openai('chat/completions', {
       model: CHAT_MODEL, temperature: 0.1, max_tokens: 450,
       messages: [
         { role: 'system', content: SYSTEM },
         ...history.map(m => ({ role: m.role, content: String(m.content).slice(0, 1500) })),
-        { role: 'user', content: `${ctx ? `Screen context: ${ctx}\n\n` : ''}SOURCES:\n${sourceText}\n\nQUESTION: ${question}` }
+        // Earlier [S#] numbers referred to earlier sources; tell the model the numbering restarts.
+        { role: 'user', content: `${ctx ? `Screen context: ${ctx}\n\n` : ''}${history.length ? 'This is a follow-up in the same conversation: interpret the question using the previous messages (same unit, panel, sheet or topic unless the user changes it). Source numbers below are new for this answer.\n\n' : ''}SOURCES:\n${sourceText}\n\nQUESTION: ${question}` }
       ]
     });
     const answer = completion.choices?.[0]?.message?.content?.trim() || 'No answer.';
