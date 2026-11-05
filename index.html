@@ -1700,7 +1700,7 @@
       <div class="insp-tabs">
         <div class="insp-tab active" onclick="inspShowTab('new')">➕ New Inspection</div>
         <div class="insp-tab" onclick="inspShowTab('history')">📋 History</div>
-        <div class="insp-tab" onclick="inspShowTab('punchlist')">⚠️ Punch List</div>
+        <div class="insp-tab" onclick="inspShowTab('punchlist')">📌 Punch List</div>
       </div>
 
       <!-- TAB: NUEVA INSPECCIÓN -->
@@ -1729,7 +1729,7 @@
             <div id="insp-search-results" style="display:none"></div>
             <div class="insp-empty" id="insp-search-hint">
               <div style="font-size:36px">🏗️</div>
-              <h4 id="insp-unit-count-hint">101 units available</h4>
+              <h4 id="insp-unit-count-hint">Units available</h4>
               <p>Type a unit number or building name to begin</p>
             </div>
           </div>
@@ -4728,7 +4728,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       }
       const unitId = String(unit.id);
       const loadKey = `${unitId}::${system}`;
-      if (quantityMarksLoads.has(loadKey)) return quantityMarksLoads.get(loadKey);
+      if (quantityMarksLoads.has(loadKey)) return quantityMarksLoads.get(loadKey).catch(() => false);
       const promise = (async () => {
         const headers = await quantityAuthHeaders();
         const response = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/quantity_installed_marks?project_id=eq.${encodeURIComponent(PROJECT_ID)}&unit_id=eq.${encodeURIComponent(unitId)}${quantitySystemColumns ? `&system=eq.${encodeURIComponent(system)}` : ''}&select=id,item_index,x,y`, { headers }), 12000, 'Quantity marks request');
@@ -6019,7 +6019,11 @@ Object.assign(APP_TRANSLATIONS.en, {
       const state = quantityUnitState(quantityCurrentUnit);
       if (!quantityUsesLocalStorage() && state._marksLoaded === false) {
         const unitId = quantityCurrentUnit.id;
-        const applied = await quantityLoadRemoteMarks(quantityCurrentUnit);
+        if (quantityPlaceMarker._waiting) return;
+        quantityPlaceMarker._waiting = true;
+        const slow = setTimeout(() => { if (typeof toast === 'function') toast('Loading installed marks…'); }, 800);
+        let applied = false;
+        try { applied = await quantityLoadRemoteMarks(quantityCurrentUnit); } finally { clearTimeout(slow); quantityPlaceMarker._waiting = false; }
         if (quantityCurrentUnit?.id !== unitId) return;
         if (!applied && quantityUnitState(quantityCurrentUnit)._marksLoaded === false) { if (typeof toast === 'function') toast('Installed marks are still loading. Try again.'); return; }
         return quantityPlaceMarker(event);
@@ -15489,6 +15493,8 @@ function inspGoStep(n) {
     if (el) { el.classList.remove('hidden'); el.style.display = 'block'; }
   inspSetBreadcrumb([{label:'🔍 Search Unit', step:1}]);
     inspCurrentUnit = null; inspCurrentType = null;
+    const countHint = document.getElementById('insp-unit-count-hint');
+    if (countHint) { try { countHint.textContent = `${inspectionEntitySource().length} units available`; } catch (_) {} }
   } else if (n === 2) {
     const el = document.getElementById('insp-step-types');
     if (el) {
@@ -15545,6 +15551,8 @@ function inspSearchUnits(q) {
   const searchInput = document.getElementById('insp-unit-search');
   if (searchInput) searchInput.disabled = false;
   results.style.pointerEvents = 'auto';
+  const countHint = document.getElementById('insp-unit-count-hint');
+  if (countHint) { try { countHint.textContent = `${inspectionEntitySource().length} units available`; } catch (_) {} }
 
   if (!q || q.length < 1) {
     results.style.display = 'none';
