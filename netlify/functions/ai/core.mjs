@@ -75,11 +75,11 @@ async function extractPage(pdfBytes, pageNumber, totalPages, category, fileName,
       messages: [
         { role: 'system', content: SYSTEM },
         { role: 'user', content: [
-          { type: 'text', text: imagePaths.length === 1 ? `${half ? `Read ONLY the ${half === 'L' ? 'LEFT' : 'RIGHT'} HALF of this image and ignore the other half. ` : ''}This image is ONE QUARTER of page ${pageNumber} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Extract only what is in this quarter; text cut at the edge may continue in another quarter. Transcribe only what you can actually read. Extract the JSON.` : `Page ${pageNumber} of ${totalPages} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Image 1 is the whole sheet; the next images are zoomed quarters of the same sheet (top-left, top-right, bottom-left, bottom-right) so small text is legible. Transcribe only what you can actually read. Extract the JSON.` },
+          { type: 'text', text: imagePaths.length === 1 ? `${half ? `Read ONLY ${({ T: 'the TOP HALF (0–50% of the height)', B: 'the BOTTOM HALF (50–100% of the height)', TT: 'the band from 0% to 25% of the height', TB: 'the band from 25% to 50% of the height', BT: 'the band from 50% to 75% of the height', BB: 'the band from 75% to 100% of the height', L: 'the LEFT HALF', R: 'the RIGHT HALF' })[half] || 'the requested part'} of this image and ignore the rest; include lines that start in that band. ` : ''}This image is ONE QUARTER of page ${pageNumber} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Extract only what is in this quarter; text cut at the edge may continue in another quarter. Transcribe only what you can actually read. Extract the JSON.` : `Page ${pageNumber} of ${totalPages} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Image 1 is the whole sheet; the next images are zoomed quarters of the same sheet (top-left, top-right, bottom-left, bottom-right) so small text is legible. Transcribe only what you can actually read. Extract the JSON.` },
           ...images.map(url => ({ type: 'image_url', image_url: { url, detail: 'high' } }))
         ] }
       ]
-    }, 25000, imagePaths.length === 1 ? 2200 : 3000);
+    }, 25000, imagePaths.length === 1 ? 2600 : 3000);
     const content = response.choices?.[0]?.message?.content || '{}';
     let data; try { data = JSON.parse(content); } catch (_) { data = { summary: '', text: String(content).slice(0, 6000), confidence: 'low' }; }
     data._usage = response.usage || null; data._model = MODEL; data._source = 'images'; data._finish = response.choices?.[0]?.finish_reason || null;
@@ -178,8 +178,8 @@ async function finishDocument(documentId) {
 }
 
 function mergeParts(parts) {
-  const order = ['1', '1L', '1R', '2', '2L', '2R', '3', '3L', '3R', '4', '4L', '4R'];
-  const list = order.map(k => parts[k]).filter(Boolean);
+  const rank = k => Number(k[0]) * 100 + ({ '': 0, T: 10, TT: 11, TB: 12, B: 20, BT: 21, BB: 22, L: 30, R: 40 }[k.slice(1)] ?? 50);
+  const list = Object.keys(parts).sort((a, b) => rank(a) - rank(b)).map(k => parts[k]).filter(Boolean);
   const first = key => list.map(p => p?.[key]).find(v => v != null && v !== '') ?? null;
   const uniq = arr => [...new Set(arr.filter(Boolean).map(String))];
   const usage = list.reduce((sum, p) => ({ prompt_tokens: sum.prompt_tokens + (p._usage?.prompt_tokens || 0), completion_tokens: sum.completion_tokens + (p._usage?.completion_tokens || 0) }), { prompt_tokens: 0, completion_tokens: 0 });
@@ -206,22 +206,25 @@ export async function processOne() {
     // the parts are merged at the end.
     const tileMode = imagePaths.length >= 5 && (page.extracted?.tileMode || /took longer/i.test(String(page.error || '')));
     if (tileMode) {
-      // Queue of pieces: quarters "1".."4"; a quarter that is still too slow is
-      // split into its left/right halves ("1L","1R"). A half that still times
-      // out is skipped and reported, so the page always finishes.
+      // Queue of pieces: quarters "1".."4". A quarter that is too slow or whose
+      // answer is cut is split into top/bottom halves ("1T","1B"), and those
+      // into horizontal strips ("1TT".."1BB"). Text columns read top-down, so
+      // horizontal strips keep whole lines. A strip that still fails is
+      // skipped and reported, so the page always finishes.
       const parts = { ...(page.extracted?.parts || {}) };
       const queue = Array.isArray(page.extracted?.queue) ? [...page.extracted.queue] : ['1', '2', '3', '4'];
       const skipped = Array.isArray(page.extracted?.skipped) ? [...page.extracted.skipped] : [];
       const key = queue.shift();
       if (key) {
-        const half = key.length > 1 ? key.slice(-1) : '';
+        const half = key.slice(1);
+        const canSplit = half.length < 2;
         try {
           const part = await extractPage(null, page.page_number, doc.page_count || 1, doc.category, doc.file_name, [imagePaths[Number(key[0])]], half);
-          if (part._finish === 'length' && !half) queue.unshift(`${key}L`, `${key}R`); // too much text: read in halves
-          else parts[key] = part;
+          if (part._finish === 'length' && canSplit) queue.unshift(`${key}T`, `${key}B`); // too much text: smaller pieces
+          else { parts[key] = part; if (part._finish === 'length') skipped.push(`${key} (cut)`); }
         } catch (error) {
           if (!/took longer/i.test(String(error.message))) throw error;
-          if (half) skipped.push(key); else queue.unshift(`${key}L`, `${key}R`);
+          if (canSplit) queue.unshift(`${key}T`, `${key}B`); else skipped.push(key);
         }
         if (queue.length) {
           await rest(`/rest/v1/ai_document_pages?id=eq.${page.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'pending', attempts: 0, error: null, extracted: { images: imagePaths, tileMode: true, parts, queue, skipped }, updated_at: new Date().toISOString() }) });
