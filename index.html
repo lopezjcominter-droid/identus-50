@@ -13869,7 +13869,16 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         });
         // Remove stale 100% notifications when Quick Add, Edit, or Undo lowers
         // the system progress again. The notification must follow live unit data.
-        const next = Array.from(byKey.values()).filter(task => activeKeys.has(task.key));
+        let next = Array.from(byKey.values()).filter(task => activeKeys.has(task.key));
+        // A passed inspection saved after the 100% always clears its notification,
+        // even if another device re-saved the task as pending.
+        const records = typeof inspGetInspections === 'function' ? inspGetInspections() : [];
+        if (records.length) next = next.map(task => {
+          if (task.resolvedAt || task.kind === 'official_ready') return task;
+          const done = records.filter(r => String(r.apt) === String(task.apt) && inspectionTypeMatchesSystem(r.type, task.system) && (Date.parse(r.date || r.completedAt || r.createdAt || 0) || 0) >= Number(task.completedAt || 0) - 60000).sort((a, b) => Date.parse(a.date || 0) - Date.parse(b.date || 0)).at(-1);
+          if (!done) return task;
+          return done.failedCount > 0 ? (task.lastAttempt ? task : { ...task, lastAttempt: done.date }) : { ...task, resolvedAt: done.date || new Date().toISOString(), lastAttempt: null };
+        });
         const signature = tasks => JSON.stringify((tasks || []).slice().sort((a, b) => String(a.key || '').localeCompare(String(b.key || ''))));
         if (signature(next) !== signature(tasks)) saveInspectionRequiredTasks(next);
         return next;
@@ -13884,6 +13893,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           void hydrateOfficialRemote().then(() => renderInspectionRequiredTasks());
           return;
         }
+        if (typeof inspLoadRemoteModuleDataOnce === 'function' && !window.__inspNotifLoaded) { window.__inspNotifLoaded = true; Promise.resolve(inspLoadRemoteModuleDataOnce()).then(() => renderInspectionRequiredTasks()).catch(() => {}); }
         const tasks = syncInspectionRequiredTasks().filter(task => !task.resolvedAt && (!shouldShowUnit || (data || []).some(unit => String(unit.apt) === String(task.apt) && shouldShowUnit(unit))));
         panel.style.display = tasks.length ? 'block' : 'none';
         list.innerHTML = tasks.map(task => { const officialReady = task.kind === 'official_ready'; return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid #E5E7EB;flex-wrap:wrap;"><div><div style="font-size:13px;font-weight:600;color:#1F2937;">Unit ${String(task.apt)} · ${String(task.system)}</div><div style="font-size:12px;color:#64748B;margin-top:3px;">${officialReady ? 'QA/QC and internal inspections passed for Rough-In, Trim-Out, Data, and Fire Alarm · Official inspection ready' : `System completed at 100% · Inspection required${task.lastAttempt ? ' · Previous inspection failed' : ''}`}</div></div><button type="button" class="btn btn-primary" data-inspection-start="${String(task.apt).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-inspection-kind="${officialReady ? 'official_ready' : 'system'}" style="font-size:12px;padding:7px 10px;">${officialReady ? 'Request Official Inspection' : 'Start Inspection'}</button></div>`; }).join('');
@@ -13919,8 +13929,15 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
             if (typeof inspRenderTypeGrid === 'function') inspRenderTypeGrid();
           }
         };
-        setTimeout(openCards, 0);
+        // Load saved inspections first so the cards show ✅ Completed correctly.
+        const ready = typeof inspLoadRemoteModuleDataOnce === 'function' ? Promise.resolve(inspLoadRemoteModuleDataOnce()).catch(() => {}) : Promise.resolve();
+        ready.then(() => setTimeout(openCards, 0));
       };
+      function inspectionTypeMatchesSystem(recordType, taskSystem) {
+        const normalize = value => String(value || '').toLowerCase().replace(/[\s/_-]+/g, '');
+        const system = normalize(taskSystem), type = normalize(recordType);
+        return type.includes(system) || (system.includes('roughin') && type.includes('rough')) || (system.includes('firestop') && type.includes('firestop')) || (system.includes('firealarm') && type.includes('firealarm')) || (system.includes('trimout') && type.includes('trim'));
+      }
       window.updateInspectionRequiredTasks = function (record) {
         if (!record) return;
         const tasks = getInspectionRequiredTasks();
