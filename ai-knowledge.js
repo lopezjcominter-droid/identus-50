@@ -336,7 +336,7 @@
     const el = document.createElement('div'); el.className = `aic-m aic-${who}`; el.textContent = text;
     if (citations?.length) {
       const wrap = document.createElement('div');
-      citations.forEach(c => { const b = document.createElement('span'); b.className = 'aic-cite'; b.title = 'Open document'; b.textContent = `[${c.ref}] ${c.sheet || c.file || ''}${c.revision ? ` · Rev ${String(c.revision).replace(/^\s*rev(ision)?\.?\s*/i, '')}` : ''} · p.${c.page || 1}${c.current ? ' · current' : ''}`; b.onclick = () => chatOpenCitation(c); wrap.appendChild(b); });
+      const seenDocs = new Set(); citations.filter(c => { const k = c.documentId || c.sheet; if (seenDocs.has(k)) return false; seenDocs.add(k); return true; }).forEach(c => { const b = document.createElement('span'); b.className = 'aic-cite'; b.title = 'Open document'; b.textContent = `[${c.ref}] ${c.sheet || c.file || ''}${c.revision ? ` · Rev ${String(c.revision).replace(/^\s*rev(ision)?\.?\s*/i, '')}` : ''} · p.${c.page || 1}${c.current ? ' · current' : ''}`; b.onclick = () => chatOpenCitation(c); wrap.appendChild(b); });
       el.appendChild(wrap);
     }
     box.appendChild(el); box.scrollTop = box.scrollHeight; return el;
