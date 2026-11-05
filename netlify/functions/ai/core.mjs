@@ -5,6 +5,23 @@
 // Optional: OPENAI_MODEL (default gpt-4.1-mini), OPENAI_EMBED_MODEL (default
 // text-embedding-3-small), AI_MAX_PAGE_ATTEMPTS (default 3).
 import { PDFDocument } from 'pdf-lib';
+import jpeg from 'jpeg-js';
+
+// Real crop of a JPEG to a band (T/B halves, TT..BB quarters of the height,
+// L/R halves), so the model only receives the text it must transcribe.
+const BANDS = { T: [0, 0.5], B: [0.5, 1], TT: [0, 0.25], TB: [0.25, 0.5], BT: [0.5, 0.75], BB: [0.75, 1] };
+function cropJpeg(bytes, band) {
+  const img = jpeg.decode(bytes, { useTArray: true, maxMemoryUsageInMB: 512 });
+  let x0 = 0, x1 = img.width, y0 = 0, y1 = img.height;
+  if (BANDS[band]) { y0 = Math.floor(img.height * BANDS[band][0]); y1 = Math.ceil(img.height * BANDS[band][1]); }
+  else if (band === 'L') x1 = Math.ceil(img.width / 2);
+  else if (band === 'R') x0 = Math.floor(img.width / 2);
+  // Small overlap so a line on the cut is not lost.
+  const pad = Math.round((y1 - y0) * 0.04); y0 = Math.max(0, y0 - pad); y1 = Math.min(img.height, y1 + pad);
+  const w = x1 - x0, h = y1 - y0, out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) out.set(img.data.subarray(((y + y0) * img.width + x0) * 4, ((y + y0) * img.width + x1) * 4), y * w * 4);
+  return jpeg.encode({ data: out, width: w, height: h }, 88).data;
+}
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kihsukzcbohmxovbyisi.supabase.co';
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -69,13 +86,17 @@ async function extractPage(pdfBytes, pageNumber, totalPages, category, fileName,
   // those at high detail. Fall back to the PDF only when no images exist.
   if (imagePaths.length) {
     const images = [];
-    for (const path of imagePaths.slice(0, 6)) images.push(`data:image/jpeg;base64,${Buffer.from(await download(path)).toString('base64')}`);
+    for (const path of imagePaths.slice(0, 6)) {
+      let bytes = await download(path);
+      if (half && imagePaths.length === 1) bytes = cropJpeg(bytes, half);
+      images.push(`data:image/jpeg;base64,${Buffer.from(bytes).toString('base64')}`);
+    }
     const response = await openai('chat/completions', {
       model: MODEL, temperature: 0, response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: SYSTEM },
         { role: 'user', content: [
-          { type: 'text', text: imagePaths.length === 1 ? `${half ? `Read ONLY ${({ T: 'the TOP HALF (0–50% of the height)', B: 'the BOTTOM HALF (50–100% of the height)', TT: 'the band from 0% to 25% of the height', TB: 'the band from 25% to 50% of the height', BT: 'the band from 50% to 75% of the height', BB: 'the band from 75% to 100% of the height', L: 'the LEFT HALF', R: 'the RIGHT HALF' })[half] || 'the requested part'} of this image and ignore the rest; include lines that start in that band. ` : ''}This image is ONE QUARTER of page ${pageNumber} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Extract only what is in this quarter; text cut at the edge may continue in another quarter. Transcribe only what you can actually read. Extract the JSON.` : `Page ${pageNumber} of ${totalPages} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Image 1 is the whole sheet; the next images are zoomed quarters of the same sheet (top-left, top-right, bottom-left, bottom-right) so small text is legible. Transcribe only what you can actually read. Extract the JSON.` },
+          { type: 'text', text: imagePaths.length === 1 ? `${half ? 'This image is a horizontal strip cut from a sheet; lines at the top or bottom edge may be cut. ' : ''}This image is ONE QUARTER of page ${pageNumber} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Extract only what is in this quarter; text cut at the edge may continue in another quarter. Transcribe only what you can actually read. Extract the JSON.` : `Page ${pageNumber} of ${totalPages} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Image 1 is the whole sheet; the next images are zoomed quarters of the same sheet (top-left, top-right, bottom-left, bottom-right) so small text is legible. Transcribe only what you can actually read. Extract the JSON.` },
           ...images.map(url => ({ type: 'image_url', image_url: { url, detail: 'high' } }))
         ] }
       ]
