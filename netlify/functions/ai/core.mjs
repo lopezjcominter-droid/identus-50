@@ -77,7 +77,8 @@ Return JSON with exactly these keys:
  "legend": [string], "references": [string] (other sheet numbers or spec sections referenced, e.g. "E101", "26 27 26"),
  "affected_sheets": [string] (for RFIs: sheets the RFI says are affected),
  "text": string (ONLY readable text that is NOT already in notes, schedules or legend; max ~1500 characters),
- "confidence": "high"|"medium"|"low"}
+ "confidence": "high"|"medium"|"low",
+ "complete": boolean (true ONLY if you transcribed every note, specification paragraph and schedule row visible in the image; false if any block of small text was summarized, skipped or too small to read)}
 Do not count devices or symbols.`;
 
 async function extractPage(pdfBytes, pageNumber, totalPages, category, fileName, imagePaths = [], half = '') {
@@ -259,9 +260,9 @@ export async function processOne() {
       var extracted = await extractPage(bytes, page.page_number, doc.page_count || 1, doc.category, doc.file_name, imagePaths);
       // Text-heavy sheets (specs, notes) read as a whole come back cut or
       // uncertain: read them again piece by piece.
-      if (imagePaths.length >= 5 && (extracted._finish === 'length' || extracted.confidence === 'low')) {
+      if (imagePaths.length >= 5 && (extracted._finish === 'length' || extracted.confidence === 'low' || extracted.complete !== true)) {
         await rest(`/rest/v1/ai_document_pages?id=eq.${page.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'pending', attempts: 0, error: null, extracted: { images: imagePaths, tileMode: true }, updated_at: new Date().toISOString() }) });
-        return { partial: `${doc.file_name} p${page.page_number} switching to quarters`, reason: extracted._finish === 'length' ? 'cut' : 'low confidence' };
+        return { partial: `${doc.file_name} p${page.page_number} switching to quarters`, reason: extracted._finish === 'length' ? 'cut' : (extracted.complete !== true ? 'not complete' : 'low confidence') };
       }
     }
     extracted.images = imagePaths;
