@@ -27,7 +27,8 @@ async function download(path) {
   if (!response.ok) throw new Error(`Storage ${response.status}: could not read ${path}`);
   return new Uint8Array(await response.arrayBuffer());
 }
-async function openai(path, payload, timeoutMs = 20000) {
+async function openai(path, payload, timeoutMs = 20000, maxTokens = 0) {
+  if (maxTokens && path === 'chat/completions') payload = { ...payload, max_tokens: maxTokens };
   // Scheduled functions are stopped at ~30 s: never wait longer than this.
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
@@ -58,11 +59,11 @@ Return JSON with exactly these keys:
  "schedules": [{"name": string, "rows": [string]}] (panel, fixture, equipment schedules; one row per line, verbatim),
  "legend": [string], "references": [string] (other sheet numbers or spec sections referenced, e.g. "E101", "26 27 26"),
  "affected_sheets": [string] (for RFIs: sheets the RFI says are affected),
- "text": string (the important readable text of the page, max ~6000 characters),
+ "text": string (ONLY readable text that is NOT already in notes, schedules or legend; max ~1500 characters),
  "confidence": "high"|"medium"|"low"}
 Do not count devices or symbols.`;
 
-async function extractPage(pdfBytes, pageNumber, totalPages, category, fileName, imagePaths = []) {
+async function extractPage(pdfBytes, pageNumber, totalPages, category, fileName, imagePaths = [], half = '') {
   // Drawings are vector art without a text layer: the model must SEE the
   // sheet. The browser renders each page to JPEG tiles at upload time; send
   // those at high detail. Fall back to the PDF only when no images exist.
@@ -74,11 +75,11 @@ async function extractPage(pdfBytes, pageNumber, totalPages, category, fileName,
       messages: [
         { role: 'system', content: SYSTEM },
         { role: 'user', content: [
-          { type: 'text', text: imagePaths.length === 1 ? `This image is ONE QUARTER of page ${pageNumber} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Extract only what is in this quarter; text cut at the edge may continue in another quarter. Transcribe only what you can actually read. Extract the JSON.` : `Page ${pageNumber} of ${totalPages} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Image 1 is the whole sheet; the next images are zoomed quarters of the same sheet (top-left, top-right, bottom-left, bottom-right) so small text is legible. Transcribe only what you can actually read. Extract the JSON.` },
+          { type: 'text', text: imagePaths.length === 1 ? `${half ? `Read ONLY the ${half === 'L' ? 'LEFT' : 'RIGHT'} HALF of this image and ignore the other half. ` : ''}This image is ONE QUARTER of page ${pageNumber} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Extract only what is in this quarter; text cut at the edge may continue in another quarter. Transcribe only what you can actually read. Extract the JSON.` : `Page ${pageNumber} of ${totalPages} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Image 1 is the whole sheet; the next images are zoomed quarters of the same sheet (top-left, top-right, bottom-left, bottom-right) so small text is legible. Transcribe only what you can actually read. Extract the JSON.` },
           ...images.map(url => ({ type: 'image_url', image_url: { url, detail: 'high' } }))
         ] }
       ]
-    }, 25000);
+    }, 25000, imagePaths.length === 1 ? 2200 : 3000);
     const content = response.choices?.[0]?.message?.content || '{}';
     let data; try { data = JSON.parse(content); } catch (_) { data = { summary: '', text: String(content).slice(0, 6000), confidence: 'low' }; }
     data._usage = response.usage || null; data._model = MODEL; data._source = 'images';
@@ -177,7 +178,8 @@ async function finishDocument(documentId) {
 }
 
 function mergeParts(parts) {
-  const list = [1, 2, 3, 4].map(i => parts[i]).filter(Boolean);
+  const order = ['1', '1L', '1R', '2', '2L', '2R', '3', '3L', '3R', '4', '4L', '4R'];
+  const list = order.map(k => parts[k]).filter(Boolean);
   const first = key => list.map(p => p?.[key]).find(v => v != null && v !== '') ?? null;
   const uniq = arr => [...new Set(arr.filter(Boolean).map(String))];
   const usage = list.reduce((sum, p) => ({ prompt_tokens: sum.prompt_tokens + (p._usage?.prompt_tokens || 0), completion_tokens: sum.completion_tokens + (p._usage?.completion_tokens || 0) }), { prompt_tokens: 0, completion_tokens: 0 });
@@ -204,18 +206,28 @@ export async function processOne() {
     // the parts are merged at the end.
     const tileMode = imagePaths.length >= 5 && (page.extracted?.tileMode || /took longer/i.test(String(page.error || '')));
     if (tileMode) {
+      // Queue of pieces: quarters "1".."4"; a quarter that is still too slow is
+      // split into its left/right halves ("1L","1R"). A half that still times
+      // out is skipped and reported, so the page always finishes.
       const parts = { ...(page.extracted?.parts || {}) };
-      const next = [1, 2, 3, 4].find(i => !parts[i]);
-      if (next) {
-        const part = await extractPage(null, page.page_number, doc.page_count || 1, doc.category, doc.file_name, [imagePaths[next]]);
-        parts[next] = part;
-        const remaining = [1, 2, 3, 4].filter(i => !parts[i]).length;
-        if (remaining) {
-          await rest(`/rest/v1/ai_document_pages?id=eq.${page.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'pending', attempts: 0, error: null, extracted: { images: imagePaths, tileMode: true, parts }, updated_at: new Date().toISOString() }) });
-          return { partial: `${doc.file_name} p${page.page_number} quarter ${next}`, remaining };
+      const queue = Array.isArray(page.extracted?.queue) ? [...page.extracted.queue] : ['1', '2', '3', '4'];
+      const skipped = Array.isArray(page.extracted?.skipped) ? [...page.extracted.skipped] : [];
+      const key = queue.shift();
+      if (key) {
+        const half = key.length > 1 ? key.slice(-1) : '';
+        try {
+          parts[key] = await extractPage(null, page.page_number, doc.page_count || 1, doc.category, doc.file_name, [imagePaths[Number(key[0])]], half);
+        } catch (error) {
+          if (!/took longer/i.test(String(error.message))) throw error;
+          if (half) skipped.push(key); else queue.unshift(`${key}L`, `${key}R`);
+        }
+        if (queue.length) {
+          await rest(`/rest/v1/ai_document_pages?id=eq.${page.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'pending', attempts: 0, error: null, extracted: { images: imagePaths, tileMode: true, parts, queue, skipped }, updated_at: new Date().toISOString() }) });
+          return { partial: `${doc.file_name} p${page.page_number} piece ${key}`, remaining: queue.length };
         }
       }
       var extracted = mergeParts(parts);
+      if (skipped.length) { extracted.confidence = 'low'; extracted.unread_parts = skipped; }
     } else {
       const bytes = imagePaths.length ? null : await download(doc.storage_path);
       var extracted = await extractPage(bytes, page.page_number, doc.page_count || 1, doc.category, doc.file_name, imagePaths);
