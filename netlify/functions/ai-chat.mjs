@@ -62,7 +62,25 @@ export default async (request) => {
   if (!/^Bearer\s+\S+/.test(bearer) || !apikey) return json(401, { error: 'Sign in again.' });
   const auth = { bearer, apikey };
   let input; try { input = await request.json(); } catch (_) { return json(400, { error: 'Invalid request' }); }
-  const projectId = String(input.projectId || ''); const question = String(input.question || '').trim().slice(0, 2000);
+  const projectId = String(input.projectId || ''); let question = String(input.question || '').trim().slice(0, 2000);
+  // Voice note: transcribe the recorded audio with OpenAI, then answer it as text.
+  if (!question && input.audio) {
+    try {
+      const bytes = Buffer.from(String(input.audio), 'base64');
+      if (bytes.length > 4_000_000) return json(400, { error: 'Voice note too long (max ~1 min).' });
+      const type = String(input.audioType || 'audio/webm').split(';')[0];
+      const ext = type.includes('mp4') || type.includes('m4a') ? 'mp4' : type.includes('ogg') ? 'ogg' : type.includes('wav') ? 'wav' : 'webm';
+      const form = new FormData();
+      form.append('file', new Blob([bytes], { type }), `voice.${ext}`);
+      form.append('model', process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-transcribe');
+      form.append('prompt', 'Electrical construction: receptacles, AFF, panel, breaker, conduit, EMT, THHN, NEC, fire alarm, drawing sheet E280, E600.');
+      const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: form });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b?.error?.message || `transcription ${r.status}`);
+      question = String(b.text || '').trim().slice(0, 2000);
+    } catch (error) { return json(502, { error: `Could not transcribe the voice note: ${error.message}` }); }
+    if (!question) return json(400, { error: 'No speech detected in the voice note.' });
+  }
   if (!/^[0-9a-f-]{36}$/i.test(projectId) || !question) return json(400, { error: 'Missing project or question' });
   try {
     const user = await sb('/auth/v1/user', auth);
@@ -109,7 +127,7 @@ export default async (request) => {
 
     const ctx = input.context && typeof input.context === 'object' ? JSON.stringify(input.context).slice(0, 400) : '';
     const completion = await openai('chat/completions', {
-      model: CHAT_MODEL, temperature: 0.1, max_tokens: 450,
+      model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450,
       messages: [
         { role: 'system', content: SYSTEM },
         ...history.map(m => ({ role: m.role, content: String(m.content).slice(0, 1500) })),
@@ -130,7 +148,7 @@ export default async (request) => {
       { conversation_id: conversationId, project_id: projectId, role: 'assistant', content: answer, citations: used }
     ]) }).catch(() => {});
     if (conversationId) await sb(`/rest/v1/ai_conversations?id=eq.${conversationId}`, auth, { method: 'PATCH', body: JSON.stringify({ updated_at: new Date().toISOString() }) }).catch(() => {});
-    return json(200, { answer, citations: used, conversationId, usage });
+    return json(200, { answer, question, citations: used, conversationId, usage });
   } catch (error) {
     console.error('ai-chat', error.message);
     return json(error.status === 401 ? 401 : 500, { error: error.status === 401 ? 'Sign in again.' : `The assistant could not answer: ${String(error.message).slice(0, 200)}` });
