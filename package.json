@@ -2,6 +2,7 @@
   "name": "identus-50",
   "private": true,
   "dependencies": {
-    "pdf-lib": "1.17.1"
+    "pdf-lib": "1.17.1",
+    "jpeg-js": "0.4.4"
   }
 }
