@@ -346,7 +346,7 @@ body.aic-open{overflow:hidden}
     const panel = document.createElement('section'); panel.id = 'aiChatPanel'; panel.hidden = true; panel.setAttribute('data-no-translate', '');
     panel.innerHTML = `<div class="h"><div><strong style="color:#3730A3;">AI Assistant</strong><small id="aiChatCtx"></small></div><div style="display:flex;gap:6px;align-items:center;"><button type="button" class="aic-hbtn" onclick="aiChatNew()">＋ New chat</button><button type="button" class="aic-hbtn" id="aiChatHistBtn" onclick="aiChatHistory()">🕘 History</button><button type="button" aria-label="Close" onclick="aiChatToggle(false)" style="border:0;background:none;cursor:pointer;font-size:20px;color:#64748B;">×</button></div></div>
       <div id="aiChatMsgs"></div>
-      <form id="aiChatForm"><button type="button" id="aiChatMic" title="Speak" style="background:#EEF2FF;color:#3730A3;">🎤</button><input id="aiChatInput" autocomplete="off" placeholder="Ask about drawings, specs, RFIs, code…"><button type="submit" style="background:#3730A3;color:#fff;">Send</button></form>`;
+      <form id="aiChatForm"><button type="button" id="aiChatMic" title="Voice note" style="background:#EEF2FF;color:#3730A3;">🎤</button><input id="aiChatInput" autocomplete="off" placeholder="Ask about drawings, specs, RFIs, code…"><button type="submit" style="background:#3730A3;color:#fff;">Send</button></form>`;
     document.body.appendChild(fab); document.body.appendChild(panel);
     fab.onclick = () => aiChatToggle();
     panel.querySelector('#aiChatForm').onsubmit = event => { event.preventDefault(); chatAsk(); };
@@ -371,32 +371,42 @@ body.aic-open{overflow:hidden}
     const { data } = await sb.storage.from(BUCKET).createSignedUrl(path, 600);
     if (data?.signedUrl) window.open(`${data.signedUrl}#page=${c.page || 1}`, '_blank', 'noopener');
   }
-  async function chatAsk() {
-    const input = document.getElementById('aiChatInput'); const question = String(input?.value || '').trim();
-    if (!question || chatBusy) return;
-    chatBusy = true; input.value = ''; chatAdd('u', question); const waiting = chatAdd('a', '…');
+  async function chatAsk(voice) {
+    const input = document.getElementById('aiChatInput'); const question = voice ? '' : String(input?.value || '').trim();
+    if ((!question && !voice) || chatBusy) return;
+    chatBusy = true; if (!voice) input.value = ''; const mine = chatAdd('u', question || '🎤 …'); const waiting = chatAdd('a', '…');
     try {
       const token = window.getAccessToken ? await window.getAccessToken() : null;
       if (!token) throw new Error('Your session expired. Sign in again.');
-      const response = await fetch('/.netlify/functions/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') }, body: JSON.stringify({ projectId: projectId(), question, conversationId: chatConversationId, context: chatContext() }) });
+      const response = await fetch('/.netlify/functions/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') }, body: JSON.stringify({ projectId: projectId(), question, ...(voice || {}), conversationId: chatConversationId, context: chatContext() }) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || `Error ${response.status}`);
       chatConversationId = body.conversationId || chatConversationId;
+      if (voice && body.question) mine.textContent = `🎤 ${body.question}`;
       waiting.remove(); chatAdd('a', body.answer, body.citations);
     } catch (error) { waiting.textContent = `⚠️ ${error.message}`; }
     finally { chatBusy = false; }
   }
-  function chatMic() {
-    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Rec) { chatAdd('a', 'Voice input is not available in this browser. Use the keyboard dictation button instead.'); return; }
-    if (chatRecognition) { chatRecognition.stop(); return; }
-    const rec = new Rec(); chatRecognition = rec;
-    rec.lang = (document.documentElement.lang || navigator.language || 'es-US').startsWith('en') ? 'en-US' : 'es-US';
-    rec.interimResults = true; const input = document.getElementById('aiChatInput'); const mic = document.getElementById('aiChatMic');
-    mic.textContent = '⏺️';
-    rec.onresult = e => { input.value = Array.from(e.results).map(r => r[0].transcript).join(' '); };
-    rec.onend = () => { chatRecognition = null; mic.textContent = '🎤'; if (input.value.trim()) chatAsk(); };
-    rec.onerror = () => { chatRecognition = null; mic.textContent = '🎤'; };
+  // Voice note: tap 🎤 to record, tap ⏹ to send (max 60 s). Transcribed on the server.
+  let chatRecorder = null;
+  async function chatMic() {
+    const mic = document.getElementById('aiChatMic');
+    if (chatRecorder) { chatRecorder.stop(); return; }
+    if (chatBusy) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { chatAdd('a', 'Voice notes are not available in this browser.'); return; }
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (_) { chatAdd('a', 'Microphone permission denied.'); return; }
+    const type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find(t => MediaRecorder.isTypeSupported?.(t)) || '';
+    const rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined); const parts = []; chatRecorder = rec;
+    const started = Date.now(); mic.textContent = '⏹'; mic.style.background = '#FEE2E2';
+    const timer = setInterval(() => { const s = Math.round((Date.now() - started) / 1000); mic.title = `${s}s`; if (s >= 60) rec.stop(); }, 500);
+    rec.ondataavailable = e => { if (e.data?.size) parts.push(e.data); };
+    rec.onstop = async () => {
+      clearInterval(timer); stream.getTracks().forEach(t => t.stop()); chatRecorder = null; mic.textContent = '🎤'; mic.style.background = '#EEF2FF';
+      if (Date.now() - started < 700 || !parts.length) return;
+      const blob = new Blob(parts, { type: rec.mimeType || type || 'audio/webm' });
+      const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.readAsDataURL(blob); });
+      chatAsk({ audio: b64, audioType: blob.type });
+    };
     rec.start();
   }
   window.aiChatToggle = force => {
