@@ -158,8 +158,15 @@ async function claimPage() {
   // A page left in "processing" by a run that was stopped (time limit) is
   // picked up again after 3 minutes, so nothing stays stuck.
   const staleBefore = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-  const stale = await rest(`/rest/v1/ai_document_pages?status=eq.processing&updated_at=lt.${encodeURIComponent(staleBefore)}&select=id,attempts&limit=5`);
+  const stale = await rest(`/rest/v1/ai_document_pages?status=eq.processing&updated_at=lt.${encodeURIComponent(staleBefore)}&select=id,attempts,extracted&limit=5`);
   for (const page of stale || []) {
+    // A full-sheet read that was cut by the time limit switches to tile mode
+    // (pieces) instead of retrying the same full read until it fails.
+    const ex = page.extracted || {};
+    if (Array.isArray(ex.images) && ex.images.length >= 5 && !ex.tileMode) {
+      await rest(`/rest/v1/ai_document_pages?id=eq.${page.id}&status=eq.processing`, { method: 'PATCH', body: JSON.stringify({ status: 'pending', attempts: 0, error: null, extracted: { ...ex, tileMode: true }, updated_at: new Date().toISOString() }) });
+      continue;
+    }
     const failed = (page.attempts || 0) >= MAX_ATTEMPTS;
     await rest(`/rest/v1/ai_document_pages?id=eq.${page.id}&status=eq.processing`, { method: 'PATCH', body: JSON.stringify({ status: failed ? 'error' : 'pending', error: failed ? 'Stopped repeatedly (page too large or too slow)' : null, updated_at: new Date().toISOString() }) });
   }
