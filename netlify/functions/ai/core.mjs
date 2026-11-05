@@ -82,7 +82,7 @@ async function extractPage(pdfBytes, pageNumber, totalPages, category, fileName,
     }, 25000, imagePaths.length === 1 ? 2200 : 3000);
     const content = response.choices?.[0]?.message?.content || '{}';
     let data; try { data = JSON.parse(content); } catch (_) { data = { summary: '', text: String(content).slice(0, 6000), confidence: 'low' }; }
-    data._usage = response.usage || null; data._model = MODEL; data._source = 'images';
+    data._usage = response.usage || null; data._model = MODEL; data._source = 'images'; data._finish = response.choices?.[0]?.finish_reason || null;
     return data;
   }
   let bytes = pdfBytes;
@@ -216,7 +216,9 @@ export async function processOne() {
       if (key) {
         const half = key.length > 1 ? key.slice(-1) : '';
         try {
-          parts[key] = await extractPage(null, page.page_number, doc.page_count || 1, doc.category, doc.file_name, [imagePaths[Number(key[0])]], half);
+          const part = await extractPage(null, page.page_number, doc.page_count || 1, doc.category, doc.file_name, [imagePaths[Number(key[0])]], half);
+          if (part._finish === 'length' && !half) queue.unshift(`${key}L`, `${key}R`); // too much text: read in halves
+          else parts[key] = part;
         } catch (error) {
           if (!/took longer/i.test(String(error.message))) throw error;
           if (half) skipped.push(key); else queue.unshift(`${key}L`, `${key}R`);
@@ -231,6 +233,12 @@ export async function processOne() {
     } else {
       const bytes = imagePaths.length ? null : await download(doc.storage_path);
       var extracted = await extractPage(bytes, page.page_number, doc.page_count || 1, doc.category, doc.file_name, imagePaths);
+      // Text-heavy sheets (specs, notes) read as a whole come back cut or
+      // uncertain: read them again piece by piece.
+      if (imagePaths.length >= 5 && (extracted._finish === 'length' || extracted.confidence === 'low')) {
+        await rest(`/rest/v1/ai_document_pages?id=eq.${page.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'pending', attempts: 0, error: null, extracted: { images: imagePaths, tileMode: true }, updated_at: new Date().toISOString() }) });
+        return { partial: `${doc.file_name} p${page.page_number} switching to quarters`, reason: extracted._finish === 'length' ? 'cut' : 'low confidence' };
+      }
     }
     extracted.images = imagePaths;
     const chunks = chunkText(extracted);
