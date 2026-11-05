@@ -74,7 +74,7 @@ async function extractPage(pdfBytes, pageNumber, totalPages, category, fileName,
       messages: [
         { role: 'system', content: SYSTEM },
         { role: 'user', content: [
-          { type: 'text', text: `Page ${pageNumber} of ${totalPages} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Image 1 is the whole sheet; the next images are zoomed quarters of the same sheet (top-left, top-right, bottom-left, bottom-right) so small text is legible. Transcribe only what you can actually read. Extract the JSON.` },
+          { type: 'text', text: imagePaths.length === 1 ? `This image is ONE QUARTER of page ${pageNumber} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Extract only what is in this quarter; text cut at the edge may continue in another quarter. Transcribe only what you can actually read. Extract the JSON.` : `Page ${pageNumber} of ${totalPages} of "${fileName}", ${CATEGORY_HINT[category] || CATEGORY_HINT.other}. Image 1 is the whole sheet; the next images are zoomed quarters of the same sheet (top-left, top-right, bottom-left, bottom-right) so small text is legible. Transcribe only what you can actually read. Extract the JSON.` },
           ...images.map(url => ({ type: 'image_url', image_url: { url, detail: 'high' } }))
         ] }
       ]
@@ -176,6 +176,21 @@ async function finishDocument(documentId) {
   }
 }
 
+function mergeParts(parts) {
+  const list = [1, 2, 3, 4].map(i => parts[i]).filter(Boolean);
+  const first = key => list.map(p => p?.[key]).find(v => v != null && v !== '') ?? null;
+  const uniq = arr => [...new Set(arr.filter(Boolean).map(String))];
+  const usage = list.reduce((sum, p) => ({ prompt_tokens: sum.prompt_tokens + (p._usage?.prompt_tokens || 0), completion_tokens: sum.completion_tokens + (p._usage?.completion_tokens || 0) }), { prompt_tokens: 0, completion_tokens: 0 });
+  return {
+    sheet_number: first('sheet_number'), title: first('title'), discipline: first('discipline'), building: first('building'), floor: first('floor'),
+    revision: first('revision'), revision_date: first('revision_date'), spec_section: first('spec_section'), rfi_number: first('rfi_number'),
+    summary: uniq(list.map(p => p.summary)).join(' '), notes: uniq(list.flatMap(p => p.notes || [])), schedules: list.flatMap(p => p.schedules || []),
+    legend: uniq(list.flatMap(p => p.legend || [])), references: uniq(list.flatMap(p => p.references || [])), affected_sheets: uniq(list.flatMap(p => p.affected_sheets || [])),
+    text: list.map(p => p.text || '').join('\n').slice(0, 12000),
+    confidence: list.some(p => p.confidence === 'low') ? 'low' : (list.every(p => p.confidence === 'high') ? 'high' : 'medium'),
+    _usage: usage, _model: MODEL, _source: 'images-quarters'
+  };
+}
 export async function processOne() {
   const page = await claimPage();
   if (!page) return { idle: true };
@@ -184,8 +199,27 @@ export async function processOne() {
   await rest(`/rest/v1/ai_documents?id=eq.${doc.id}&status=eq.pending`, { method: 'PATCH', body: JSON.stringify({ status: 'processing', updated_at: new Date().toISOString() }) }).catch(() => {});
   try {
     const imagePaths = Array.isArray(page.extracted?.images) ? page.extracted.images : [];
-    const bytes = imagePaths.length ? null : await download(doc.storage_path);
-    const extracted = await extractPage(bytes, page.page_number, doc.page_count || 1, doc.category, doc.file_name, imagePaths);
+    // Dense sheets (big schedules) can take longer than one run allows. After a
+    // timeout the page is read one quarter at a time, one quarter per run, and
+    // the parts are merged at the end.
+    const tileMode = imagePaths.length >= 5 && (page.extracted?.tileMode || /took longer/i.test(String(page.error || '')));
+    if (tileMode) {
+      const parts = { ...(page.extracted?.parts || {}) };
+      const next = [1, 2, 3, 4].find(i => !parts[i]);
+      if (next) {
+        const part = await extractPage(null, page.page_number, doc.page_count || 1, doc.category, doc.file_name, [imagePaths[next]]);
+        parts[next] = part;
+        const remaining = [1, 2, 3, 4].filter(i => !parts[i]).length;
+        if (remaining) {
+          await rest(`/rest/v1/ai_document_pages?id=eq.${page.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'pending', attempts: 0, error: null, extracted: { images: imagePaths, tileMode: true, parts }, updated_at: new Date().toISOString() }) });
+          return { partial: `${doc.file_name} p${page.page_number} quarter ${next}`, remaining };
+        }
+      }
+      var extracted = mergeParts(parts);
+    } else {
+      const bytes = imagePaths.length ? null : await download(doc.storage_path);
+      var extracted = await extractPage(bytes, page.page_number, doc.page_count || 1, doc.category, doc.file_name, imagePaths);
+    }
     extracted.images = imagePaths;
     const chunks = chunkText(extracted);
     const vectors = await embed(chunks);
@@ -196,7 +230,12 @@ export async function processOne() {
     return { done: `${doc.file_name} p${page.page_number}`, usage: extracted._usage };
   } catch (error) {
     const fatal = (page.attempts || 1) >= MAX_ATTEMPTS || error.status === 401 || (error.status === 400 && !/timeout|took longer/i.test(error.message));
-    await rest(`/rest/v1/ai_document_pages?id=eq.${page.id}`, { method: 'PATCH', body: JSON.stringify({ status: fatal ? 'error' : 'pending', error: String(error.message || error).slice(0, 500), updated_at: new Date().toISOString() }) });
+    const timedOut = /took longer/i.test(String(error.message || ''));
+    const patch = { status: fatal && !timedOut ? 'error' : 'pending', error: String(error.message || error).slice(0, 500), updated_at: new Date().toISOString() };
+    // A timeout switches the page to quarter-by-quarter reading instead of failing.
+    if (timedOut && Array.isArray(page.extracted?.images) && page.extracted.images.length >= 5 && !page.extracted.tileMode) Object.assign(patch, { attempts: 0, extracted: { ...page.extracted, tileMode: true } });
+    else if (timedOut && fatal) patch.status = 'error';
+    await rest(`/rest/v1/ai_document_pages?id=eq.${page.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
     if (fatal) await finishDocument(doc.id).catch(() => {});
     if (error.status === 401 || error.status === 429) throw error; // stop this run: bad key or quota
     return { failed: `${doc.file_name} p${page.page_number}`, error: error.message };
