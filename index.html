@@ -14851,6 +14851,7 @@ async function inspLoadRemoteModuleData() {
     const items = (itemsByRecord.get(row.id) || []).sort((a, b) => a.idx - b.idx);
     return {
       id: row.id,
+      unitId: row.unit_id,
       apt: unit.apt || '',
       building: unit.building || '',
       floor: unit.floor || '',
@@ -14909,7 +14910,16 @@ async function inspLoadRemoteModuleData() {
 }
 
 function inspGetInspections() {
-  if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:') return Array.isArray(inspRemoteRecords) ? inspRemoteRecords : [];
+  if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:') {
+    const list = Array.isArray(inspRemoteRecords) ? inspRemoteRecords : [];
+    // Records can load before the unit list; fill the unit name once it is known.
+    if (list.some(r => !r.apt && r.unitId)) {
+      let units = []; try { units = [...(Array.isArray(data) ? data : []), ...(typeof inspectionEntitySource === 'function' ? inspectionEntitySource() : [])]; } catch (_) {}
+      const byId = new Map(units.filter(u => u && u.id).map(u => [String(u.id), u]));
+      list.forEach(r => { if (!r.apt && r.unitId) { const u = byId.get(String(r.unitId)); if (u) { r.apt = u.apt || u.unit_number || ''; r.building = r.building || u.building || ''; r.floor = r.floor || u.floor || ''; } } });
+    }
+    return list;
+  }
   try { return JSON.parse(localStorage.getItem('inspections_data') || '[]'); } catch(e) { return []; }
 }
 
