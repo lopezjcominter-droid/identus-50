@@ -43,7 +43,9 @@ Rules:
 - If drawings and spec disagree, point out the conflict with both citations and recommend an RFI; do not pick one silently.
 - If the SOURCES do not answer the question, say so. Then you may give code guidance labeled "General guidance (${CODE_BASIS}, not from project documents)" with the article number, and recommend confirming with the AHJ.
 - Never state that a revision is current unless the source is marked CURRENT REVISION. If a source is marked "not confirmed", say it is an AI reading pending review.
-- Do not count devices or symbols.`;
+- Do not count devices or symbols.
+Trade conventions (do not flag these as conflicts): "4 wire" range/dryer circuits = 3 conductors plus ground; "3W" panels = 2 hots + neutral; AFF = above finished floor; MLO = main lugs only.
+If the user's message is feedback or a follow-up ("revisa bien", "¿seguro?", "check again"), re-check your previous answer against the SOURCES and correct it if needed; do not treat it as a new topic.`;
 
 export default async (request) => {
   if (request.method !== 'POST') return json(405, { error: 'POST only' });
