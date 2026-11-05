@@ -3,7 +3,7 @@
 import { runQueue } from './ai/core.mjs';
 export default async () => {
   try {
-    const result = await runQueue(22000);
+    const result = await runQueue(6000);
     console.log('ai-process', JSON.stringify(result).slice(0, 2000));
   } catch (error) {
     console.error('ai-process stopped', error.message);
