@@ -2334,6 +2334,7 @@
         </details>
 
         <!-- Reusable floor/site plan library -->
+        <div id="aiKnowledgeBaseHost"></div>
         <details id="setupFloorPlansDetails" open style="border:1px solid #BFDBFE;border-radius:8px;overflow:hidden;background:#F8FBFF;margin-top:10px;">
           <summary style="padding:12px 14px;font-size:13px;font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;">
             🗺️ Floor / Site Plan Library <span style="font-size:11px;font-weight:400;color:#475569;">Upload by building and floor</span>
@@ -8485,6 +8486,7 @@ async function openProjectSetup() {
       const setupList = document.getElementById('setupBuildingsList');
       setupList.innerHTML = '<div style="padding:12px;text-align:center;color:#6B7280;font-size:13px;">⏳ Loading from Supabase...</div>';
 showAppModal('projectSetupModal');
+      try { if (typeof window.aiKbRender === 'function') window.aiKbRender(); } catch (error) { console.warn('AI Knowledge Base', error); }
       // Unit drawings / floor plans come from Quantity Control data: load it if
       // Setup is opened before the QC tab (it re-renders both lists when done).
       try { if (!quantityUsesLocalStorage() && !quantityRemoteReady) (quantityRemoteLoading || quantityHydrateRemote()).then(() => { if (document.getElementById('setupDrawingModelsList')) renderSetupDrawingModels(); if (document.getElementById('setupFloorPlansList')) renderSetupFloorPlans(); }).catch(() => {}); } catch (_) {}
@@ -17781,5 +17783,6 @@ document.addEventListener('DOMContentLoaded', function() {
 // Report refreshes on tab entry and filter changes. Avoid a polling loop here:
 // it repeatedly rebuilt the report while the user was reading or typing.
 </script>
+<script src="ai-knowledge.js" defer></script>
 </body>
 </html>
