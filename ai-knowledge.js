@@ -303,7 +303,7 @@
     if (document.getElementById('aiChatFab')) return;
     const style = document.createElement('style');
     style.textContent = `#aiChatFab{position:fixed;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:10080;width:54px;height:54px;border-radius:50%;border:0;background:#3730A3;color:#fff;font-size:24px;cursor:pointer;box-shadow:0 6px 18px rgba(15,23,42,.3)}
-#aiChatPanel{position:fixed;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(150px + env(safe-area-inset-bottom,0px));z-index:10080;width:min(410px,calc(100vw - 36px));height:min(600px,calc(100vh - 190px));background:#fff;border:1px solid #C7D2FE;border-radius:12px;box-shadow:0 14px 36px rgba(15,23,42,.25);display:flex;flex-direction:column;overflow:hidden;font-size:13px}
+#aiChatPanel{position:fixed;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(150px + env(safe-area-inset-bottom,0px));z-index:10080;width:min(410px,calc(100vw - 36px));height:min(640px,calc(100vh - 190px));height:min(640px,calc(100dvh - 190px));background:#fff;border:1px solid #C7D2FE;border-radius:12px;box-shadow:0 14px 36px rgba(15,23,42,.25);display:flex;flex-direction:column;overflow:hidden;font-size:13px}
 #aiChatPanel[hidden]{display:none}
 #aiChatPanel .h{padding:10px 12px;background:#EEF2FF;border-bottom:1px solid #C7D2FE;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
 #aiChatPanel .h small{display:block;color:#64748B;font-size:11px;margin-top:2px}
@@ -312,13 +312,27 @@
 .aic-u{align-self:flex-end;background:#3730A3;color:#fff}.aic-a{align-self:flex-start;background:#F1F5F9;color:#0F172A}
 .aic-cite{display:inline-block;margin:4px 4px 0 0;padding:2px 7px;border:1px solid #C7D2FE;border-radius:5px;background:#fff;color:#3730A3;font-size:11px;cursor:pointer}
 #aiChatForm{display:flex;gap:6px;padding:9px;border-top:1px solid #E2E8F0}
-#aiChatInput{flex:1;min-width:0;padding:9px 10px;border:1px solid #CBD5E1;border-radius:8px;font:inherit}
+#aiChatInput{flex:1;min-width:0;padding:9px 10px;border:1px solid #CBD5E1;border-radius:8px;font:inherit;font-size:16px}
 #aiChatForm button{border:0;border-radius:8px;padding:0 12px;cursor:pointer;font-weight:600}
 .aic-hbtn{border:1px solid #C7D2FE;background:#fff;color:#3730A3;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer}
 .aic-h{display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;cursor:pointer;background:#fff}
 .aic-h:hover{background:#EEF2FF}.aic-h b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#1E293B}
 .aic-h small{color:#64748B;font-size:11px;white-space:nowrap}
-@media (max-width:520px){#aiChatPanel{right:0;left:0;bottom:0;width:100%;height:100%;border-radius:0}}`;
+@media (max-width:820px),(pointer:coarse) and (max-width:1024px){
+#aiChatPanel{inset:0;right:0;left:0;top:0;bottom:0;width:100%;max-width:100%;height:100%;height:100dvh;border-radius:0;border:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box}
+#aiChatPanel .h{padding:12px 14px}
+#aiChatPanel .h strong{font-size:16px}
+.aic-hbtn{padding:6px 10px;font-size:12px}
+#aiChatPanel .h button[aria-label="Close"]{font-size:28px!important;padding:0 4px}
+#aiChatMsgs{padding:12px 14px;font-size:15px}
+.aic-m{max-width:94%}
+.aic-cite{font-size:12px;padding:4px 8px}
+#aiChatForm{padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px))}
+#aiChatForm button{min-height:44px;padding:0 14px}
+body.aic-open #aiChatFab{display:none}
+body.aic-open{overflow:hidden}
+}
+@media (max-width:820px){#aiChatFab{bottom:calc(76px + env(safe-area-inset-bottom,0px))}}`;
     document.head.appendChild(style);
     const fab = document.createElement('button'); fab.id = 'aiChatFab'; fab.type = 'button'; fab.title = 'AI assistant'; fab.setAttribute('aria-label', 'Open the AI assistant'); fab.textContent = '💬';
     const panel = document.createElement('section'); panel.id = 'aiChatPanel'; panel.hidden = true; panel.setAttribute('data-no-translate', '');
@@ -380,6 +394,7 @@
   window.aiChatToggle = force => {
     chatEnsure(); const panel = document.getElementById('aiChatPanel');
     panel.hidden = force === undefined ? !panel.hidden : !force;
+    document.body.classList.toggle('aic-open', !panel.hidden);
     if (!panel.hidden) { const c = chatContext(); document.getElementById('aiChatCtx').textContent = [c.tab, c.unit && `Unit ${c.unit}`, c.system].filter(Boolean).join(' · '); document.getElementById('aiChatInput').focus(); }
   };
   let chatView = 'chat';
