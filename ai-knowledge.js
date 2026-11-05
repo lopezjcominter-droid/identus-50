@@ -113,6 +113,7 @@
     const busyCount = documents.filter(d => d.status === 'pending' || d.status === 'processing').length;
     const alerts = (review ? `<div style="padding:7px 10px;border:1px solid #FDBA74;background:#FFF7ED;color:#9A3412;border-radius:6px;font-size:12px;">⚠️ ${review} document(s) need review. Open them with <b>Review</b> to correct or confirm the data.</div>` : '') + (busyCount ? `<div style="padding:7px 10px;border:1px solid #BFDBFE;background:#EFF6FF;color:#1D4ED8;border-radius:6px;font-size:12px;">⏳ The AI is reading ${busyCount} document(s) in the background. You can close Setup; it keeps going.</div>` : '');
     const missing = tableMissing ? `<div style="padding:8px 10px;border:1px solid #FCD34D;background:#FFFBEB;color:#92400E;border-radius:6px;font-size:12px;">The AI Knowledge Base tables are not in Supabase yet. Run <strong>20261104_ai_knowledge_base.sql</strong> in the Supabase SQL editor, then reopen Setup.</div>` : '';
+    host.setAttribute('data-no-translate', '');
     host.innerHTML = `<details id="aiKnowledgeBaseDetails" open style="border:1px solid #C7D2FE;border-radius:8px;overflow:hidden;background:#F8F9FF;margin-top:10px;">
       <summary style="padding:10px 14px;cursor:pointer;font-weight:700;color:#3730A3;font-size:13px;">🤖 AI Knowledge Base <span style="font-weight:400;color:#64748B;font-size:11px;">· documents the AI assistant will use for this project</span></summary>
       <div style="padding:14px;display:flex;flex-direction:column;gap:10px;background:#fff;">
@@ -239,8 +240,8 @@
   function chatEnsure() {
     if (document.getElementById('aiChatFab')) return;
     const style = document.createElement('style');
-    style.textContent = `#aiChatFab{position:fixed;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:10080;width:54px;height:54px;border-radius:50%;border:0;background:#3730A3;color:#fff;font-size:24px;cursor:pointer;box-shadow:0 6px 18px rgba(15,23,42,.3)}
-#aiChatPanel{position:fixed;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:10080;width:min(410px,calc(100vw - 36px));height:min(600px,calc(100vh - 120px));background:#fff;border:1px solid #C7D2FE;border-radius:12px;box-shadow:0 14px 36px rgba(15,23,42,.25);display:flex;flex-direction:column;overflow:hidden;font-size:13px}
+    style.textContent = `#aiChatFab{position:fixed;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:10080;width:54px;height:54px;border-radius:50%;border:0;background:#3730A3;color:#fff;font-size:24px;cursor:pointer;box-shadow:0 6px 18px rgba(15,23,42,.3)}
+#aiChatPanel{position:fixed;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(150px + env(safe-area-inset-bottom,0px));z-index:10080;width:min(410px,calc(100vw - 36px));height:min(600px,calc(100vh - 190px));background:#fff;border:1px solid #C7D2FE;border-radius:12px;box-shadow:0 14px 36px rgba(15,23,42,.25);display:flex;flex-direction:column;overflow:hidden;font-size:13px}
 #aiChatPanel[hidden]{display:none}
 #aiChatPanel .h{padding:10px 12px;background:#EEF2FF;border-bottom:1px solid #C7D2FE;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
 #aiChatPanel .h small{display:block;color:#64748B;font-size:11px;margin-top:2px}
@@ -251,11 +252,15 @@
 #aiChatForm{display:flex;gap:6px;padding:9px;border-top:1px solid #E2E8F0}
 #aiChatInput{flex:1;min-width:0;padding:9px 10px;border:1px solid #CBD5E1;border-radius:8px;font:inherit}
 #aiChatForm button{border:0;border-radius:8px;padding:0 12px;cursor:pointer;font-weight:600}
+.aic-hbtn{border:1px solid #C7D2FE;background:#fff;color:#3730A3;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer}
+.aic-h{display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;cursor:pointer;background:#fff}
+.aic-h:hover{background:#EEF2FF}.aic-h b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#1E293B}
+.aic-h small{color:#64748B;font-size:11px;white-space:nowrap}
 @media (max-width:520px){#aiChatPanel{right:0;left:0;bottom:0;width:100%;height:100%;border-radius:0}}`;
     document.head.appendChild(style);
     const fab = document.createElement('button'); fab.id = 'aiChatFab'; fab.type = 'button'; fab.title = 'AI assistant'; fab.setAttribute('aria-label', 'Open the AI assistant'); fab.textContent = '💬';
-    const panel = document.createElement('section'); panel.id = 'aiChatPanel'; panel.hidden = true;
-    panel.innerHTML = `<div class="h"><div><strong style="color:#3730A3;">AI Assistant</strong><small id="aiChatCtx"></small></div><div style="display:flex;gap:4px;"><button type="button" title="New conversation" onclick="aiChatNew()" style="border:0;background:none;cursor:pointer;font-size:15px;">🗒️</button><button type="button" aria-label="Close" onclick="aiChatToggle(false)" style="border:0;background:none;cursor:pointer;font-size:20px;color:#64748B;">×</button></div></div>
+    const panel = document.createElement('section'); panel.id = 'aiChatPanel'; panel.hidden = true; panel.setAttribute('data-no-translate', '');
+    panel.innerHTML = `<div class="h"><div><strong style="color:#3730A3;">AI Assistant</strong><small id="aiChatCtx"></small></div><div style="display:flex;gap:6px;align-items:center;"><button type="button" class="aic-hbtn" onclick="aiChatNew()">＋ New chat</button><button type="button" class="aic-hbtn" id="aiChatHistBtn" onclick="aiChatHistory()">🕘 History</button><button type="button" aria-label="Close" onclick="aiChatToggle(false)" style="border:0;background:none;cursor:pointer;font-size:20px;color:#64748B;">×</button></div></div>
       <div id="aiChatMsgs"></div>
       <form id="aiChatForm"><button type="button" id="aiChatMic" title="Speak" style="background:#EEF2FF;color:#3730A3;">🎤</button><input id="aiChatInput" autocomplete="off" placeholder="Ask about drawings, specs, RFIs, code…"><button type="submit" style="background:#3730A3;color:#fff;">Send</button></form>`;
     document.body.appendChild(fab); document.body.appendChild(panel);
@@ -315,7 +320,37 @@
     panel.hidden = force === undefined ? !panel.hidden : !force;
     if (!panel.hidden) { const c = chatContext(); document.getElementById('aiChatCtx').textContent = [c.tab, c.unit && `Unit ${c.unit}`, c.system].filter(Boolean).join(' · '); document.getElementById('aiChatInput').focus(); }
   };
-  window.aiChatNew = () => { chatConversationId = null; const box = document.getElementById('aiChatMsgs'); if (box) box.innerHTML = ''; chatAdd('a', 'New conversation. What do you need?'); };
+  let chatView = 'chat';
+  function chatShowForm(show) { const f = document.getElementById('aiChatForm'); if (f) f.style.display = show ? '' : 'none'; }
+  window.aiChatNew = () => { chatConversationId = null; chatView = 'chat'; chatShowForm(true); const box = document.getElementById('aiChatMsgs'); if (box) box.innerHTML = ''; chatAdd('a', 'New conversation. What do you need?'); document.getElementById('aiChatInput')?.focus(); };
+  // History: the user's own conversations for this project (RLS: only theirs).
+  window.aiChatHistory = async () => {
+    const sb = client(); const box = document.getElementById('aiChatMsgs'); if (!sb || !box) return;
+    if (chatView === 'history') { chatView = 'chat'; chatShowForm(true); if (chatConversationId) return aiChatOpen(chatConversationId); return aiChatNew(); }
+    chatView = 'history'; chatShowForm(false);
+    box.innerHTML = '<div style="color:#64748B;font-size:12px;">Loading history…</div>';
+    const { data, error } = await sb.from('ai_conversations').select('id,title,updated_at,created_at').eq('project_id', projectId()).order('updated_at', { ascending: false }).limit(50);
+    if (chatView !== 'history') return;
+    if (error) { box.innerHTML = `<div style="color:#B91C1C;font-size:12px;">${esc(error.message)}</div>`; return; }
+    if (!data?.length) { box.innerHTML = '<div style="color:#64748B;font-size:12px;">No conversations yet.</div>'; return; }
+    const when = v => { const d = new Date(v); return isNaN(d) ? '' : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
+    box.innerHTML = '<div style="font-size:11px;font-weight:700;color:#3730A3;text-transform:uppercase;letter-spacing:.05em;">Your conversations</div>' + data.map(c => `<div class="aic-h" onclick="aiChatOpen('${c.id}')"><b title="${esc(c.title || '')}">${esc(c.title || 'Conversation')}</b><small>${when(c.updated_at || c.created_at)}</small><button type="button" title="Delete" onclick="event.stopPropagation();aiChatDelete('${c.id}')" style="border:0;background:none;cursor:pointer;color:#94A3B8;font-size:14px;">🗑</button></div>`).join('');
+  };
+  window.aiChatOpen = async id => {
+    const sb = client(); const box = document.getElementById('aiChatMsgs'); if (!sb || !box) return;
+    chatView = 'chat'; chatShowForm(true); chatConversationId = id; box.innerHTML = '';
+    const { data, error } = await sb.from('ai_messages').select('role,content,citations,created_at').eq('conversation_id', id).order('created_at', { ascending: true }).limit(200);
+    if (error) { chatAdd('a', `⚠️ ${error.message}`); return; }
+    (data || []).forEach(m => chatAdd(m.role === 'user' ? 'u' : 'a', m.content, m.role === 'assistant' ? m.citations : null));
+    if (!data?.length) chatAdd('a', 'This conversation is empty.');
+  };
+  window.aiChatDelete = async id => {
+    const sb = client(); if (!sb || !confirm('Delete this conversation? This cannot be undone.')) return;
+    const r = await sb.from('ai_conversations').delete().eq('id', id);
+    if (r.error) { if (typeof toast === 'function') toast(`❌ ${r.error.message}`); return; }
+    if (chatConversationId === id) chatConversationId = null;
+    chatView = 'chat'; window.aiChatHistory();
+  };
   // Show the button only to Admin / PM, once the session role is known.
   function chatBoot(tries = 0) {
     if (canManage()) { chatEnsure(); return; }

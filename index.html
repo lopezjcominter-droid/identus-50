@@ -2661,14 +2661,14 @@ Object.assign(APP_TRANSLATIONS.en, {
     const nodes = []; let node;
     while ((node = walker.nextNode())) nodes.push(node);
     nodes.forEach(n => {
-        if (!n.nodeValue.trim() || n.parentElement?.closest('script,style,textarea,input')) return;
+        if (!n.nodeValue.trim() || n.parentElement?.closest('script,style,textarea,input,[data-no-translate]')) return;
         const value = translateValue(n.nodeValue);
         if (n.nodeValue !== value) n.nodeValue = value;
       });
       document.querySelectorAll('[placeholder],[title],[aria-label]').forEach(el => {
         ['placeholder','title','aria-label'].forEach(attr => {
           const current = el.getAttribute(attr);
-          if (!current) return;
+          if (!current || el.closest('[data-no-translate]')) return;
           const value = translateValue(current);
           if (value !== current) el.setAttribute(attr, value);
         });
