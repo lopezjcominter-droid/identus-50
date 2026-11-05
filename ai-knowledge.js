@@ -330,8 +330,10 @@
 #aiChatForm{padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px))}
 #aiChatForm button{min-height:44px;padding:0 14px}
 body.aic-open #aiChatFab{display:none}
-body.aic-open{overflow:hidden}
-#aiChatMsgs{background:#F0F2F5;gap:6px}
+body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
+#aiChatPanel{position:fixed!important;z-index:2147483000!important;background:#fff!important;box-shadow:none;height:var(--aic-vh,100dvh)!important;top:var(--aic-top,0px)!important;bottom:auto!important;overscroll-behavior:contain}
+#aiChatPanel .h{background:#fff;border-bottom:1px solid #E4E6EB;position:sticky;top:0}
+#aiChatMsgs{background:#F0F2F5;gap:6px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .aic-m{max-width:80%;padding:9px 13px;border-radius:18px;box-shadow:0 1px 1px rgba(0,0,0,.06)}
 .aic-u{background:#0084FF;border-bottom-right-radius:5px}.aic-a{background:#fff;border-bottom-left-radius:5px}
 #aiChatForm{align-items:center;gap:8px;background:#fff}
@@ -409,15 +411,20 @@ body.aic-open{overflow:hidden}
     };
     rec.start();
   }
+  // Phone: keep the chat exactly the size of the visible screen (keyboard open or not).
+  if (window.visualViewport) { const fit = () => { const v = window.visualViewport; document.documentElement.style.setProperty('--aic-vh', `${v.height}px`); document.documentElement.style.setProperty('--aic-top', `${v.offsetTop}px`); const m = document.getElementById('aiChatMsgs'); if (m) m.scrollTop = m.scrollHeight; }; visualViewport.addEventListener('resize', fit); visualViewport.addEventListener('scroll', fit); fit(); }
   window.aiChatToggle = force => {
     chatEnsure(); const panel = document.getElementById('aiChatPanel');
     panel.hidden = force === undefined ? !panel.hidden : !force;
+    if (!panel.hidden && !document.body.classList.contains('aic-open')) { window.__aicY = window.scrollY; document.body.style.top = `-${window.__aicY}px`; }
+    const wasOpen = document.body.classList.contains('aic-open');
     document.body.classList.toggle('aic-open', !panel.hidden);
-    if (!panel.hidden) { const c = chatContext(); document.getElementById('aiChatCtx').textContent = [c.tab, c.unit && `Unit ${c.unit}`, c.system].filter(Boolean).join(' · '); document.getElementById('aiChatInput').focus(); }
+    if (panel.hidden && wasOpen) { document.body.style.top = ''; window.scrollTo(0, window.__aicY || 0); }
+    if (!panel.hidden) { const c = chatContext(); document.getElementById('aiChatCtx').textContent = [c.tab, c.unit && `Unit ${c.unit}`, c.system].filter(Boolean).join(' · '); if (!matchMedia('(pointer:coarse)').matches) document.getElementById('aiChatInput').focus(); }
   };
   let chatView = 'chat';
   function chatShowForm(show) { const f = document.getElementById('aiChatForm'); if (f) f.style.display = show ? '' : 'none'; }
-  window.aiChatNew = () => { chatConversationId = null; chatView = 'chat'; chatShowForm(true); const box = document.getElementById('aiChatMsgs'); if (box) box.innerHTML = ''; chatAdd('a', 'New conversation. What do you need?'); document.getElementById('aiChatInput')?.focus(); };
+  window.aiChatNew = () => { chatConversationId = null; chatView = 'chat'; chatShowForm(true); const box = document.getElementById('aiChatMsgs'); if (box) box.innerHTML = ''; chatAdd('a', 'New conversation. What do you need?'); if (!matchMedia('(pointer:coarse)').matches) document.getElementById('aiChatInput')?.focus(); };
   // History: the user's own conversations for this project (RLS: only theirs).
   window.aiChatHistory = async () => {
     const sb = client(); const box = document.getElementById('aiChatMsgs'); if (!sb || !box) return;
