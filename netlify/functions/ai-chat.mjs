@@ -63,25 +63,7 @@ export default async (request) => {
   const auth = { bearer, apikey };
   let input; try { input = await request.json(); } catch (_) { return json(400, { error: 'Invalid request' }); }
   const projectId = String(input.projectId || ''); let question = String(input.question || '').trim().slice(0, 2000);
-  // Voice note: transcribe the recorded audio with OpenAI, then answer it as text.
-  if (!question && input.audio) {
-    try {
-      const bytes = Buffer.from(String(input.audio), 'base64');
-      if (bytes.length > 4_000_000) return json(400, { error: 'Voice note too long (max ~1 min).' });
-      const type = String(input.audioType || 'audio/webm').split(';')[0];
-      const ext = type.includes('mp4') || type.includes('m4a') ? 'mp4' : type.includes('ogg') ? 'ogg' : type.includes('wav') ? 'wav' : 'webm';
-      const form = new FormData();
-      form.append('file', new Blob([bytes], { type }), `voice.${ext}`);
-      form.append('model', process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-transcribe');
-      form.append('prompt', 'Electrical construction: receptacles, AFF, panel, breaker, conduit, EMT, THHN, NEC, fire alarm, drawing sheet E280, E600.');
-      const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: form });
-      const b = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(b?.error?.message || `transcription ${r.status}`);
-      question = String(b.text || '').trim().slice(0, 2000);
-    } catch (error) { return json(502, { error: `Could not transcribe the voice note: ${error.message}` }); }
-    if (!question) return json(400, { error: 'No speech detected in the voice note.' });
-  }
-  if (!/^[0-9a-f-]{36}$/i.test(projectId) || !question) return json(400, { error: 'Missing project or question' });
+  if (!/^[0-9a-f-]{36}$/i.test(projectId) || (!question && !input.audio)) return json(400, { error: 'Missing project or question' });
   try {
     const user = await sb('/auth/v1/user', auth);
     if (!user?.id) return json(401, { error: 'Sign in again.' });
@@ -89,6 +71,26 @@ export default async (request) => {
     const member = await sb(`/rest/v1/project_members?project_id=eq.${projectId}&user_id=eq.${user.id}&select=role`, auth).catch(() => []);
     const role = String(member?.[0]?.role || '').toLowerCase();
     if (!['admin', 'pm'].includes(role)) return json(403, { error: 'The AI assistant is available to Admin and PM users of this project.' });
+    // Voice note: transcribe the recorded audio with OpenAI, then answer it as text.
+    if (!question && input.audio) {
+      try {
+        const bytes = Buffer.from(String(input.audio), 'base64');
+        if (bytes.length > 4_000_000) return json(400, { error: 'Voice note too long (max ~1 min).' });
+        const type = String(input.audioType || 'audio/webm').split(';')[0];
+        const ext = type.includes('mp4') || type.includes('m4a') ? 'mp4' : type.includes('ogg') ? 'ogg' : type.includes('wav') ? 'wav' : 'webm';
+        const form = new FormData();
+        form.append('file', new Blob([bytes], { type }), `voice.${ext}`);
+        form.append('model', process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-transcribe');
+        form.append('language', /^en/i.test(String(input.lang || '')) ? 'en' : 'es');
+        form.append('prompt', `Pregunta de construcción eléctrica en español o inglés (Spanglish). Términos: receptáculos, receptacle, outlet, AFF, panel A1, breaker, conduit, EMT, PVC, THHN, MC cable, ground, neutral, home run, junction box, disconnect, range, dryer, water heater, smoke detector, fire alarm, pull station, horn strobe, low voltage, data, NEC 2020, Florida Building Code, RFI, spec. Hojas: ${String(input.sheets || 'E001, E280, E600').slice(0, 600)}.`);
+        const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: form });
+        const b = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(b?.error?.message || `transcription ${r.status}`);
+        question = String(b.text || '').trim().slice(0, 2000);
+      } catch (error) { return json(502, { error: `Could not transcribe the voice note: ${error.message}` }); }
+      if (!question) return json(400, { error: 'No speech detected in the voice note.' });
+      if (input.transcribeOnly) return json(200, { question });
+    }
 
     // Follow-up questions ("¿y el dryer?", "¿en qué hoja?") only make sense with
     // the conversation: search with the recent questions too, and keep the
