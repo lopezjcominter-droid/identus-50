@@ -16,8 +16,9 @@ async function sb(path, auth, options = {}) {
   if (!response.ok) throw Object.assign(new Error(`Supabase ${response.status}: ${body?.message || text}`), { status: response.status });
   return body;
 }
-async function openai(path, payload) {
-  const response = await fetch(`https://api.openai.com/v1/${path}`, { method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+async function openai(path, payload, timeoutMs = 0) {
+  const ctl = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
+  const response = await fetch(`https://api.openai.com/v1/${path}`, { signal: ctl, method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(`OpenAI ${response.status}: ${body?.error?.message || 'request failed'}`), { status: response.status });
   return body;
@@ -99,10 +100,20 @@ export default async (request) => {
     let history = [];
     if (conversationId) history = (await sb(`/rest/v1/ai_messages?conversation_id=eq.${conversationId}&select=role,content,citations&order=created_at.desc&limit=8`, auth).catch(() => [])).reverse();
     const recentQuestions = history.filter(m => m.role === 'user').slice(-2).map(m => m.content);
-    const searchText = [...recentQuestions, question].join('\n').slice(-1500);
+    const t0 = Date.now();
+    // Rewrite the question into drawing/spec terms (English + Spanish) for a better search.
+    let rewritten = '';
+    try {
+      const rw = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 90, messages: [
+        { role: 'system', content: 'Rewrite the electrical-construction question as a short search query using the words drawings and specs use (English terms as on the sheets, e.g. "receptacle mounting height AFF", plus key Spanish words). Resolve follow-ups using the previous questions. Output only the query.' },
+        { role: 'user', content: `${recentQuestions.length ? `Previous questions:\n${recentQuestions.join('\n')}\n\n` : ''}Question: ${question}` }
+      ] }, 2500);
+      rewritten = String(rw.choices?.[0]?.message?.content || '').trim().slice(0, 300);
+    } catch (_) {}
+    const searchText = [...recentQuestions, question, rewritten].join('\n').slice(-1800);
     const citedDocIds = [...new Set(history.filter(m => m.role === 'assistant').slice(-2).flatMap(m => (Array.isArray(m.citations) ? m.citations : []).map(c => c.documentId)).filter(Boolean))].slice(0, 4);
     const embedding = (await openai('embeddings', { model: EMBED_MODEL, input: searchText })).data?.[0]?.embedding;
-    const matches = await sb('/rest/v1/rpc/ai_match_chunks', auth, { method: 'POST', body: JSON.stringify({ p_project_id: projectId, p_query: `[${embedding.join(',')}]`, p_count: 8 }) });
+    const matches = await sb('/rest/v1/rpc/ai_match_chunks', auth, { method: 'POST', body: JSON.stringify({ p_project_id: projectId, p_query: `[${embedding.join(',')}]`, p_count: 20 }) });
     // Also pull pages of sheets named explicitly in the question (e.g. "E600").
     const named = [...new Set((question.toUpperCase().match(/\b[A-Z]{1,3}-?\d{2,4}(?:\.\d+)?\b/g) || []))].slice(0, 5);
     let namedChunks = [];
@@ -116,13 +127,13 @@ export default async (request) => {
       // The best chunks of the documents already under discussion.
       followChunks = (await sb('/rest/v1/rpc/ai_match_chunks', auth, { method: 'POST', body: JSON.stringify({ p_project_id: projectId, p_query: qEmb, p_count: 20 }) }).catch(() => [])).filter(c => citedDocIds.includes(c.document_id)).slice(0, 4);
     }
-    const seen = new Set(); const chunks = [...namedChunks, ...followChunks, ...(matches || [])].filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, 12);
+    const seen = new Set(); const chunks = [...namedChunks, ...followChunks, ...(matches || [])].filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, 16);
     const docIds = [...new Set(chunks.map(c => c.document_id))];
     const docs = docIds.length ? await sb(`/rest/v1/ai_documents?id=in.(${docIds.join(',')})&select=id,file_name,category,sheet_number,title,revision,is_current_revision,metadata_confirmed,storage_path`, auth) : [];
     const docById = new Map((docs || []).map(d => [d.id, d]));
     const rank = { drawings: 0, specifications: 1, rfi: 2, other: 3 };
     chunks.sort((a, b) => (rank[docById.get(a.document_id)?.category] ?? 3) - (rank[docById.get(b.document_id)?.category] ?? 3));
-    const sources = chunks.map((c, i) => { const d = docById.get(c.document_id) || {}; return { ref: `S${i + 1}`, documentId: c.document_id, page: c.page_number, file: d.file_name, sheet: d.sheet_number, title: d.title, revision: d.revision, current: !!d.is_current_revision, confirmed: !!d.metadata_confirmed, category: d.category, content: String(c.content || '').slice(0, 2200) }; });
+    const sources = chunks.map((c, i) => { const d = docById.get(c.document_id) || {}; return { ref: `S${i + 1}`, documentId: c.document_id, page: c.page_number, file: d.file_name, sheet: d.sheet_number, title: d.title, revision: d.revision, current: !!d.is_current_revision, confirmed: !!d.metadata_confirmed, category: d.category, content: String(c.content || '').slice(0, 1800) }; });
     const sourceText = sources.length ? sources.map(s => `[${s.ref}] ${s.file || ''} · ${s.category || ''}${s.sheet ? ` · sheet ${s.sheet}` : ''}${s.revision ? ` · rev ${s.revision}` : ''} · page ${s.page || 1}${s.current ? ' · CURRENT REVISION' : ''}${s.confirmed ? '' : ' · not confirmed'}\n${s.content}`).join('\n\n---\n\n') : '(no project documents matched)';
 
     // Short history for follow-up questions.
@@ -137,7 +148,17 @@ export default async (request) => {
         { role: 'user', content: `${history.length ? 'This is a follow-up in the same conversation: interpret the question using the previous messages (same unit, panel, sheet or topic unless the user changes it). Source numbers below are new for this answer.\n\n' : ''}SOURCES:\n${sourceText}\n\nQUESTION: ${question}` }
       ]
     });
-    const answer = completion.choices?.[0]?.message?.content?.trim() || 'No answer.';
+    let answer = completion.choices?.[0]?.message?.content?.trim() || 'No answer.';
+    // Second check: keep only what the cited sources actually say (skipped if time is short).
+    if (sources.length && Date.now() - t0 < 5000) {
+      try {
+        const check = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450, messages: [
+          { role: 'system', content: 'You verify answers about construction documents. Compare the DRAFT with the SOURCES. Remove or correct any value, size, height, quantity or note that the sources do not state; never add typical/standard values. If the sources do not contain the answer, say so briefly and name the sheet to check. Keep the same language, short style and [S#] citations (only citations that support the text). Output only the final answer.' },
+          { role: 'user', content: `SOURCES:\n${sourceText}\n\nQUESTION: ${question}\n\nDRAFT:\n${answer}` }
+        ] }, Math.max(1500, 8500 - (Date.now() - t0)));
+        const fixed = check.choices?.[0]?.message?.content?.trim(); if (fixed) answer = fixed;
+      } catch (_) {}
+    }
     const used = sources.filter(s => answer.includes(`[${s.ref}]`)).map(({ content, ...rest }) => rest);
     const usage = completion.usage || {};
 
