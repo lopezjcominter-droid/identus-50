@@ -39,6 +39,31 @@
       return n;
     } catch (_) { return null; }
   }
+  // Render each PDF page to JPEGs (whole sheet + 4 zoomed quarters) so the AI
+  // can read drawings, which are vector art with no text layer.
+  async function renderPageImages(pdf, pageNumber, pid, docId) {
+    const page = await pdf.getPage(pageNumber);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(3200 / base.width, Math.sqrt(14_000_000 / (base.width * base.height)));
+    const viewport = page.getViewport({ scale });
+    const full = document.createElement('canvas'); full.width = Math.ceil(viewport.width); full.height = Math.ceil(viewport.height);
+    const ctx = full.getContext('2d', { alpha: false }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, full.width, full.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const crop = (sx, sy, sw, sh, maxW) => { const c = document.createElement('canvas'); const k = Math.min(1, maxW / sw); c.width = Math.round(sw * k); c.height = Math.round(sh * k); c.getContext('2d').drawImage(full, sx, sy, sw, sh, 0, 0, c.width, c.height); return c; };
+    const W = full.width, H = full.height, hw = Math.ceil(W / 2), hh = Math.ceil(H / 2);
+    const parts = [crop(0, 0, W, H, 1600), crop(0, 0, hw, hh, 1600), crop(W - hw, 0, hw, hh, 1600), crop(0, H - hh, hw, hh, 1600), crop(W - hw, H - hh, hw, hh, 1600)];
+    const sb = client(); const paths = [];
+    for (let i = 0; i < parts.length; i++) {
+      const blob = await new Promise(resolve => parts[i].toBlob(resolve, 'image/jpeg', 0.85));
+      const path = `${pid}/pages/${docId}/p${pageNumber}-${i}.jpg`;
+      const up = await sb.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+      if (up.error) throw up.error;
+      paths.push(path); parts[i].width = 0; parts[i].height = 0;
+    }
+    full.width = 0; full.height = 0; try { page.cleanup(); } catch (_) {}
+    return paths;
+  }
+  async function openPdf(buffer) { const pdfjs = await quantityEnsurePdfJs(); return pdfjs.getDocument({ data: new Uint8Array(buffer.slice(0)) }).promise; }
   function safeName(name) { return String(name || 'document.pdf').replace(/[^A-Za-z0-9._-]+/g, '_').slice(-120); }
 
   async function load() {
@@ -106,6 +131,7 @@
         <button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="aiKbOpen('${d.id}')">View</button>
         ${d.status === 'ready' || d.status === 'needs_review' || d.status === 'error' ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="aiKbEdit('${d.id}')">Review</button>` : ''}
         ${d.status === 'error' ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="aiKbRetry('${d.id}')">Retry</button>` : ''}
+        <button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" title="Read this document again with page images" onclick="aiKbReread(['${d.id}'])">Re-read</button>
         <button type="button" class="btn btn-danger" style="font-size:11px;padding:4px 8px;" onclick="aiKbDelete('${d.id}')">Remove</button>
         ${metaLine(d)}${editor(d)}
       </div>`).join('') : `<div style="font-size:12px;color:#94A3B8;padding:6px 0;">No ${esc(CATEGORIES.find(c => c.id === activeCategory).label)} uploaded yet.</div>`;
@@ -121,6 +147,7 @@
         <div style="display:flex;gap:6px;flex-wrap:wrap;">${tabs}</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <label class="btn btn-secondary" style="font-size:11px;padding:6px 10px;cursor:pointer;${tableMissing ? 'opacity:.5;pointer-events:none;' : ''}">📎 Upload PDFs to ${esc(CATEGORIES.find(c => c.id === activeCategory).label)}<input id="aiKbInput" type="file" multiple accept="application/pdf,.pdf" onchange="aiKbUpload(this)" style="display:none"></label>
+          ${list.length ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:6px 10px;" onclick="aiKbRereadAll()">↻ Re-read all ${esc(CATEGORIES.find(c => c.id === activeCategory).label)}</button>` : ''}
           <span id="aiKbMessage" style="font-size:11px;color:#475569;">Files are stored privately for this project only. Identical files are skipped.</span>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">${rows}</div>
@@ -151,8 +178,14 @@
         const ins = await sb.from('ai_documents').insert({ project_id: pid, category, file_name: file.name, storage_path: path, mime_type: 'application/pdf', size_bytes: file.size, sha256: hash, page_count: pages, status: 'pending' }).select('id').single();
         if (ins.error) throw ins.error;
         if (pages) {
-          const pageRows = Array.from({ length: pages }, (_, i) => ({ project_id: pid, document_id: ins.data.id, page_number: i + 1 }));
-          for (let i = 0; i < pageRows.length; i += 200) { const r = await sb.from('ai_document_pages').insert(pageRows.slice(i, i + 200)); if (r.error) throw r.error; }
+          const pdf = await openPdf(buffer);
+          for (let n = 1; n <= pages; n++) {
+            const m2 = msg(); if (m2) m2.textContent = `Preparing ${file.name} · page ${n} of ${pages}…`;
+            const images = await renderPageImages(pdf, n, pid, ins.data.id);
+            const r = await sb.from('ai_document_pages').insert({ project_id: pid, document_id: ins.data.id, page_number: n, extracted: { images } });
+            if (r.error) throw r.error;
+          }
+          try { pdf.destroy(); } catch (_) {}
         }
         done++;
       } catch (error) {
@@ -163,6 +196,33 @@
     const m = msg(); if (m) { m.textContent = `✓ ${done} uploaded${skipped ? ` · ${skipped} already in the project (skipped)` : ''}${failed ? ` · ${failed} failed (PDF only; check the console)` : ''}. The AI will read them in the background (about one page every few seconds).`; m.style.color = failed ? '#B91C1C' : '#15803D'; }
   }
 
+  // Re-read: render the page images again and send the document back to the AI queue.
+  async function reread(ids) {
+    const sb = client(); const pid = projectId(); if (!canManage() || !sb || !pid) return;
+    const m = () => document.getElementById('aiKbMessage');
+    let done = 0;
+    for (const id of ids) {
+      const d = documents.find(x => x.id === id); if (!d) continue;
+      try {
+        const mm = m(); if (mm) { mm.textContent = `Preparing ${d.file_name} (${done + 1}/${ids.length})…`; mm.style.color = '#1D4ED8'; }
+        const signed = await sb.storage.from(BUCKET).createSignedUrl(d.storage_path, 600);
+        const buffer = await (await fetch(signed.data.signedUrl)).arrayBuffer();
+        const pdf = await openPdf(buffer); const total = pdf.numPages;
+        for (let n = 1; n <= total; n++) {
+          const images = await renderPageImages(pdf, n, pid, id);
+          const existing = await sb.from('ai_document_pages').select('id').eq('document_id', id).eq('page_number', n).maybeSingle();
+          const row = { status: 'pending', attempts: 0, error: null, extracted: { images }, updated_at: new Date().toISOString() };
+          const r = existing.data ? await sb.from('ai_document_pages').update(row).eq('id', existing.data.id) : await sb.from('ai_document_pages').insert({ project_id: pid, document_id: id, page_number: n, ...row });
+          if (r.error) throw r.error;
+        }
+        try { pdf.destroy(); } catch (_) {}
+        await sb.from('ai_documents').update({ status: 'pending', error: null, page_count: total }).eq('id', id);
+        done++;
+      } catch (error) { console.error('Re-read failed', d.file_name, error); }
+    }
+    await refresh();
+    const mm = m(); if (mm) { mm.textContent = `✓ ${done} document(s) sent back to the AI with page images.`; mm.style.color = '#15803D'; }
+  }
   async function openDoc(id) {
     const d = documents.find(x => x.id === id); const sb = client(); if (!d || !sb) return;
     const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(d.storage_path, 600);
@@ -218,6 +278,8 @@
     await refresh();
   }
 
+  window.aiKbReread = ids => reread(ids).catch(error => console.error(error));
+  window.aiKbRereadAll = () => { const ids = documents.filter(d => d.category === activeCategory).map(d => d.id); if (ids.length && confirm(`Read again ${ids.length} document(s) with page images? Confirmed data is kept.`)) reread(ids); };
   window.aiKbEdit = id => { editingId = id; render(); };
   window.aiKbSaveMeta = id => saveMeta(id);
   window.aiKbToggleCurrent = id => toggleCurrent(id);
