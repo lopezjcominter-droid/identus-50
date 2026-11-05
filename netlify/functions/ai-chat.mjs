@@ -132,7 +132,7 @@ export default async (request) => {
         { role: 'system', content: SYSTEM },
         ...history.map(m => ({ role: m.role, content: String(m.content).slice(0, 1500) })),
         // Earlier [S#] numbers referred to earlier sources; tell the model the numbering restarts.
-        { role: 'user', content: `${ctx ? `Screen context: ${ctx}\n\n` : ''}${history.length ? 'This is a follow-up in the same conversation: interpret the question using the previous messages (same unit, panel, sheet or topic unless the user changes it). Source numbers below are new for this answer.\n\n' : ''}SOURCES:\n${sourceText}\n\nQUESTION: ${question}` }
+        { role: 'user', content: `${history.length ? 'This is a follow-up in the same conversation: interpret the question using the previous messages (same unit, panel, sheet or topic unless the user changes it). Source numbers below are new for this answer.\n\n' : ''}SOURCES:\n${sourceText}\n\nQUESTION: ${question}` }
       ]
     });
     const answer = completion.choices?.[0]?.message?.content?.trim() || 'No answer.';
