@@ -318,7 +318,7 @@
 .aic-h{display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;cursor:pointer;background:#fff}
 .aic-h:hover{background:#EEF2FF}.aic-h b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#1E293B}
 .aic-h small{color:#64748B;font-size:11px;white-space:nowrap}
-@media (max-width:820px),(pointer:coarse) and (max-width:1024px){
+@media (max-width:600px){
 #aiChatPanel{inset:0;right:0;left:0;top:0;bottom:0;width:100%;max-width:100%;height:100%;height:100dvh;border-radius:0;border:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box}
 #aiChatPanel .h{padding:12px 14px}
 #aiChatPanel .h strong{font-size:16px}
@@ -331,8 +331,16 @@
 #aiChatForm button{min-height:44px;padding:0 14px}
 body.aic-open #aiChatFab{display:none}
 body.aic-open{overflow:hidden}
+#aiChatMsgs{background:#F0F2F5;gap:6px}
+.aic-m{max-width:80%;padding:9px 13px;border-radius:18px;box-shadow:0 1px 1px rgba(0,0,0,.06)}
+.aic-u{background:#0084FF;border-bottom-right-radius:5px}.aic-a{background:#fff;border-bottom-left-radius:5px}
+#aiChatForm{align-items:center;gap:8px;background:#fff}
+#aiChatInput{border-radius:22px;padding:10px 16px;background:#F0F2F5;border-color:transparent}
+#aiChatForm button{border-radius:50%;min-width:44px;width:44px;padding:0}
+#aiChatForm button[type=submit]{font-size:0;background:#0084FF!important}#aiChatForm button[type=submit]::after{content:'➤';font-size:18px}
 }
-@media (max-width:820px){#aiChatFab{bottom:calc(76px + env(safe-area-inset-bottom,0px))}}`;
+@media (min-width:601px) and (pointer:coarse){#aiChatPanel{height:min(560px,calc(100dvh - 190px))}}
+@media (max-width:600px){#aiChatFab{bottom:calc(76px + env(safe-area-inset-bottom,0px))}}`;
     document.head.appendChild(style);
     const fab = document.createElement('button'); fab.id = 'aiChatFab'; fab.type = 'button'; fab.title = 'AI assistant'; fab.setAttribute('aria-label', 'Open the AI assistant'); fab.textContent = '💬';
     const panel = document.createElement('section'); panel.id = 'aiChatPanel'; panel.hidden = true; panel.setAttribute('data-no-translate', '');
