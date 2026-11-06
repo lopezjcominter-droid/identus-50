@@ -2121,6 +2121,7 @@
             <option value="Lighting">Lighting</option>
             <option value="Underground">Underground</option>
           </select>
+          <div id="eventQuantityHint" style="display:none;margin-top:8px;padding:8px 10px;border:1px solid #BFDBFE;border-radius:6px;background:#EFF6FF;color:#1E3A8A;font-size:12px;">Managed in Quantity Control: progress comes from the installed marks on the drawing.<br><button type="button" class="btn btn-primary" style="margin-top:8px;" onclick="openQuantityFromEvent()">Open Quantity Control</button></div>
         </div>
 
         <div class="form-group">
@@ -2130,11 +2131,11 @@
 
         <div class="form-group">
           <label class="form-label">Status</label>
-          <select class="form-select" id="eventStatus" required>
-            <option value="Behind">Behind</option>
-            <option value="At Risk">At Risk</option>
-            <option value="In Progress">In Progress</option>
-            <option value="Completed">Completed</option>
+          <select class="form-select" id="eventStatus" required disabled title="Set automatically from Progress %">
+            <option value="Behind">Not Started (0%)</option>
+            <option value="At Risk">In Progress (1–99%)</option>
+            <option value="In Progress">In Progress (1–99%)</option>
+            <option value="Completed">Completed (100%)</option>
           </select>
         </div>
 
@@ -10503,12 +10504,14 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
             html += `<div class="system-details" style="opacity:0.35;"><div class="system-details-header"><span>${systemDisplayName(sysName)}</span><span style="font-weight:600;">Not applicable</span></div></div>`;
             return;
           }
-          const statusColor = sysData.status === 'Completed' ? '#22C55E' : sysData.status === 'Behind' ? '#EF4444' : sysData.status === 'At Risk' ? '#F59E0B' : '#3B82F6';
+          const pctValue = Number(sysData.progress) || 0;
+          const statusLabel = pctValue >= 100 ? 'Completed' : pctValue > 0 ? 'In Progress' : 'Not Started';
+          const statusColor = pctValue >= 100 ? '#22C55E' : pctValue > 0 ? '#3B82F6' : '#EF4444';
           html += `
             <div class="system-details">
               <div class="system-details-header">
                 <span>${systemDisplayName(sysName)}</span>
-                <span style="color: ${statusColor}; font-weight: 700;">${sysData.status}</span>
+                <span style="color: ${statusColor}; font-weight: 700;">${statusLabel}</span>
               </div>
               <div class="system-details-row">
                 <span>Progress:</span>
@@ -10844,7 +10847,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         o.textContent = na ? label + ' (not applicable)' : label;
       });
       document.getElementById('eventProgress').value = 0;
-      document.getElementById('eventStatus').value = 'In Progress';
+      document.getElementById('eventStatus').value = 'Behind';
+      updateEventEntryMode('');
       document.getElementById('eventNotes').value = '';
       document.getElementById('eventPhotos').value = '';
       // Reset new photo inputs
@@ -10857,12 +10861,28 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       showAppModal('addEventModal');
     }
 
+    // Quantity systems are updated in Quantity Control, not with a manual %.
+    function updateEventEntryMode(system) {
+      const quantityMode = typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(system);
+      const hint = document.getElementById('eventQuantityHint');
+      if (hint) hint.style.display = quantityMode ? 'block' : 'none';
+      ['eventProgress', 'eventStatus', 'eventNotes', 'eventPhotos'].forEach(id => { const g = document.getElementById(id)?.closest('.form-group'); if (g) g.style.display = quantityMode ? 'none' : ''; });
+      const progress = document.getElementById('eventProgress'); if (progress) progress.required = !quantityMode;
+      const save = document.querySelector('#addEventModal button[type=submit]'); if (save) save.style.display = quantityMode ? 'none' : '';
+    }
+    function openQuantityFromEvent() {
+      const unit = currentEventUnit; const system = document.getElementById('eventSystem')?.value;
+      if (!unit || !QUANTITY_SYSTEMS.includes(system)) return;
+      closeAddEventModal();
+      setTimeout(() => openQuantityFromUnit(unit.apt, unit.building, unit.floor, system), 450);
+    }
     function autoFillEventSystem(system) {
+      updateEventEntryMode(system);
       if (!system || !currentEventUnit) return;
       const sysData = currentEventUnit.systems[system];
       if (sysData) {
         document.getElementById('eventProgress').value = sysData.progress || 0;
-        document.getElementById('eventStatus').value = sysData.status || 'In Progress';
+        document.getElementById('eventStatus').value = progressToStatus(Math.min(100, Math.max(0, parseInt(sysData.progress) || 0)));
       } else {
         document.getElementById('eventProgress').value = 0;
         document.getElementById('eventStatus').value = 'Behind';
@@ -11202,6 +11222,14 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       setupUnitNumberAutocomplete();
     }
 
+    // Unit suggestions follow the selected Building/Floor (so "Underground"
+    // shows 1U, 2U, 3U…) and match any part of the unit number.
+    function unitSuggestionMatches(value, building, floor) {
+      const term = String(value || '').toLowerCase().trim();
+      return data.filter(u => (!building || u.building === building) && (!floor || u.floor === floor) && (!term || String(u.apt || '').toLowerCase().includes(term)))
+        .sort((a, b) => (String(a.apt).toLowerCase().startsWith(term) ? 0 : 1) - (String(b.apt).toLowerCase().startsWith(term) ? 0 : 1))
+        .map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 40);
+    }
     function setupUnitNumberAutocomplete() {
       const input = document.getElementById('unitNumber');
       const list = document.getElementById('unitNumberSuggestions');
@@ -11210,11 +11238,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         const value = input.value.toLowerCase().trim();
         let matches = [];
 
-        if (value === '') {
-          matches = data.map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 15);
-        } else {
-          matches = data.filter(u => String(u.apt || '').toLowerCase().startsWith(value)).map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 15);
-        }
+        matches = unitSuggestionMatches(value, document.getElementById('unitBuilding')?.value, document.getElementById('unitFloor')?.value);
 
         if (matches.length > 0) {
           list.innerHTML = matches.map(apt => `
@@ -11432,11 +11456,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         const value = input.value.toLowerCase().trim();
         let matches = [];
 
-        if (value === '') {
-          matches = data.map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 15);
-        } else {
-          matches = data.filter(u => String(u.apt || '').toLowerCase().startsWith(value)).map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 15);
-        }
+        matches = unitSuggestionMatches(value, document.getElementById('quickBuilding')?.value, document.getElementById('quickFloor')?.value);
 
         if (matches.length > 0) {
           list.innerHTML = matches.map(apt => `
@@ -11451,6 +11471,10 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
 
       input.addEventListener('input', function() { showSuggestions(); autoFillQuickUnit(input.value.trim()); });
       input.addEventListener('focus', showSuggestions);
+      ['quickBuilding', 'quickFloor'].forEach(id => { const el = document.getElementById(id); if (el && !el.dataset.unitPick) { el.dataset.unitPick = '1'; el.addEventListener('change', () => {
+        const one = unitSuggestionMatches('', document.getElementById('quickBuilding')?.value, document.getElementById('quickFloor')?.value);
+        if (one.length === 1 && document.getElementById('quickBuilding')?.value && document.getElementById('quickFloor')?.value) { input.value = one[0]; autoFillQuickUnit(one[0]); }
+      }); } });
 
       document.addEventListener('click', function(e) {
         if (!e.target.closest('#quickUnit') && !e.target.closest('#quickUnitSuggestions')) {
