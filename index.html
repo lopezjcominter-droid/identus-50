@@ -11114,6 +11114,11 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
 
     async function saveEvent(event) {
       event.preventDefault();
+      if (saveEvent.busy) return;
+      saveEvent.busy = true;
+      try { return await saveEventNow(event); } finally { saveEvent.busy = false; }
+    }
+    async function saveEventNow(event) {
       if (!currentEventUnit) return;
       if (!await allowRemoteAction('event_write', 60)) return;
 
@@ -11588,8 +11593,17 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       document.getElementById('quickPhotoStatus').textContent = n > 0 ? `✓ ${n} photo(s) ready — keep adding, then Save` : 'No photo';
     }
 
+    // One save at a time: a second click while photos upload created duplicate history entries.
     async function saveQuickUnit(event) {
       event.preventDefault();
+      if (saveQuickUnit.busy) return;
+      saveQuickUnit.busy = true;
+      const qBtn = document.getElementById('quickSaveButton'); const qBtnText = qBtn?.textContent;
+      if (qBtn) { qBtn.disabled = true; qBtn.textContent = 'Saving…'; }
+      try { return await saveQuickUnitNow(event); }
+      finally { saveQuickUnit.busy = false; if (qBtn) { qBtn.disabled = false; qBtn.textContent = qBtnText; } }
+    }
+    async function saveQuickUnitNow(event) {
       if (!await allowRemoteAction('quick_add_write', 60)) return;
       const apt = document.getElementById('quickUnit').value;
       const floor = document.getElementById('quickFloor').value;
