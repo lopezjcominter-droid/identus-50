@@ -10195,8 +10195,9 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       try { return JSON.parse(localStorage.getItem('official_final_inspections') || '{}') || {}; }
       catch (_) { return {}; }
     }
-    async function saveOfficialFinalStore(store) {
-      if (officialProductionMode()) { await hydrateOfficialRemote(); officialRemoteStore.final = store || {}; await persistOfficialFinalRemote(officialRemoteStore.final); return true; }
+    async function saveOfficialFinalStore(store, onlyKey) {
+      // Save only the unit that changed (saving every unit each time made the page slow).
+      if (officialProductionMode()) { await hydrateOfficialRemote(); officialRemoteStore.final = store || {}; await persistOfficialFinalRemote(onlyKey && store?.[onlyKey] ? { [onlyKey]: store[onlyKey] } : officialRemoteStore.final); return true; }
       localStorage.setItem('official_final_inspections', JSON.stringify(store));
       return true;
     }
@@ -10294,8 +10295,12 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         if (unit) resolveOfficialReadyTask(unit.apt);
       });
       renderOfficialFinalTab();
-      if (document.getElementById('officialTab')?.style.display === 'block') renderOfficialMainTab();
+      if (typeof renderOfficialMainTab === 'function') renderOfficialMainTab();
       if (typeof toast === 'function') toast(`Official inspection requested for ${selected.length} unit${selected.length === 1 ? '' : 's'}`);
+    }
+    function officialFilterRows(value) {
+      const term = String(value || '').trim().toLowerCase();
+      document.querySelectorAll('#officialUnitTable tbody tr').forEach(tr => { tr.style.display = !term || tr.textContent.toLowerCase().includes(term) ? '' : 'none'; });
     }
     // Dashboard tab: Official Final overview for all units + batch requests.
     // Each unit's record is still entered in View → Official Final.
@@ -10307,6 +10312,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         void hydrateOfficialRemote().then(() => renderOfficialMainTab()).catch(error => { host.innerHTML = `<div class="insp-card" style="padding:20px;color:#B91C1C;">Official inspections could not load: ${officialFinalEscape(error.message || error)}</div>`; });
         return;
       }
+      const keepFilter = document.getElementById('officialUnitFilter')?.value || '';
+      setTimeout(() => { const f = document.getElementById('officialUnitFilter'); if (f && keepFilter) { f.value = keepFilter; officialFilterRows(keepFilter); } }, 0);
       const units = officialInspectableLocations().sort((a, b) => String(a.building).localeCompare(String(b.building)) || String(a.floor).localeCompare(String(b.floor)) || String(a.apt).localeCompare(String(b.apt), undefined, { numeric: true }));
       const rows = units.map(unit => { const entry = officialFinalEntry(unit); return { unit, result: entry.current?.result || (entry.draft ? 'Draft' : 'Not Scheduled'), date: entry.current?.date || '', inspector: entry.current?.inspector || '' }; });
       const count = name => rows.filter(row => row.result === name).length;
@@ -10317,8 +10324,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           <div style="display:flex;gap:10px;flex-wrap:wrap;padding:12px 16px;">
             ${[['Passed', count('Passed')], ['Failed', count('Failed')], ['Scheduled', count('Scheduled')], ['Not Scheduled', count('Not Scheduled') + count('Draft')], ['Open requests', pending]].map(([label, value]) => `<div style="min-width:120px;padding:10px 12px;border:1px solid #E5E7EB;border-radius:8px;"><div style="font-size:11px;color:#6B7280;">${label}</div><div style="font-size:20px;font-weight:700;color:${color(label)};">${value}</div></div>`).join('')}
           </div>
-          <div style="overflow:auto;max-height:420px;padding:0 16px 16px;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="text-align:left;color:#6B7280;"><th style="padding:6px;">Unit</th><th style="padding:6px;">Building / Floor</th><th style="padding:6px;">Result</th><th style="padding:6px;">Date</th><th style="padding:6px;">Inspector</th><th></th></tr></thead><tbody>
-            ${rows.map(row => `<tr style="border-top:1px solid #E5E7EB;"><td style="padding:6px;font-weight:600;">${officialFinalEscape(row.unit.apt)}</td><td style="padding:6px;">${officialFinalEscape(row.unit.building)} · ${officialFinalEscape(row.unit.floor)}</td><td style="padding:6px;color:${color(row.result)};font-weight:600;">${officialFinalEscape(row.result)}</td><td style="padding:6px;">${officialFinalEscape(row.date)}</td><td style="padding:6px;">${officialFinalEscape(row.inspector)}</td><td style="padding:6px;"><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" data-official-open="${officialFinalEscape(officialFinalKey(row.unit))}">Open</button></td></tr>`).join('')}
+          <div style="padding:0 16px 8px;"><input id="officialUnitFilter" type="text" inputmode="search" autocomplete="off" autocorrect="off" spellcheck="false" name="identus-unit-filter" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" role="searchbox" class="form-input" style="max-width:320px;" placeholder="Search unit (e.g. 1204, 3U, Hallway)" oninput="officialFilterRows(this.value)"></div><div style="overflow:auto;max-height:420px;padding:0 16px 16px;"><table id="officialUnitTable" style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="text-align:left;color:#6B7280;"><th style="padding:6px;">Unit</th><th style="padding:6px;">Building / Floor</th><th style="padding:6px;">Result</th><th style="padding:6px;">Date</th><th style="padding:6px;">Inspector</th><th></th></tr></thead><tbody>
+            ${rows.map(row => `<tr style="border-top:1px solid #E5E7EB;"><td style="padding:6px;font-weight:600;color:${row.result === 'Passed' || row.result === 'Failed' ? color(row.result) : 'inherit'};">${officialFinalEscape(row.unit.apt)}</td><td style="padding:6px;">${officialFinalEscape(row.unit.building)} · ${officialFinalEscape(row.unit.floor)}</td><td style="padding:6px;color:${color(row.result)};font-weight:600;">${officialFinalEscape(row.result)}</td><td style="padding:6px;">${officialFinalEscape(row.date)}</td><td style="padding:6px;">${officialFinalEscape(row.inspector)}</td><td style="padding:6px;"><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" data-official-open="${officialFinalEscape(officialFinalKey(row.unit))}">Open</button></td></tr>`).join('')}
           </tbody></table></div>
         </section>
         ${renderOfficialBatchPanel()}`;
@@ -10382,7 +10389,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       const latest = entry.current;
       const history = Array.isArray(entry.history) ? entry.history : [];
       const statusColor = latest?.result === 'Passed' ? '#15803D' : latest?.result === 'Failed' ? '#B91C1C' : '#64748B';
-      const historyHtml = history.length ? history.slice().reverse().map(item => `<div style="padding:10px 0;border-bottom:1px solid #E5E7EB;"><strong>${item.result}</strong> · ${item.date || 'No date'} · ${item.inspector || 'No inspector'}<br><small>${item.submittedAt ? new Date(item.submittedAt).toLocaleString('en-US') : ''}${item.comments ? ` · ${esc(item.comments)}` : ''}</small></div>`).join('') : '<div style="color:#64748B;padding:10px 0;">No official final inspection history.</div>';
+      const historyHtml = history.length ? history.slice().reverse().map(item => `<div style="padding:10px 0;border-bottom:1px solid #E5E7EB;"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;"><span><strong>${item.result}</strong> · ${item.date || 'No date'} · ${item.inspector || 'No inspector'}</span>${item.id ? `<button type="button" class="btn btn-secondary" style="padding:2px 10px;font-size:12px;color:#B91C1C;border-color:#FCA5A5;" onclick="deleteOfficialFinalRecord('${esc(item.id)}')">Delete</button>` : ''}</div><small>${item.submittedAt ? new Date(item.submittedAt).toLocaleString('en-US') : ''}${item.comments ? ` · ${esc(item.comments)}` : ''}</small></div>`).join('') : '<div style="color:#64748B;padding:10px 0;">No official final inspection history.</div>';
       document.getElementById('detailsContent').innerHTML = `
         <div class="insp-card">
           <div class="insp-card-header"><h3>Official Final Inspection</h3><span style="color:${statusColor};font-weight:700;">${latest?.result || 'Not Scheduled'}</span></div>
@@ -10412,10 +10419,26 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       const entry = store[key] || { draft: null, current: null, history: [] };
       entry.draft = { ...officialFinalFormData(), savedAt: new Date().toISOString() };
       store[key] = entry;
-      try { await saveOfficialFinalStore(store); }
+      try { await saveOfficialFinalStore(store, key); }
       catch (error) { if (typeof toast === 'function') toast(`❌ Official draft could not be saved: ${error.message || 'connection error'}`); return; }
       renderOfficialFinalTab();
+      if (typeof renderOfficialMainTab === 'function') renderOfficialMainTab();
       if (typeof toast === 'function') toast('Official final inspection draft saved');
+    }
+    async function deleteOfficialFinalRecord(id) {
+      if (!currentDetailsUnit || !id) return;
+      if (!confirm('Delete this official final record from the history? This cannot be undone.')) return;
+      const store = getOfficialFinalStore();
+      const key = officialFinalKey(currentDetailsUnit);
+      const entry = store[key]; if (!entry) return;
+      entry.history = (entry.history || []).filter(item => item.id !== id);
+      if (entry.current?.id === id) entry.current = entry.history.length ? entry.history[entry.history.length - 1] : null;
+      store[key] = entry;
+      try { await saveOfficialFinalStore(store, key); }
+      catch (error) { if (typeof toast === 'function') toast(`❌ Could not delete: ${error.message || 'connection error'}`); return; }
+      renderOfficialFinalTab();
+      if (typeof renderOfficialMainTab === 'function') renderOfficialMainTab();
+      if (typeof toast === 'function') toast('Official record deleted');
     }
     async function submitOfficialFinal() {
       if (!currentDetailsUnit) return;
@@ -10432,7 +10455,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       entry.history = [...(entry.history || []), record];
       entry.draft = null;
       store[key] = entry;
-      try { await saveOfficialFinalStore(store); }
+      try { await saveOfficialFinalStore(store, key); }
       catch (error) { if (typeof toast === 'function') toast(`❌ Official result could not be saved: ${error.message || 'connection error'}`); return; }
       if (form.result === 'Failed') {
         const existing = (punchlist || []).find(p => p.source === 'official_final' && p.location === currentDetailsUnit.apt && p.status !== 'Closed');
@@ -10445,6 +10468,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         if (typeof savePunchlist === 'function') await savePunchlist();
       }
       renderOfficialFinalTab();
+      if (typeof renderOfficialMainTab === 'function') renderOfficialMainTab();
       if (typeof renderPunchlist === 'function') renderPunchlist();
       if (typeof updateMetrics === 'function') updateMetrics();
       if (typeof updateCharts === 'function') updateCharts();
@@ -13875,18 +13899,23 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         const activeKeys = new Set();
         (data || []).forEach(unit => {
           quantityApplyComputedProgress(unit);
-          const quantityReady = QUANTITY_SYSTEMS.every(system => {
-            const value = (unit.systems || {})[system];
-            return value && Number(value.progress || 0) >= 100;
+          // Ready for the Official Final when: every quantity system this unit
+          // has is at 100%, and every quality inspection that applies to the
+          // unit (the ones linked to those quantity systems and all the others)
+          // has a passed latest result.
+          const unitQuantity = QUANTITY_SYSTEMS.filter(system => (unit.systems || {})[system]);
+          const quantityReady = unitQuantity.every(system => Number(unit.systems[system].progress || 0) >= 100);
+          const allRecords = typeof inspGetInspections === 'function' ? inspGetInspections() : [];
+          const types = (typeof INSP_INSPECTION_TYPES !== 'undefined' ? INSP_INSPECTION_TYPES : []).filter(type => typeof inspIsInspectionTypeApplicableForUnit !== 'function' || inspIsInspectionTypeApplicableForUnit(type, unit));
+          const unitRecords = allRecords.filter(r => String(r.apt) === String(unit.apt) && (!r.building || String(r.building) === String(unit.building)));
+          const passDates = types.map(type => {
+            const latest = unitRecords.filter(r => r.typeId === type.id).sort((x, y) => Date.parse(x.date || 0) - Date.parse(y.date || 0)).at(-1);
+            return latest && !(latest.failedCount > 0) ? (Date.parse(latest.date || 0) || 1) : 0;
           });
-          const internalInspectionReady = quantityReady && QUANTITY_SYSTEMS.every(system => {
-            const internalTask = byKey.get(`${unit.id || unit.apt}|${system}`);
-            return internalTask?.resolvedAt && !internalTask.lastAttempt;
-          });
+          const internalInspectionReady = allRecords.length > 0 && types.length > 0 && quantityReady && passDates.every(Boolean);
           if (internalInspectionReady) {
             const readyKey = `${unit.id || unit.apt}|official-ready`;
-            const completionDates = QUANTITY_SYSTEMS.map(system => Date.parse(quantityCompletionDate(unit, system)) || 0);
-            const readyAt = Math.max(...completionDates, Date.now());
+            const readyAt = Math.max(...passDates, ...unitQuantity.map(system => Date.parse(quantityCompletionDate(unit, system)) || 0));
             activeKeys.add(readyKey);
             const priorReady = byKey.get(readyKey);
             if (!priorReady || readyAt > Number(priorReady.completedAt || 0)) byKey.set(readyKey, { key: readyKey, apt: unit.apt, building: unit.building, floor: unit.floor, system: 'Official Inspection Ready', kind: 'official_ready', completedAt: readyAt, resolvedAt: priorReady?.resolvedAt || null, lastAttempt: null });
