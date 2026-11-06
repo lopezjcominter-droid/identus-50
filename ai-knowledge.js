@@ -361,7 +361,7 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     const el = document.createElement('div'); el.className = `aic-m aic-${who}`; el.textContent = text;
     if (citations?.length) {
       const wrap = document.createElement('div');
-      const seenDocs = new Set(); citations.filter(c => { const k = c.documentId || c.sheet; if (seenDocs.has(k)) return false; seenDocs.add(k); return true; }).forEach(c => { const b = document.createElement('span'); b.className = 'aic-cite'; b.title = 'Open document'; b.textContent = `[${c.ref}] ${c.sheet || c.file || ''}${c.revision ? ` · Rev ${String(c.revision).replace(/^\s*rev(ision)?\.?\s*/i, '')}` : ''} · p.${c.page || 1}${c.current ? ' · current' : ''}`; b.onclick = () => chatOpenCitation(c); wrap.appendChild(b); });
+      const seenDocs = new Set(); citations.filter(c => { const k = c.documentId || c.sheet; if (seenDocs.has(k)) return false; seenDocs.add(k); return true; }).forEach(c => { const b = document.createElement('span'); b.className = 'aic-cite'; b.title = 'Open document'; b.textContent = `${c.sheet || c.file || ''}${c.revision ? ` · Rev ${String(c.revision).replace(/^\s*rev(ision)?\.?\s*/i, '')}` : ''} · p.${c.page || 1}${c.current ? ' · current' : ''}`; b.onclick = () => chatOpenCitation(c); wrap.appendChild(b); });
       el.appendChild(wrap);
     }
     box.appendChild(el); box.scrollTop = box.scrollHeight; return el;
@@ -373,6 +373,25 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     if (!path) return;
     const { data } = await sb.storage.from(BUCKET).createSignedUrl(path, 600);
     if (data?.signedUrl) window.open(`${data.signedUrl}#page=${c.page || 1}`, '_blank', 'noopener');
+  }
+  // Takeoff: count symbols on the chosen sheet, one quarter per call in parallel.
+  async function chatTakeoff(t, question, waiting, token) {
+    const label = `${t.sheet || t.file}${t.revision ? ` · Rev ${t.revision}` : ''} · p.${t.page}`;
+    waiting.textContent = `Contando símbolos en ${label}… (≈20 s)`;
+    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') };
+    const call = part => fetch('/.netlify/functions/ai-takeoff', { method: 'POST', headers, body: JSON.stringify({ projectId: projectId(), documentId: t.documentId, page: t.page, part, request: question }) }).then(async r => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error || `Error ${r.status}`); return b; });
+    const results = await Promise.allSettled([1, 2, 3, 4].map(call));
+    const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+    if (!ok.length) throw new Error(results[0].reason?.message || 'The count failed.');
+    const totals = new Map();
+    ok.forEach(r => (r.items || []).forEach(i => { const k = `${i.symbol}${i.tag ? ` (${i.tag})` : ''}`.trim(); totals.set(k, (totals.get(k) || 0) + i.count); }));
+    const failed = results.length - ok.length;
+    const lines = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `• ${k}: ${n}`);
+    const answer = (lines.length ? `Takeoff en ${t.sheet || t.file}:\n${lines.join('\n')}` : `No encontré esos símbolos en el área pedida en ${t.sheet || t.file}.`)
+      + `\n⚠️ Conteo por IA: verifícalo en el plano antes de usarlo.${failed ? ` ${failed} de 4 partes del plano no se pudieron leer; el total puede estar incompleto.` : ''}`;
+    const citations = [{ ref: 'S1', documentId: t.documentId, page: t.page, sheet: t.sheet, file: t.file, revision: t.revision }];
+    waiting.remove(); chatAdd('a', answer, citations);
+    fetch('/.netlify/functions/ai-takeoff', { method: 'POST', headers, body: JSON.stringify({ projectId: projectId(), save: true, conversationId: chatConversationId, question, answer, citations }) }).then(r => r.json()).then(b => { if (b?.conversationId) chatConversationId = b.conversationId; }).catch(() => {});
   }
   async function chatAsk(voice) {
     const input = document.getElementById('aiChatInput'); const question = voice ? '' : String(input?.value || '').trim();
@@ -386,6 +405,7 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
       if (!response.ok) throw new Error(body.error || `Error ${response.status}`);
       chatConversationId = body.conversationId || chatConversationId;
       if (voice && body.question) mine.textContent = `🎤 ${body.question}`;
+      if (body.takeoff) { await chatTakeoff(body.takeoff, body.question || question, waiting, token); return; }
       waiting.remove(); chatAdd('a', body.answer, body.citations);
     } catch (error) { waiting.textContent = `⚠️ ${error.message}`; }
     finally { chatBusy = false; }
