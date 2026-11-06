@@ -138,6 +138,15 @@ export default async (request) => {
     const rank = { drawings: 0, specifications: 1, rfi: 2, other: 3 };
     chunks.sort((a, b) => (rank[docById.get(a.document_id)?.category] ?? 3) - (rank[docById.get(b.document_id)?.category] ?? 3));
     const sources = chunks.map((c, i) => { const d = docById.get(c.document_id) || {}; return { ref: `S${i + 1}`, documentId: c.document_id, page: c.page_number, file: d.file_name, sheet: d.sheet_number, title: d.title, revision: d.revision, current: !!d.is_current_revision, confirmed: !!d.metadata_confirmed, category: d.category, content: String(c.content || '').slice(0, 1800) }; });
+    // Takeoff: "cuántas luces / how many receptacles / takeoff del pasillo 2".
+    // The browser counts the chosen drawing quarter by quarter (ai-takeoff).
+    if (/\b(cu[aá]nt[oa]s|how many|takeoff|take off|conteo|contar|cuenta(me)?)\b/i.test(question) && !/\b(spec|nec|c[oó]digo|code)\b/i.test(question)) {
+      const named = (question.match(/\b[A-Z]{1,2}-?\d{3}[A-Z]?\b/gi) || []).map(n => n.toUpperCase().replace('-', ''));
+      const drawing = sources.find(s => s.category === 'drawings' && named.includes(String(s.sheet || '').toUpperCase().replace('-', '')))
+        || sources.find(s => s.category === 'drawings' && /^E/i.test(String(s.sheet || s.file || '')))
+        || sources.find(s => s.category === 'drawings');
+      if (drawing) return json(200, { takeoff: { documentId: drawing.documentId, page: drawing.page || 1, sheet: drawing.sheet || '', file: drawing.file || '', revision: drawing.revision || '' }, question, conversationId });
+    }
     const sourceText = sources.length ? sources.map(s => `[${s.ref}] ${s.file || ''} · ${s.category || ''}${s.sheet ? ` · sheet ${s.sheet}` : ''}${s.revision ? ` · rev ${s.revision}` : ''} · page ${s.page || 1}${s.current ? ' · CURRENT REVISION' : ''}${s.confirmed ? '' : ' · not confirmed'}\n${s.content}`).join('\n\n---\n\n') : '(no project documents matched)';
 
     // Short history for follow-up questions.
