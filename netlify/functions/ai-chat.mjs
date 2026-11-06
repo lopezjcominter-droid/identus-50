@@ -52,7 +52,7 @@ Rules:
 - If drawings and spec disagree, point out the conflict with both citations and recommend an RFI; do not pick one silently.
 - If the SOURCES do not answer the question, say so. Then you may give code guidance labeled "General guidance (${CODE_BASIS}, not from project documents)" with the article number, and recommend confirming with the AHJ.
 - Never state that a revision is current unless the source is marked CURRENT REVISION. If a source is marked "not confirmed", say it is an AI reading pending review.
-- Do not count devices or symbols.
+- You cannot count devices or symbols on the drawings. If asked how many (lights, receptacles, devices), give a number only if a schedule or note in the SOURCES states it; otherwise the first line must say clearly "No puedo contar símbolos en el plano; el conteo se hace en la hoja <sheet>" naming the sheet that shows that area, if a source shows it. Do not say "No está en los planos cargados" in that case.
 Trade conventions (do not flag these as conflicts): "4 wire" range/dryer circuits = 3 conductors plus ground; "3W" panels = 2 hots + neutral; AFF = above finished floor; MLO = main lugs only.
 QUESTION SCOPE:
 - When the user names the basis ("según NEC", "per code", "según spec", "según planos"), answer from THAT basis first. For "según NEC/código": give the NEC rule with its article (e.g. NEC 440.14: AC/refrigeration disconnect within sight of and readily accessible from the equipment; within sight = visible and not more than 50 ft, NEC 100), then add what the project documents say if they cover it. For "según spec": answer only from specification sources; if none covers it, say "No está en la spec cargada".
@@ -163,7 +163,14 @@ export default async (request) => {
         const fixed = check.choices?.[0]?.message?.content?.trim(); if (fixed) answer = fixed;
       } catch (_) {}
     }
-    const used = sources.filter(s => answer.includes(`[${s.ref}]`)).map(({ content, ...rest }) => rest);
+    // Show sheet names instead of [S#] in the text (S# alone means nothing to the reader).
+    const refNums = new Set([...answer.matchAll(/\bS(\d{1,2})\b/g)].map(m => Number(m[1])));
+    const used = sources.filter((s, i) => refNums.has(i + 1)).map(({ content, ...rest }) => rest);
+    const label = n => { const s = sources[n - 1]; if (!s) return ''; return s.sheet || String(s.file || '').replace(/\.pdf$/i, '').split(/[-_ ]/)[0] || `p.${s.page || 1}`; };
+    answer = answer.replace(/\[?\s*S\d{1,2}(?:\s*\]?\s*[,y&]?\s*\[?\s*S\d{1,2})*\s*\]?/g, group => {
+      const names = [...new Set([...group.matchAll(/S(\d{1,2})/g)].map(m => label(Number(m[1]))).filter(Boolean))];
+      return names.length ? `(${names.join(', ')})` : '';
+    }).replace(/\)\s*\(/g, ', ').replace(/\s+([.,;])/g, '$1');
     const usage = completion.usage || {};
 
     if (!conversationId) {
