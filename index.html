@@ -2947,7 +2947,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     function initializeSupabase() {
       try {
         if (window.supabase && window.supabase.createClient) {
-          sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: proxyFetch } });
+          sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: proxyFetch }, auth: { lock: async (_name, _timeout, fn) => fn() } }); // no cross-tab auth lock: it could leave saves waiting forever after the tab slept
           console.log('✅ Supabase client initialized successfully');
           return true;
         } else {
@@ -13732,8 +13732,14 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         const uid = currentEventUnit && currentEventUnit.id; const sys = $('eventSystem') && $('eventSystem').value;
         const uapt = currentEventUnit && currentEventUnit.apt;
         window._stampCtx = { unit: uapt, system: sys };
-        try { const r = await o.apply(this, arguments); if (!navigator.onLine && uid) enqueue(uid, sys); return r; }
-        finally { window._stampCtx = null; }
+        // Never leave "Saving…" forever: after 2 minutes release the button and say so.
+        let guard; const stuck = new Promise(res => { guard = setTimeout(() => res('stuck'), 120000); });
+        try {
+          const r = await Promise.race([o.apply(this, arguments), stuck]);
+          if (r === 'stuck') { const b = document.querySelector('#addEventModal button[type=submit]'); if (b) { b.disabled = false; b.textContent = 'Save Event'; } toast('The save did not finish (connection waited too long). Reload the page and add the photos again.', 10000); return; }
+          if (!navigator.onLine && uid) enqueue(uid, sys); return r;
+        }
+        finally { clearTimeout(guard); window._stampCtx = null; }
       });
       wrap('saveQuickUnit', o => async function (ev) {
         const apt = $('quickUnit') && $('quickUnit').value; const sys = $('quickSystem') && $('quickSystem').value;
