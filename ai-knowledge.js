@@ -450,12 +450,11 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
       try {
         const wav = await chatToWav(blob).catch(() => null); const sendBlob = wav || blob;
         const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.readAsDataURL(sendBlob); });
-        const token = window.getAccessToken ? await window.getAccessToken() : null;
         const sheets = [...new Set(documents.map(d => d.metadata?.sheet_number || d.sheet_number || String(d.file_name || '').split(/[-_ .]/)[0]).filter(Boolean))].slice(0, 120).join(', ');
-        const response = await fetch('/.netlify/functions/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') }, body: JSON.stringify({ projectId: projectId(), audio: b64, audioType: sendBlob.type, transcribeOnly: true, sheets, lang: document.documentElement.lang || navigator.language }) });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.error || `Error ${response.status}`);
-        input.value = body.question || '';
+        // One step: the voice note is transcribed and answered in the same call;
+        // the bubble shows what was understood.
+        input.disabled = false; input.placeholder = 'Ask about drawings, specs, RFIs, code…';
+        chatAsk({ audio: b64, audioType: sendBlob.type, sheets, lang: document.documentElement.lang || navigator.language });
       } catch (error) { chatAdd('a', `⚠️ ${error.message}`); }
       finally { input.disabled = false; input.placeholder = 'Ask about drawings, specs, RFIs, code…'; }
     };
