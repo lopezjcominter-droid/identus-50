@@ -354,7 +354,7 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     fab.onclick = () => aiChatToggle();
     panel.querySelector('#aiChatForm').onsubmit = event => { event.preventDefault(); chatAsk(); };
     panel.querySelector('#aiChatMic').onclick = chatMic;
-    chatAdd('a', 'Hi! Ask me about this project’s drawings, specifications, RFIs or electrical code. I cite the sheet, revision and page I use.');
+    chatAdd('a', /^es/i.test(document.documentElement.lang || (()=>{try{return localStorage.getItem('cfg_language')}catch(_){return ''}})() || '') ? 'Asistente técnico de Identus 50. Consulte planos, specs, RFIs o NEC/FBC.' : 'Identus 50 technical assistant. Ask about drawings, specs, RFIs or NEC/FBC.');
   }
   function chatAdd(who, text, citations) {
     const box = document.getElementById('aiChatMsgs'); if (!box) return null;
