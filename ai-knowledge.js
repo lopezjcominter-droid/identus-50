@@ -420,6 +420,19 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     if (!bar) { bar = document.createElement('div'); bar.id = 'aiChatRec'; bar.innerHTML = '<button type="button" id="aiChatRecDel" title="Delete">🗑</button><span id="aiChatRecTime">🔴 0:00</span><button type="button" id="aiChatRecSend" title="Send">➤</button>'; f.appendChild(bar); bar.querySelector('#aiChatRecDel').onclick = () => { chatRecDiscard = true; chatRecorder?.stop(); }; bar.querySelector('#aiChatRecSend').onclick = () => { chatRecDiscard = false; chatRecorder?.stop(); }; }
     bar.style.display = on ? 'flex' : 'none';
   }
+  // Voice note → 16 kHz mono WAV (small, and every AI service accepts it).
+  async function chatToWav(blob) {
+    const Ctx = window.AudioContext || window.webkitAudioContext; if (!Ctx) return null;
+    const ctx = new Ctx(); const decoded = await ctx.decodeAudioData(await blob.arrayBuffer()); ctx.close?.();
+    const rate = 16000; const off = new OfflineAudioContext(1, Math.ceil(decoded.duration * rate), rate);
+    const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+    const pcm = (await off.startRendering()).getChannelData(0);
+    const buf = new ArrayBuffer(44 + pcm.length * 2); const v = new DataView(buf); const w = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+    w(0, 'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, pcm.length * 2, true);
+    for (let i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+    return new Blob([buf], { type: 'audio/wav' });
+  }
   async function chatMic() {
     if (chatRecorder || chatBusy) return;
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { chatAdd('a', 'Voice notes are not available in this browser.'); return; }
@@ -435,10 +448,11 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
       const input = document.getElementById('aiChatInput'); const blob = new Blob(parts, { type: rec.mimeType || type || 'audio/webm' });
       input.value = ''; input.placeholder = 'Transcribing…'; input.disabled = true;
       try {
-        const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.readAsDataURL(blob); });
+        const wav = await chatToWav(blob).catch(() => null); const sendBlob = wav || blob;
+        const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.readAsDataURL(sendBlob); });
         const token = window.getAccessToken ? await window.getAccessToken() : null;
         const sheets = [...new Set(documents.map(d => d.metadata?.sheet_number || d.sheet_number || String(d.file_name || '').split(/[-_ .]/)[0]).filter(Boolean))].slice(0, 120).join(', ');
-        const response = await fetch('/.netlify/functions/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') }, body: JSON.stringify({ projectId: projectId(), audio: b64, audioType: blob.type, transcribeOnly: true, sheets, lang: document.documentElement.lang || navigator.language }) });
+        const response = await fetch('/.netlify/functions/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') }, body: JSON.stringify({ projectId: projectId(), audio: b64, audioType: sendBlob.type, transcribeOnly: true, sheets, lang: document.documentElement.lang || navigator.language }) });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || `Error ${response.status}`);
         input.value = body.question || '';
