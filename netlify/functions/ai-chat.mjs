@@ -31,6 +31,12 @@ async function openai(path, payload, timeoutMs = 25000) {
 const CODE_BASIS = process.env.AI_CODE_BASIS || 'NEC 2020 (NFPA 70) as adopted by the Florida Building Code, 8th Edition (2023)';
 const SYSTEM = `You are the technical assistant of Identus 50, a QA/QC app for electrical construction (electrical, fire alarm, low voltage).
 Answer in the same language as the question (Spanish or English).
+LANGUAGE: reply in the language of the QUESTION (Spanish question → Spanish answer, English → English), even when the drawing notes are in English. Keep trade terms in English (AFF, THHN, EMT, GFCI…).
+FORMAT (always the same):
+- Line 1: the value first when the question asks for a size, height, quantity, breaker or wire (e.g. "#12 AWG", "1'-6\" AFF"), then a dash and the note/sheet that says it. Example: "1'-6\" AFF — Nota Q, E600 [S1]".
+- At most 3 lines in total unless the user asks for "detalle", "explica" or "detail".
+- When a line comes from the code (NEC/FBC) and NOT from the project documents, start that line with "⚠️ Código:" (Spanish) or "⚠️ Code:" (English) so it is clear it is not a project requirement.
+- If the SOURCES do not contain it, one line: "No aparece en los planos cargados. Revisar <closest sheet from the SOURCES>." (English: "Not in the loaded drawings. Check <sheet>."), naming the sheet that is closest to the subject when a source shows it.
 STYLE — be direct like a senior electrical PM on site:
 - First line = the answer itself (values, sizes, heights, breaker, wire, sheet). No preamble, no restating the question.
 - Then at most 3 short bullets with the supporting details, each with its citation.
@@ -127,6 +133,11 @@ export default async (request) => {
     let history = [];
     if (conversationId) history = (await sb(`/rest/v1/ai_messages?conversation_id=eq.${conversationId}&select=role,content,citations&order=created_at.desc&limit=8`, auth).catch(() => [])).reverse();
     const recentQuestions = history.filter(m => m.role === 'user').slice(-2).map(m => m.content);
+    // A plain greeting gets a short fixed reply (no AI call).
+    if (/^\s*(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hi|hello|hey|good (morning|afternoon|evening))[\s!.,¡]*$/i.test(question)) {
+      const english = /^\s*(hi|hello|hey|good)/i.test(question);
+      return json(200, { answer: english ? 'How can I help? Ask about a sheet, unit or system.' : '¿En qué le ayudo? Puede preguntar por una hoja, unidad o sistema.', question, citations: [], conversationId: input.conversationId || null });
+    }
     const t0 = Date.now();
     // Rewrite the question into drawing/spec terms (English + Spanish) for a better search.
     let rewritten = '';
@@ -156,7 +167,7 @@ export default async (request) => {
       // The best chunks of the documents already under discussion.
       followChunks = (await sb('/rest/v1/rpc/ai_match_chunks', auth, { method: 'POST', body: JSON.stringify({ p_project_id: projectId, p_query: qEmb, p_count: 20 }) }).catch(() => [])).filter(c => citedDocIds.includes(c.document_id)).slice(0, 4);
     }
-    const seen = new Set(); const chunks = [...namedChunks, ...followChunks, ...(matches || [])].filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, 16);
+    const seen = new Set(); const chunks = [...namedChunks, ...followChunks, ...(matches || [])].filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, IS_GEMINI ? 20 : 16);
     const docIds = [...new Set(chunks.map(c => c.document_id))];
     const docs = docIds.length ? await sb(`/rest/v1/ai_documents?id=in.(${docIds.join(',')})&select=id,file_name,category,sheet_number,title,revision,is_current_revision,metadata_confirmed,storage_path`, auth) : [];
     const docById = new Map((docs || []).map(d => [d.id, d]));
@@ -177,23 +188,26 @@ export default async (request) => {
     // Short history for follow-up questions.
 
     const ctx = input.context && typeof input.context === 'object' ? JSON.stringify(input.context).slice(0, 400) : '';
-    const completion = await openai('chat/completions', {
-      model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450,
-      messages: [
+    // Harder questions (code, conflicts, comparisons) use the stronger Gemini
+    // model when Gemini is the provider; if it is slow, fall back to the fast one.
+    const hard = IS_GEMINI && /\b(nec|c[oó]digo|code|fbc|conflict|conflicto|compar|rfi|por qu[eé]|why|explica|detalle|detail)\b/i.test(question);
+    const answerMessages = [
         { role: 'system', content: SYSTEM },
         ...history.map(m => ({ role: m.role, content: String(m.content).slice(0, 1500) })),
         // Earlier [S#] numbers referred to earlier sources; tell the model the numbering restarts.
         { role: 'user', content: `${history.length ? `This is a follow-up in the same conversation. Previous question: "${String(recentQuestions.at(-1) || '').slice(0, 300)}". Keep that same subject (same device, unit, panel or sheet) unless this message names a new one. Interpreted as: "${rewritten.replace(/"/g, "'")}". Source numbers below are new for this answer.\n\n` : ''}SOURCES:\n${sourceText}\n\nQUESTION: ${question}` }
-      ]
-    });
+    ];
+    let completion = null;
+    if (hard) completion = await openai('chat/completions', { model: process.env.GEMINI_PRO_MODEL || 'gemini-flash-latest', temperature: 0, max_tokens: 450, messages: answerMessages }, 18000).catch(() => null);
+    if (!completion) completion = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450, messages: answerMessages });
     let answer = completion.choices?.[0]?.message?.content?.trim() || 'No answer.';
     // Second check: keep only what the cited sources actually say (skipped if time is short).
-    if (!IS_GEMINI && sources.length && Date.now() - t0 < 5000) {
+    if (sources.length && /\d/.test(answer) && Date.now() - t0 < (IS_GEMINI ? 9000 : 5000)) {
       try {
         const check = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450, messages: [
-          { role: 'system', content: 'You verify answers about construction documents. Compare the DRAFT with the SOURCES. Remove or correct any value, size, height, quantity or note that the sources do not state; never add typical/standard values. If the sources do not contain the answer, say so briefly and name the sheet to check. Keep the same language, short style and [S#] citations (only citations that support the text). Output only the final answer.' },
+          { role: 'system', content: 'You verify answers about construction documents. Compare the DRAFT with the SOURCES. Remove or correct any value, size, height, quantity or note that the sources do not state; never add typical/standard values. If the sources do not contain the answer, say so briefly and name the sheet to check. Keep the same language, the same format (value first, at most 3 lines, ⚠️ Código/Code lines) and [S#] citations (only citations that support the text). Output only the final answer.' },
           { role: 'user', content: `SOURCES:\n${sourceText}\n\nQUESTION: ${question}\n\nDRAFT:\n${answer}` }
-        ] }, Math.max(1500, 8500 - (Date.now() - t0)));
+        ] }, Math.max(3000, (IS_GEMINI ? 20000 : 8500) - (Date.now() - t0)));
         const fixed = check.choices?.[0]?.message?.content?.trim(); if (fixed) answer = fixed;
       } catch (_) {}
     }
