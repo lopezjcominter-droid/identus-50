@@ -82,7 +82,25 @@ export default async (request) => {
     if (!['admin', 'pm'].includes(role)) return json(403, { error: 'The AI assistant is available to Admin and PM users of this project.' });
     // Voice note: transcribe the recorded audio with OpenAI, then answer it as text.
     if (!question && input.audio) {
-      if (IS_GEMINI) return json(501, { error: 'Voice notes need the OpenAI key for now. Type the question instead.' });
+      if (IS_GEMINI) {
+        // Gemini: the browser sends a 16 kHz WAV; Gemini writes down what was said.
+        try {
+          const type = String(input.audioType || '').split(';')[0];
+          if (!/wav/.test(type)) return json(400, { error: 'Reload the page and record again (the voice note must be WAV for Gemini).' });
+          const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${CHAT_MODEL}:generateContent`, { method: 'POST', signal: AbortSignal.timeout(20000), headers: { 'Content-Type': 'application/json', 'x-goog-api-key': OPENAI_KEY }, body: JSON.stringify({
+            contents: [{ role: 'user', parts: [
+              { text: `Transcribe this voice note exactly as spoken (Spanish, English or Spanglish). It is a question about electrical construction drawings. Known terms: receptáculos, receptacle, AFF, panel, breaker, conduit, EMT, THHN, disconnect, range, dryer, fire alarm, NEC 2020, Florida Building Code, RFI, spec. Sheets: ${String(input.sheets || '').slice(0, 600)}. Output only the transcription.` },
+              { inline_data: { mime_type: 'audio/wav', data: String(input.audio) } }
+            ] }],
+            generationConfig: { temperature: 0 }
+          }) });
+          const b = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(b?.error?.message || `transcription ${r.status}`);
+          question = String((b.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('')).trim().slice(0, 2000);
+        } catch (error) { return json(502, { error: `Could not transcribe the voice note: ${error.message}` }); }
+        if (!question) return json(400, { error: 'No speech detected in the voice note.' });
+        if (input.transcribeOnly) return json(200, { question });
+      } else
       try {
         const bytes = Buffer.from(String(input.audio), 'base64');
         if (bytes.length > 4_000_000) return json(400, { error: 'Voice note too long (max ~1 min).' });
