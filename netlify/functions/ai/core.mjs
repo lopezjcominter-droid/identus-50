@@ -25,9 +25,10 @@ function cropJpeg(bytes, band) {
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kihsukzcbohmxovbyisi.supabase.co';
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
-const EMBED_MODEL = process.env.OPENAI_EMBED_MODEL || 'text-embedding-3-small';
+import { AI_KEY, AI_BASE, AI_KEY_NAME, IS_GEMINI, DEFAULT_CHAT_MODEL, DEFAULT_EMBED_MODEL, adaptPayload } from './provider.mjs';
+const OPENAI_KEY = AI_KEY;
+const MODEL = (IS_GEMINI ? '' : process.env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL;
+const EMBED_MODEL = (IS_GEMINI ? '' : process.env.OPENAI_EMBED_MODEL) || DEFAULT_EMBED_MODEL;
 const MAX_ATTEMPTS = Number(process.env.AI_MAX_PAGE_ATTEMPTS || 3);
 const BUCKET = 'ai-docs';
 
@@ -46,10 +47,11 @@ async function download(path) {
 }
 async function openai(path, payload, timeoutMs = 20000, maxTokens = 0) {
   if (maxTokens && path === 'chat/completions') payload = { ...payload, max_tokens: maxTokens };
+  payload = adaptPayload(path, payload);
   // Scheduled functions are stopped at ~30 s: never wait longer than this.
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
-  try { response = await fetch(`https://api.openai.com/v1/${path}`, { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); }
+  try { response = await fetch(`${AI_BASE}/${path}`, { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); }
   catch (error) { throw Object.assign(new Error(error.name === 'AbortError' ? `OpenAI took longer than ${Math.round(timeoutMs / 1000)} s` : `OpenAI: ${error.message}`), { status: 408 }); }
   finally { clearTimeout(timer); }
   const body = await response.json().catch(() => ({}));
@@ -296,7 +298,7 @@ export async function processOne() {
 
 // Process pages until the time budget is used (scheduled functions stop at ~30 s).
 export async function runQueue(budgetMs = 6000) {
-  if (!SERVICE_KEY || !OPENAI_KEY) return { configured: false, missing: [!SERVICE_KEY && 'SUPABASE_SERVICE_ROLE_KEY', !OPENAI_KEY && 'OPENAI_API_KEY'].filter(Boolean) };
+  if (!SERVICE_KEY || !OPENAI_KEY) return { configured: false, missing: [!SERVICE_KEY && 'SUPABASE_SERVICE_ROLE_KEY', !OPENAI_KEY && AI_KEY_NAME].filter(Boolean) };
   const started = Date.now(); const results = [];
   // Start a new page only early in the run: one page can take ~20 s.
   while (Date.now() - started < budgetMs) {
