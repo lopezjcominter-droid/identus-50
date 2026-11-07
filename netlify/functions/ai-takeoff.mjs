@@ -5,8 +5,9 @@
 // POST { projectId, save: true, conversationId?, question, answer, citations }
 // stores the finished takeoff in the chat history.
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kihsukzcbohmxovbyisi.supabase.co';
-const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
-const MODEL = process.env.OPENAI_TAKEOFF_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+import { AI_KEY, AI_BASE, AI_KEY_NAME, IS_GEMINI, DEFAULT_CHAT_MODEL, adaptPayload } from './ai/provider.mjs';
+const OPENAI_KEY = AI_KEY;
+const MODEL = (IS_GEMINI ? '' : process.env.OPENAI_TAKEOFF_MODEL || process.env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL;
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 async function sb(path, auth, options = {}) {
   const response = await fetch(`${SUPABASE_URL}${path}`, { ...options, headers: { apikey: auth.apikey, Authorization: auth.bearer, 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -29,7 +30,7 @@ If the requested area is not inside this quarter: {"area_in_quarter": false, "it
 
 export default async (request) => {
   if (request.method !== 'POST') return json(405, { error: 'POST only' });
-  if (!OPENAI_KEY) return json(503, { error: 'The AI assistant is not configured (OPENAI_API_KEY).' });
+  if (!OPENAI_KEY) return json(503, { error: 'The AI assistant is not configured (' + AI_KEY_NAME + ').' });
   const bearer = request.headers.get('authorization') || ''; const apikey = request.headers.get('apikey') || '';
   if (!/^Bearer\s+\S+/.test(bearer) || !apikey) return json(401, { error: 'Sign in again.' });
   const auth = { bearer, apikey };
@@ -59,14 +60,14 @@ export default async (request) => {
     const paths = rows?.[0]?.extracted?.images;
     if (!Array.isArray(paths) || paths.length < 5) return json(409, { error: 'This sheet has no page images yet. Use Re-read on it in the Knowledge Base.' });
     const [whole, quarter] = await Promise.all([image(paths[0], auth), image(paths[part], auth)]);
-    const response = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', signal: AbortSignal.timeout(24000), headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({
+    const response = await fetch(`${AI_BASE}/chat/completions`, { method: 'POST', signal: AbortSignal.timeout(24000), headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(adaptPayload('chat/completions', {
       model: MODEL, temperature: 0, seed: 50, max_tokens: 700, response_format: { type: 'json_object' },
       messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: [
         { type: 'text', text: `Takeoff request: ${String(input.request || '').slice(0, 500)}\nFirst image: whole sheet. Second image: the ${PART_NAME[part]} quarter — count only here.` },
         { type: 'image_url', image_url: { url: whole, detail: 'low' } },
         { type: 'image_url', image_url: { url: quarter, detail: 'high' } }
       ] }]
-    }) });
+    })) });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`OpenAI ${response.status}: ${body?.error?.message || 'request failed'}`);
     let result = {}; try { result = JSON.parse(body.choices?.[0]?.message?.content || '{}'); } catch (_) {}

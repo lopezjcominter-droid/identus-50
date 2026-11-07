@@ -2,11 +2,12 @@
 // POST { projectId, question, conversationId?, context? } with the user's
 // Supabase session (Authorization: Bearer <access token>, apikey: <anon key>).
 // Every Supabase call runs AS THE USER, so RLS decides what they can read.
-// Requires Netlify env OPENAI_API_KEY. Optional OPENAI_CHAT_MODEL.
+// Requires Netlify env OPENAI_API_KEY or GEMINI_API_KEY (see ai/provider.mjs).
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kihsukzcbohmxovbyisi.supabase.co';
-const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
-const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
-const EMBED_MODEL = process.env.OPENAI_EMBED_MODEL || 'text-embedding-3-small';
+import { AI_KEY, AI_BASE, AI_KEY_NAME, IS_GEMINI, DEFAULT_CHAT_MODEL, DEFAULT_EMBED_MODEL, adaptPayload } from './ai/provider.mjs';
+const OPENAI_KEY = AI_KEY;
+const CHAT_MODEL = (IS_GEMINI ? '' : process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL;
+const EMBED_MODEL = (IS_GEMINI ? '' : process.env.OPENAI_EMBED_MODEL) || DEFAULT_EMBED_MODEL;
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -17,8 +18,9 @@ async function sb(path, auth, options = {}) {
   return body;
 }
 async function openai(path, payload, timeoutMs = 0) {
+  payload = adaptPayload(path, payload);
   const ctl = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
-  const response = await fetch(`https://api.openai.com/v1/${path}`, { signal: ctl, method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const response = await fetch(`${AI_BASE}/${path}`, { signal: ctl, method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(`OpenAI ${response.status}: ${body?.error?.message || 'request failed'}`), { status: response.status });
   return body;
@@ -62,7 +64,7 @@ If the user's message is feedback or a follow-up ("revisa bien", "¿seguro?", "c
 
 export default async (request) => {
   if (request.method !== 'POST') return json(405, { error: 'POST only' });
-  if (!OPENAI_KEY) return json(503, { error: 'The AI assistant is not configured (OPENAI_API_KEY).' });
+  if (!OPENAI_KEY) return json(503, { error: 'The AI assistant is not configured (' + AI_KEY_NAME + ').' });
   const bearer = request.headers.get('authorization') || ''; const apikey = request.headers.get('apikey') || '';
   if (!/^Bearer\s+\S+/.test(bearer) || !apikey) return json(401, { error: 'Sign in again.' });
   const auth = { bearer, apikey };
@@ -78,6 +80,7 @@ export default async (request) => {
     if (!['admin', 'pm'].includes(role)) return json(403, { error: 'The AI assistant is available to Admin and PM users of this project.' });
     // Voice note: transcribe the recorded audio with OpenAI, then answer it as text.
     if (!question && input.audio) {
+      if (IS_GEMINI) return json(501, { error: 'Voice notes need the OpenAI key for now. Type the question instead.' });
       try {
         const bytes = Buffer.from(String(input.audio), 'base64');
         if (bytes.length > 4_000_000) return json(400, { error: 'Voice note too long (max ~1 min).' });
