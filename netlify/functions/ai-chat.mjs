@@ -136,7 +136,9 @@ export default async (request) => {
     // A plain greeting gets a short fixed reply (no AI call).
     if (/^\s*(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hi|hello|hey|good (morning|afternoon|evening))[\s!.,¡]*$/i.test(question)) {
       const english = /^\s*(hi|hello|hey|good)/i.test(question);
-      return json(200, { answer: english ? 'How can I help? Ask about a sheet, unit or system.' : '¿En qué le ayudo? Puede preguntar por una hoja, unidad o sistema.', question, citations: [], conversationId: input.conversationId || null });
+      const profile = await sb(`/rest/v1/profiles?user_id=eq.${user.id}&select=name`, auth).catch(() => []);
+      const first = String(profile?.[0]?.name || user.user_metadata?.full_name || user.user_metadata?.name || '').trim().split(/\s+/)[0];
+      return json(200, { answer: english ? `Hi${first ? `, ${first}` : ''}. What do you need to check?` : `Hola${first ? `, ${first}` : ''}. ¿Qué necesita revisar?`, question, citations: [], conversationId: input.conversationId || null });
     }
     const t0 = Date.now();
     // Rewrite the question into drawing/spec terms (English + Spanish) for a better search.
