@@ -22,7 +22,7 @@ async function openai(path, payload, timeoutMs = 0) {
   const ctl = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
   const response = await fetch(`${AI_BASE}/${path}`, { signal: ctl, method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw Object.assign(new Error(`OpenAI ${response.status}: ${body?.error?.message || 'request failed'}`), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error(`${IS_GEMINI ? 'Gemini' : 'OpenAI'} ${response.status}: ${[401, 403].includes(response.status) || /api key/i.test(body?.error?.message || '') ? `the ${AI_KEY_NAME} in Netlify is not valid` : (response.status === 404 ? `model ${payload.model} is not available for this key (set GEMINI_MODEL / OPENAI_CHAT_MODEL in Netlify)` : (body?.error?.message || 'request failed'))}`), { status: 502, aiStatus: response.status });
   return body;
 }
 
