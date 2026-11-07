@@ -110,7 +110,9 @@ export default async (request) => {
     const t0 = Date.now();
     // Rewrite the question into drawing/spec terms (English + Spanish) for a better search.
     let rewritten = '';
-    try {
+    // Gemini is slower per call: skip the extra rewrite/check calls so the
+    // answer fits in Netlify's time limit.
+    if (!IS_GEMINI) try {
       const rw = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 90, messages: [
         { role: 'system', content: 'Rewrite the electrical-construction question as a short search query using the words drawings and specs use (English terms as on the sheets, e.g. "receptacle mounting height AFF", plus key Spanish words). Resolve follow-ups using the previous questions: a short follow-up ("y según spec", "¿y el dryer?") keeps the previous subject and only changes what it names. Output only the query.' },
         { role: 'user', content: `${recentQuestions.length ? `Previous questions:\n${recentQuestions.join('\n')}\n\n` : ''}Question: ${question}` }
@@ -166,7 +168,7 @@ export default async (request) => {
     });
     let answer = completion.choices?.[0]?.message?.content?.trim() || 'No answer.';
     // Second check: keep only what the cited sources actually say (skipped if time is short).
-    if (sources.length && Date.now() - t0 < 5000) {
+    if (!IS_GEMINI && sources.length && Date.now() - t0 < 5000) {
       try {
         const check = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450, messages: [
           { role: 'system', content: 'You verify answers about construction documents. Compare the DRAFT with the SOURCES. Remove or correct any value, size, height, quantity or note that the sources do not state; never add typical/standard values. If the sources do not contain the answer, say so briefly and name the sheet to check. Keep the same language, short style and [S#] citations (only citations that support the text). Output only the final answer.' },
