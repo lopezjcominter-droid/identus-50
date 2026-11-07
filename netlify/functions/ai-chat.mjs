@@ -17,10 +17,12 @@ async function sb(path, auth, options = {}) {
   if (!response.ok) throw Object.assign(new Error(`Supabase ${response.status}: ${body?.message || text}`), { status: response.status });
   return body;
 }
-async function openai(path, payload, timeoutMs = 0) {
+async function openai(path, payload, timeoutMs = 25000) {
   payload = adaptPayload(path, payload);
   const ctl = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
-  const response = await fetch(`${AI_BASE}/${path}`, { signal: ctl, method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  let response;
+  try { response = await fetch(`${AI_BASE}/${path}`, { signal: ctl, method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); }
+  catch (error) { throw Object.assign(new Error(`${IS_GEMINI ? 'Gemini' : 'OpenAI'} did not answer in ${Math.round(timeoutMs / 1000)} s (${payload.model}). Try again or set a faster model.`), { status: 504 }); }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(`${IS_GEMINI ? 'Gemini' : 'OpenAI'} ${response.status}: ${[401, 403].includes(response.status) || /api key/i.test(body?.error?.message || '') ? `the ${AI_KEY_NAME} in Netlify is not valid` : (response.status === 404 ? `model ${payload.model} is not available for this key (set GEMINI_MODEL / OPENAI_CHAT_MODEL in Netlify)` : (body?.error?.message || 'request failed'))}`), { status: 502, aiStatus: response.status });
   return body;
