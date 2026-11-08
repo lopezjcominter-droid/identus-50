@@ -17,6 +17,26 @@ async function sb(path, auth, options = {}) {
   if (!response.ok) throw Object.assign(new Error(`Supabase ${response.status}: ${body?.message || text}`), { status: response.status });
   return body;
 }
+// Same question again in the same project (first question of a chat): answer
+// from memory for 6 hours while this server instance is warm.
+const answerCache = new Map();
+// Streamed answer: calls onDelta with each piece of text as it arrives.
+async function openaiStream(payload, timeoutMs = 25000, onDelta) {
+  payload = adaptPayload('chat/completions', { ...payload, stream: true });
+  const response = await fetch(`${AI_BASE}/chat/completions`, { signal: AbortSignal.timeout(timeoutMs), method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  if (!response.ok || !response.body) { const b = await response.json().catch(() => ({})); throw Object.assign(new Error(`${IS_GEMINI ? 'Gemini' : 'OpenAI'} ${response.status}: ${b?.error?.message || 'request failed'}`), { status: 502 }); }
+  const reader = response.body.getReader(); const dec = new TextDecoder(); let buf = ''; let text = '';
+  for (;;) {
+    const { value, done } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i; while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+      if (!line.startsWith('data:')) continue; const data = line.slice(5).trim(); if (!data || data === '[DONE]') continue;
+      try { const piece = JSON.parse(data).choices?.[0]?.delta?.content || ''; if (piece) { text += piece; onDelta(piece); } } catch (_) {}
+    }
+  }
+  return { choices: [{ message: { content: text } }], usage: {} };
+}
 async function openai(path, payload, timeoutMs = 25000) {
   payload = adaptPayload(path, payload);
   const ctl = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
@@ -211,6 +231,12 @@ export default async (request) => {
     // Short history for follow-up questions.
 
     const ctx = input.context && typeof input.context === 'object' ? JSON.stringify(input.context).slice(0, 400) : '';
+    const cacheKey = `${projectId}|${norm(question).replace(/[^a-z0-9#'" ]+/g, ' ').replace(/\s+/g, ' ').trim()}`;
+    const cached = !history.length && answerCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < 6 * 3600 * 1000 && !pendingPages) {
+      const r = { ...cached.result, conversationId: input.conversationId || null, cached: true };
+      return input.stream ? new Response(JSON.stringify({ done: true, ...r }) + '\n', { status: 200, headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' } }) : json(200, r);
+    }
     // Harder questions (code, conflicts, comparisons) use the stronger Gemini
     // model when Gemini is the provider; if it is slow, fall back to the fast one.
     // Questions that need an exact value (height, size, breaker…) also use it.
@@ -221,10 +247,15 @@ export default async (request) => {
         // Earlier [S#] numbers referred to earlier sources; tell the model the numbering restarts.
         { role: 'user', content: `${history.length ? `This is a follow-up in the same conversation. Previous question: "${String(recentQuestions.at(-1) || '').slice(0, 300)}". Keep that same subject (same device, unit, panel or sheet) unless this message names a new one. Interpreted as: "${rewritten.replace(/"/g, "'")}". Source numbers below are new for this answer.\n\n` : ''}SOURCES:\n${sourceText}\n\nQUESTION: ${question}` }
     ];
+    // Everything after the sources: write the answer (streamed when the browser
+    // asks), check it, clean it and save it.
+    const finish = async (onDelta) => {
+    let streamed = false;
+    const ask = (payload, timeoutMs) => onDelta ? openaiStream(payload, timeoutMs, d => { streamed = true; onDelta(d); }) : openai('chat/completions', payload, timeoutMs);
     let completion = null;
-    if (hard) completion = await openai('chat/completions', { model: process.env.GEMINI_PRO_MODEL || 'gemini-flash-latest', temperature: 0, max_tokens: 450, messages: answerMessages }, 18000).catch(() => null);
+    if (hard) completion = await ask({ model: process.env.GEMINI_PRO_MODEL || 'gemini-flash-latest', temperature: 0, max_tokens: 450, messages: answerMessages }, 18000).catch(() => null);
     const usedStrong = !!completion;
-    if (!completion) completion = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450, messages: answerMessages });
+    if (!completion) completion = await ask({ model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450, messages: answerMessages });
     let answer = completion.choices?.[0]?.message?.content?.trim() || 'No answer.';
     // Second check: keep only what the cited sources actually say (skipped if time is short).
     // (skipped when the stronger Gemini model already answered: it is precise, and this saves ~4 s)
@@ -274,7 +305,21 @@ export default async (request) => {
       answer += `\n${es ? 'Confianza' : 'Confidence'}: ${({ high: es ? 'Alta' : 'High', medium: es ? 'Media' : 'Medium', low: es ? 'Baja — verificar en el plano' : 'Low — check the drawing' })[level]}`;
     }
     if (pendingPages > 0) answer += `\n(${pendingPages} ${isSpanish ? (pendingPages === 1 ? 'página aún en lectura' : 'páginas aún en lectura') + '; la respuesta puede estar incompleta' : (pendingPages === 1 ? 'page' : 'pages') + ' still being read; the answer may be incomplete'})`;
-    return json(200, { answer, question, citations: used, conversationId, usage });
+    const result = { answer, question, citations: used, conversationId, usage };
+    answerCache.set(cacheKey, { at: Date.now(), result });
+    return result;
+    };
+    if (input.stream) {
+      const enc = new TextEncoder();
+      const stream = new ReadableStream({ async start(controller) {
+        const send = obj => controller.enqueue(enc.encode(JSON.stringify(obj) + '\n'));
+        try { send({ done: true, ...(await finish(d => send({ delta: d }))) }); }
+        catch (error) { send({ error: `The assistant could not answer: ${String(error.message).slice(0, 200)}` }); }
+        controller.close();
+      } });
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache' } });
+    }
+    return json(200, await finish(null));
   } catch (error) {
     console.error('ai-chat', error.message);
     return json(error.status === 401 ? 401 : 500, { error: error.status === 401 ? 'Sign in again.' : `The assistant could not answer: ${String(error.message).slice(0, 200)}` });
