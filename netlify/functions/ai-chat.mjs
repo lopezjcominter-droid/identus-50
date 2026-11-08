@@ -85,7 +85,7 @@ export default async (request) => {
     // Admin / PM only (same rule as the Knowledge Base).
     const member = await sb(`/rest/v1/project_members?project_id=eq.${projectId}&user_id=eq.${user.id}&select=role`, auth).catch(() => []);
     const role = String(member?.[0]?.role || '').toLowerCase();
-    if (!['admin', 'pm'].includes(role)) return json(403, { error: 'The AI assistant is available to Admin and PM users of this project.' });
+    if (!['admin', 'pm', 'inspector', 'qa inspector', 'inspection'].includes(role)) return json(403, { error: 'The AI assistant is available to Admin, PM and Inspector users of this project.' });
     // Voice note: transcribe the recorded audio with OpenAI, then answer it as text.
     if (!question && input.audio) {
       if (IS_GEMINI) {

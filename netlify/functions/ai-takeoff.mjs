@@ -41,7 +41,7 @@ export default async (request) => {
     const user = await sb('/auth/v1/user', auth);
     if (!user?.id) return json(401, { error: 'Sign in again.' });
     const member = await sb(`/rest/v1/project_members?project_id=eq.${projectId}&user_id=eq.${user.id}&select=role`, auth).catch(() => []);
-    if (!['admin', 'pm'].includes(String(member?.[0]?.role || '').toLowerCase())) return json(403, { error: 'Admin and PM only.' });
+    if (!['admin', 'pm', 'inspector', 'qa inspector', 'inspection'].includes(String(member?.[0]?.role || '').toLowerCase())) return json(403, { error: 'Admin, PM and Inspector only.' });
 
     if (input.save) {
       const question = String(input.question || '').slice(0, 2000); const answer = String(input.answer || '').slice(0, 6000);
