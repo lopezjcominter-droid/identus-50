@@ -277,7 +277,9 @@ export default async (request) => {
       return names.length ? `(${names.join(', ')})` : '';
     }).replace(/\)\s*\(/g, ', ').replace(/\s+([.,;])/g, '$1')
       // "E280, E284 (E280, E284)" → "E280, E284"
-      .replace(/\b([A-Z]{1,2}\d{3}[A-Z]?(?:,\s*[A-Z]{1,2}\d{3}[A-Z]?)*)\s*\(\1\)/g, '$1');
+      .replace(/\b([A-Z]{1,2}\d{3}[A-Z]?(?:,\s*[A-Z]{1,2}\d{3}[A-Z]?)*)\s*\(\1\)/g, '$1')
+      // "(E284, E280, E284)" → "(E284, E280)"
+      .replace(/\(([^()]*)\)/g, (m, inner) => /^[A-Z]{1,2}\d{3}/.test(inner.trim()) ? `(${[...new Set(inner.split(/\s*,\s*/).filter(Boolean))].join(', ')})` : m);
     const usage = completion.usage || {};
 
     if (!conversationId) {
