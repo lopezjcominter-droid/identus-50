@@ -27,7 +27,8 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kihsukzcbohmxovbyisi.s
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 import { AI_KEY, AI_BASE, AI_KEY_NAME, IS_GEMINI, DEFAULT_CHAT_MODEL, DEFAULT_EMBED_MODEL, adaptPayload } from './provider.mjs';
 const OPENAI_KEY = AI_KEY;
-const MODEL = (IS_GEMINI ? '' : process.env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL;
+// Reading sheets needs the stronger model (Flash-Lite missed notes on dense sheets).
+const MODEL = IS_GEMINI ? (process.env.GEMINI_READ_MODEL || 'gemini-flash-latest') : (process.env.OPENAI_MODEL || DEFAULT_CHAT_MODEL);
 const EMBED_MODEL = (IS_GEMINI ? '' : process.env.OPENAI_EMBED_MODEL) || DEFAULT_EMBED_MODEL;
 const MAX_ATTEMPTS = Number(process.env.AI_MAX_PAGE_ATTEMPTS || 3);
 const BUCKET = 'ai-docs';
@@ -235,7 +236,8 @@ export async function processOne() {
     // Dense sheets (big schedules) can take longer than one run allows. After a
     // timeout the page is read one quarter at a time, one quarter per run, and
     // the parts are merged at the end.
-    const tileMode = imagePaths.length >= 5 && (page.extracted?.tileMode || /took longer/i.test(String(page.error || '')));
+    // Gemini always reads by quarters: each piece in high detail, so small notes are not skipped.
+    const tileMode = imagePaths.length >= 5 && (IS_GEMINI || page.extracted?.tileMode || /took longer/i.test(String(page.error || '')));
     if (tileMode) {
       // Queue of pieces: quarters "1".."4". A quarter that is too slow or whose
       // answer is cut is split into top/bottom halves ("1T","1B"), and those
