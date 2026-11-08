@@ -244,7 +244,9 @@ export default async (request) => {
     answer = answer.replace(/\[?\s*S\d{1,2}(?:\s*\]?\s*[,y&]?\s*\[?\s*S\d{1,2})*\s*\]?/g, group => {
       const names = [...new Set([...group.matchAll(/S(\d{1,2})/g)].map(m => label(Number(m[1]))).filter(Boolean))];
       return names.length ? `(${names.join(', ')})` : '';
-    }).replace(/\)\s*\(/g, ', ').replace(/\s+([.,;])/g, '$1');
+    }).replace(/\)\s*\(/g, ', ').replace(/\s+([.,;])/g, '$1')
+      // "E280, E284 (E280, E284)" → "E280, E284"
+      .replace(/\b([A-Z]{1,2}\d{3}[A-Z]?(?:,\s*[A-Z]{1,2}\d{3}[A-Z]?)*)\s*\(\1\)/g, '$1');
     const usage = completion.usage || {};
 
     if (!conversationId) {
