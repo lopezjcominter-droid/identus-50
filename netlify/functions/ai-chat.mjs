@@ -36,7 +36,9 @@ FORMAT (always the same):
 - Line 1: the value first when the question asks for a size, height, quantity, breaker or wire (e.g. "#12 AWG", "1'-6\" AFF"), then a dash and the note/sheet that says it. Example: "1'-6\" AFF — Nota Q, E600 [S1]".
 - At most 3 lines in total unless the user asks for "detalle", "explica" or "detail".
 - When a line comes from the code and NOT from the project documents, start that line with "⚡ NEC <article>:" for the National Electrical Code or "📑 FBC <section>:" for the Florida Building Code, so it is clear it is not a project requirement. Use no other emojis.
-- If the SOURCES do not contain it, one line: "No aparece en los planos cargados. Revisar <closest sheet from the SOURCES>." (English: "Not in the loaded drawings. Check <sheet>."), naming the sheet that is closest to the subject when a source shows it.
+- Add one line with the exact words of the note that supports the answer, in quotes, copied from the SOURCES (e.g. «"RECEPTACLES SHALL BE MOUNTED 1'-6\" AFF"» — E600). Never paraphrase inside the quotes.
+- If the SOURCES do not contain it, answer only: "No aparece en los planos cargados." (English: "Not in the loaded drawings."). Do not suggest a sheet unless a source of the SAME trade and subject is shown; never suggest architectural sheets for an electrical question.
+- If two revisions of the same sheet disagree, use the CURRENT REVISION and say in one line what the other revision said.
 STYLE — be direct like a senior electrical PM on site:
 - First line = the answer itself (values, sizes, heights, breaker, wire, sheet). No preamble, no restating the question.
 - Then at most 3 short bullets with the supporting details, each with its citation.
@@ -169,12 +171,29 @@ export default async (request) => {
       // The best chunks of the documents already under discussion.
       followChunks = (await sb('/rest/v1/rpc/ai_match_chunks', auth, { method: 'POST', body: JSON.stringify({ p_project_id: projectId, p_query: qEmb, p_count: 20 }) }).catch(() => [])).filter(c => citedDocIds.includes(c.document_id)).slice(0, 4);
     }
-    const seen = new Set(); const chunks = [...namedChunks, ...followChunks, ...(matches || [])].filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, IS_GEMINI ? 20 : 16);
+    // 1) Word search too: notes that contain the exact words (AFF, receptacle, #12…)
+    // are found even when the meaning search misses them.
+    const SYN = { 'receptaculo': ['receptacle', 'outlet'], 'receptaculos': ['receptacle', 'outlet'], 'tomacorriente': ['receptacle'], 'altura': ['AFF', 'mounting height', 'height'], 'cable': ['wire', 'AWG'], 'calibre': ['AWG', 'wire size'], 'interruptor': ['switch', 'breaker'], 'panel': ['panel'], 'luces': ['light', 'fixture'], 'luminaria': ['fixture', 'light'], 'alarma': ['fire alarm'], 'desconectivo': ['disconnect'], 'disconnect': ['disconnect'], 'tierra': ['ground'], 'tuberia': ['conduit', 'EMT'] };
+    const STOP = new Set(['que', 'cual', 'cuales', 'como', 'donde', 'para', 'los', 'las', 'del', 'por', 'con', 'una', 'uno', 'van', 'esta', 'este', 'what', 'which', 'where', 'the', 'for', 'and', 'with', 'are', 'how', 'plano', 'planos', 'segun', 'según', 'dame', 'the']);
+    const norm = w => w.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const words = [...new Set(`${question} ${rewritten}`.split(/[^\p{L}\p{N}#'"-]+/u).map(w => w.trim()).filter(w => w.length >= 3 && !STOP.has(norm(w))))];
+    const terms = [...new Set(words.flatMap(w => [w, ...(SYN[norm(w)] || [])]))].filter(t => !/[,()*]/.test(t)).slice(0, 8);
+    let wordChunks = [];
+    if (terms.length) {
+      const or = terms.map(t => `content.ilike.*${encodeURIComponent(t)}*`).join(',');
+      const found = await sb(`/rest/v1/ai_chunks?project_id=eq.${projectId}&or=(${or})&select=id,document_id,page_number,content&limit=40`, auth).catch(() => []);
+      const score = c => terms.reduce((n, t) => n + (String(c.content || '').toLowerCase().includes(t.toLowerCase()) ? 1 : 0), 0);
+      wordChunks = (found || []).map(c => ({ ...c, _hits: score(c) })).sort((a, b) => b._hits - a._hits).slice(0, 6);
+    }
+    // 5) Pages still being read: the answer may be incomplete.
+    const pendingPages = await sb(`/rest/v1/ai_document_pages?project_id=eq.${projectId}&status=in.(pending,processing)&select=id&limit=500`, auth).then(r => (r || []).length).catch(() => 0);
+    const seen = new Set(); const chunks = [...namedChunks, ...wordChunks, ...followChunks, ...(matches || [])].filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, IS_GEMINI ? 20 : 16);
     const docIds = [...new Set(chunks.map(c => c.document_id))];
     const docs = docIds.length ? await sb(`/rest/v1/ai_documents?id=in.(${docIds.join(',')})&select=id,file_name,category,sheet_number,title,revision,is_current_revision,metadata_confirmed,storage_path`, auth) : [];
     const docById = new Map((docs || []).map(d => [d.id, d]));
     const rank = { drawings: 0, specifications: 1, rfi: 2, other: 3 };
-    chunks.sort((a, b) => (rank[docById.get(a.document_id)?.category] ?? 3) - (rank[docById.get(b.document_id)?.category] ?? 3));
+    // 6) Same category: the CURRENT revision goes first.
+    chunks.sort((a, b) => ((rank[docById.get(a.document_id)?.category] ?? 3) - (rank[docById.get(b.document_id)?.category] ?? 3)) || ((docById.get(b.document_id)?.is_current_revision ? 1 : 0) - (docById.get(a.document_id)?.is_current_revision ? 1 : 0)));
     const sources = chunks.map((c, i) => { const d = docById.get(c.document_id) || {}; return { ref: `S${i + 1}`, documentId: c.document_id, page: c.page_number, file: d.file_name, sheet: d.sheet_number, title: d.title, revision: d.revision, current: !!d.is_current_revision, confirmed: !!d.metadata_confirmed, category: d.category, content: String(c.content || '').slice(0, 1800) }; });
     // Takeoff: "cuántas luces / how many receptacles / takeoff del pasillo 2".
     // The browser counts the chosen drawing quarter by quarter (ai-takeoff).
@@ -232,6 +251,15 @@ export default async (request) => {
       { conversation_id: conversationId, project_id: projectId, role: 'assistant', content: answer, citations: used }
     ]) }).catch(() => {});
     if (conversationId) await sb(`/rest/v1/ai_conversations?id=eq.${conversationId}`, auth, { method: 'PATCH', body: JSON.stringify({ updated_at: new Date().toISOString() }) }).catch(() => {});
+    // 3) Confidence, from the sources actually cited.
+    if (used.length && !/^(no aparece|not in the loaded)/i.test(answer)) {
+      const quoted = /["“«][^"”»]{8,}["”»]/.test(answer);
+      const solid = used.filter(u => u.confirmed || u.current).length;
+      const level = quoted && (solid > 0 || used.length >= 2) ? 'high' : quoted || used.length >= 2 ? 'medium' : 'low';
+      const es = !/^[\x00-\x7f]*$/.test(question) || /\b(que|cual|altura|donde|como|segun|plano|del|los|las)\b/i.test(norm(question));
+      answer += `\n${es ? 'Confianza' : 'Confidence'}: ${({ high: es ? 'Alta' : 'High', medium: es ? 'Media' : 'Medium', low: es ? 'Baja — verificar en el plano' : 'Low — check the drawing' })[level]}`;
+    }
+    if (pendingPages > 0) answer += `\n(${pendingPages} ${/^[\x00-\x7f]*$/.test(question) && !/\b(que|altura|donde)\b/i.test(question) ? 'pages still being read; the answer may be incomplete' : 'páginas aún en lectura; la respuesta puede estar incompleta'})`;
     return json(200, { answer, question, citations: used, conversationId, usage });
   } catch (error) {
     console.error('ai-chat', error.message);
