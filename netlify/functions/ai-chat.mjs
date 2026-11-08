@@ -211,7 +211,8 @@ export default async (request) => {
     const ctx = input.context && typeof input.context === 'object' ? JSON.stringify(input.context).slice(0, 400) : '';
     // Harder questions (code, conflicts, comparisons) use the stronger Gemini
     // model when Gemini is the provider; if it is slow, fall back to the fast one.
-    const hard = IS_GEMINI && /\b(nec|c[oó]digo|code|fbc|conflict|conflicto|compar|rfi|por qu[eé]|why|explica|detalle|detail)\b/i.test(question);
+    // Questions that need an exact value (height, size, breaker…) also use it.
+    const hard = IS_GEMINI && /\b(nec|c[oó]digo|code|fbc|conflict|conflicto|compar|rfi|por qu[eé]|why|explica|detalle|detail|altura|height|aff|size|tama[nñ]o|calibre|cable|wire|awg|breaker|amp|amperaje|distancia|distance|clearance|espacio|medida|dimension|cu[aá]nt[oa]s?|how many|how much)\b/i.test(question);
     const answerMessages = [
         { role: 'system', content: SYSTEM },
         ...history.map(m => ({ role: m.role, content: String(m.content).slice(0, 1500) })),
@@ -251,15 +252,22 @@ export default async (request) => {
       { conversation_id: conversationId, project_id: projectId, role: 'assistant', content: answer, citations: used }
     ]) }).catch(() => {});
     if (conversationId) await sb(`/rest/v1/ai_conversations?id=eq.${conversationId}`, auth, { method: 'PATCH', body: JSON.stringify({ updated_at: new Date().toISOString() }) }).catch(() => {});
+    // Spanish or English, from common words of the question.
+    const qWords = norm(question).split(/[^a-z0-9ñ]+/);
+    const esHits = qWords.filter(w => ['que','cual','cuales','dime','dame','de','del','el','la','los','las','en','altura','cable','donde','como','cuanto','cuantos','cuantas','para','unidad','segun','hola','por','con','tamano','tamaño'].includes(w)).length;
+    const enHits = qWords.filter(w => ['what','which','the','of','in','how','where','height','size','wire','unit','for','is','per','tell','me','give'].includes(w)).length;
+    const isSpanish = esHits >= enHits;
+    // Clean-up: code icons only on lines that really cite a code article.
+    answer = answer.split('\n').filter(l => !/^\s*(⚡|📑)\s*(NEC|FBC)\b[^\d]*$/u.test(l.replace(/\([^)]*\)/g, '').trim()) || /\d/.test(l.replace(/\([^)]*\)/g, ''))).map(l => /^\s*(⚡|📑)/u.test(l) && !/\b(NEC|FBC)\s*\d/.test(l) ? l.replace(/^\s*(⚡|📑)\s*(NEC|FBC)?\s*(\/\s*(⚡|📑)?\s*(NEC|FBC))?\s*:?\s*/u, '') : l).filter(l => l.trim()).join('\n');
     // 3) Confidence, from the sources actually cited.
     if (used.length && !/^(no aparece|not in the loaded)/i.test(answer)) {
       const quoted = /["“«][^"”»]{8,}["”»]/.test(answer);
       const solid = used.filter(u => u.confirmed || u.current).length;
       const level = quoted && (solid > 0 || used.length >= 2) ? 'high' : quoted || used.length >= 2 ? 'medium' : 'low';
-      const es = !/^[\x00-\x7f]*$/.test(question) || /\b(que|cual|altura|donde|como|segun|plano|del|los|las)\b/i.test(norm(question));
+      const es = isSpanish;
       answer += `\n${es ? 'Confianza' : 'Confidence'}: ${({ high: es ? 'Alta' : 'High', medium: es ? 'Media' : 'Medium', low: es ? 'Baja — verificar en el plano' : 'Low — check the drawing' })[level]}`;
     }
-    if (pendingPages > 0) answer += `\n(${pendingPages} ${/^[\x00-\x7f]*$/.test(question) && !/\b(que|altura|donde)\b/i.test(question) ? 'pages still being read; the answer may be incomplete' : 'páginas aún en lectura; la respuesta puede estar incompleta'})`;
+    if (pendingPages > 0) answer += `\n(${pendingPages} ${isSpanish ? (pendingPages === 1 ? 'página aún en lectura' : 'páginas aún en lectura') + '; la respuesta puede estar incompleta' : (pendingPages === 1 ? 'page' : 'pages') + ' still being read; the answer may be incomplete'})`;
     return json(200, { answer, question, citations: used, conversationId, usage });
   } catch (error) {
     console.error('ai-chat', error.message);
