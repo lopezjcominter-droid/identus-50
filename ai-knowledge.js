@@ -402,8 +402,24 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     try {
       const token = window.getAccessToken ? await window.getAccessToken() : null;
       if (!token) throw new Error('Your session expired. Sign in again.');
-      const response = await fetch('/.netlify/functions/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') }, body: JSON.stringify({ projectId: projectId(), question, ...(voice || {}), conversationId: chatConversationId, context: chatContext() }) });
-      const body = await response.json().catch(() => ({}));
+      const response = await fetch('/.netlify/functions/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') }, body: JSON.stringify({ projectId: projectId(), question, ...(voice || {}), conversationId: chatConversationId, context: chatContext(), stream: true }) });
+      // Streamed answer: show the text as it arrives, then the final checked version.
+      let body = {};
+      if (response.ok && /ndjson/.test(response.headers.get('content-type') || '') && response.body) {
+        const reader = response.body.getReader(); const dec = new TextDecoder(); let buf = ''; let live = '';
+        for (;;) {
+          const { value, done } = await reader.read(); if (done) break;
+          buf += dec.decode(value, { stream: true }); let i;
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line.trim()) continue;
+            let msg; try { msg = JSON.parse(line); } catch (_) { continue; }
+            if (msg.delta) { live += msg.delta; waiting.textContent = live.replace(/\[?S\d{1,2}\]?/g, ''); const m = document.getElementById('aiChatMsgs'); if (m) m.scrollTop = m.scrollHeight; }
+            if (msg.error) throw new Error(msg.error);
+            if (msg.done) body = msg;
+          }
+        }
+        if (!body.done) throw new Error('The answer was interrupted. Try again.');
+      } else body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || `Error ${response.status}`);
       chatConversationId = body.conversationId || chatConversationId;
       if (voice && body.question) mine.textContent = `🎤 ${body.question}`;
