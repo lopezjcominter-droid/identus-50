@@ -24,6 +24,8 @@
   let pageStats = {}; let relations = []; let editingId = null; let pollTimer = null;
   const esc = v => (typeof officialFinalEscape === 'function' ? officialFinalEscape(String(v ?? '')) : String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
   const canManage = () => window.userRole === 'admin' || window.userRole === 'pm';
+  // Inspectors can ask the assistant; only Admin/PM manage the Knowledge Base.
+  const canChat = () => canManage() || window.userRole === 'inspector';
   const client = () => (typeof sbClient !== 'undefined' ? sbClient : null);
   const projectId = () => (typeof PROJECT_ID !== 'undefined' ? PROJECT_ID : null);
 
@@ -502,9 +504,9 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     if (chatConversationId === id) chatConversationId = null;
     chatView = 'chat'; window.aiChatHistory();
   };
-  // Show the button only to Admin / PM, once the session role is known.
+  // Show the button to Admin / PM / Inspector, once the session role is known.
   function chatBoot(tries = 0) {
-    if (canManage()) { chatEnsure(); return; }
+    if (canChat()) { chatEnsure(); return; }
     if (tries < 40) setTimeout(() => chatBoot(tries + 1), 1500);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => chatBoot()); else chatBoot();
