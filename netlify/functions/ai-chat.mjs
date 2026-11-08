@@ -156,6 +156,23 @@ export default async (request) => {
     } catch (_) {}
     const searchText = [...recentQuestions, question, rewritten].join('\n').slice(-1800);
     const citedDocIds = [...new Set(history.filter(m => m.role === 'assistant').slice(-2).flatMap(m => (Array.isArray(m.citations) ? m.citations : []).map(c => c.documentId)).filter(Boolean))].slice(0, 4);
+    // 1) Word search too: notes that contain the exact words (AFF, receptacle, #12…)
+    // are found even when the meaning search misses them.
+    const SYN = { 'receptaculo': ['receptacle', 'outlet'], 'receptaculos': ['receptacle', 'outlet'], 'tomacorriente': ['receptacle'], 'altura': ['AFF', 'mounting height', 'height'], 'cable': ['wire', 'AWG'], 'calibre': ['AWG', 'wire size'], 'interruptor': ['switch', 'breaker'], 'panel': ['panel'], 'luces': ['light', 'fixture'], 'luminaria': ['fixture', 'light'], 'alarma': ['fire alarm'], 'desconectivo': ['disconnect'], 'disconnect': ['disconnect'], 'tierra': ['ground'], 'tuberia': ['conduit', 'EMT'] };
+    const STOP = new Set(['que', 'cual', 'cuales', 'como', 'donde', 'para', 'los', 'las', 'del', 'por', 'con', 'una', 'uno', 'van', 'esta', 'este', 'what', 'which', 'where', 'the', 'for', 'and', 'with', 'are', 'how', 'plano', 'planos', 'segun', 'según', 'dame', 'the']);
+    const norm = w => w.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const words = [...new Set(`${question} ${rewritten}`.split(/[^\p{L}\p{N}#'"-]+/u).map(w => w.trim()).filter(w => w.length >= 3 && !STOP.has(norm(w))))];
+    const terms = [...new Set(words.flatMap(w => [w, ...(SYN[norm(w)] || [])]))].filter(t => !/[,()*]/.test(t)).slice(0, 8);
+    // Started now and awaited later, in parallel with the meaning search (faster, same results).
+    const wordPromise = (async () => {
+      if (!terms.length) return [];
+      const or = terms.map(t => `content.ilike.*${encodeURIComponent(t)}*`).join(',');
+      const found = await sb(`/rest/v1/ai_chunks?project_id=eq.${projectId}&or=(${or})&select=id,document_id,page_number,content&limit=40`, auth).catch(() => []);
+      const score = c => terms.reduce((n, t) => n + (String(c.content || '').toLowerCase().includes(t.toLowerCase()) ? 1 : 0), 0);
+      return (found || []).map(c => ({ ...c, _hits: score(c) })).sort((a, b) => b._hits - a._hits).slice(0, 6);
+    })();
+    // 5) Pages still being read: the answer may be incomplete.
+    const pendingPromise = sb(`/rest/v1/ai_document_pages?project_id=eq.${projectId}&status=in.(pending,processing)&select=id&limit=500`, auth).then(r => (r || []).length).catch(() => 0);
     const embedding = (await openai('embeddings', { model: EMBED_MODEL, input: searchText })).data?.[0]?.embedding;
     const matches = await sb('/rest/v1/rpc/ai_match_chunks', auth, { method: 'POST', body: JSON.stringify({ p_project_id: projectId, p_query: `[${embedding.join(',')}]`, p_count: 20 }) });
     // Also pull pages of sheets named explicitly in the question (e.g. "E600").
@@ -171,22 +188,7 @@ export default async (request) => {
       // The best chunks of the documents already under discussion.
       followChunks = (await sb('/rest/v1/rpc/ai_match_chunks', auth, { method: 'POST', body: JSON.stringify({ p_project_id: projectId, p_query: qEmb, p_count: 20 }) }).catch(() => [])).filter(c => citedDocIds.includes(c.document_id)).slice(0, 4);
     }
-    // 1) Word search too: notes that contain the exact words (AFF, receptacle, #12…)
-    // are found even when the meaning search misses them.
-    const SYN = { 'receptaculo': ['receptacle', 'outlet'], 'receptaculos': ['receptacle', 'outlet'], 'tomacorriente': ['receptacle'], 'altura': ['AFF', 'mounting height', 'height'], 'cable': ['wire', 'AWG'], 'calibre': ['AWG', 'wire size'], 'interruptor': ['switch', 'breaker'], 'panel': ['panel'], 'luces': ['light', 'fixture'], 'luminaria': ['fixture', 'light'], 'alarma': ['fire alarm'], 'desconectivo': ['disconnect'], 'disconnect': ['disconnect'], 'tierra': ['ground'], 'tuberia': ['conduit', 'EMT'] };
-    const STOP = new Set(['que', 'cual', 'cuales', 'como', 'donde', 'para', 'los', 'las', 'del', 'por', 'con', 'una', 'uno', 'van', 'esta', 'este', 'what', 'which', 'where', 'the', 'for', 'and', 'with', 'are', 'how', 'plano', 'planos', 'segun', 'según', 'dame', 'the']);
-    const norm = w => w.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    const words = [...new Set(`${question} ${rewritten}`.split(/[^\p{L}\p{N}#'"-]+/u).map(w => w.trim()).filter(w => w.length >= 3 && !STOP.has(norm(w))))];
-    const terms = [...new Set(words.flatMap(w => [w, ...(SYN[norm(w)] || [])]))].filter(t => !/[,()*]/.test(t)).slice(0, 8);
-    let wordChunks = [];
-    if (terms.length) {
-      const or = terms.map(t => `content.ilike.*${encodeURIComponent(t)}*`).join(',');
-      const found = await sb(`/rest/v1/ai_chunks?project_id=eq.${projectId}&or=(${or})&select=id,document_id,page_number,content&limit=40`, auth).catch(() => []);
-      const score = c => terms.reduce((n, t) => n + (String(c.content || '').toLowerCase().includes(t.toLowerCase()) ? 1 : 0), 0);
-      wordChunks = (found || []).map(c => ({ ...c, _hits: score(c) })).sort((a, b) => b._hits - a._hits).slice(0, 6);
-    }
-    // 5) Pages still being read: the answer may be incomplete.
-    const pendingPages = await sb(`/rest/v1/ai_document_pages?project_id=eq.${projectId}&status=in.(pending,processing)&select=id&limit=500`, auth).then(r => (r || []).length).catch(() => 0);
+    const wordChunks = await wordPromise; const pendingPages = await pendingPromise;
     const seen = new Set(); const chunks = [...namedChunks, ...wordChunks, ...followChunks, ...(matches || [])].filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, IS_GEMINI ? 20 : 16);
     const docIds = [...new Set(chunks.map(c => c.document_id))];
     const docs = docIds.length ? await sb(`/rest/v1/ai_documents?id=in.(${docIds.join(',')})&select=id,file_name,category,sheet_number,title,revision,is_current_revision,metadata_confirmed,storage_path`, auth) : [];
@@ -221,10 +223,12 @@ export default async (request) => {
     ];
     let completion = null;
     if (hard) completion = await openai('chat/completions', { model: process.env.GEMINI_PRO_MODEL || 'gemini-flash-latest', temperature: 0, max_tokens: 450, messages: answerMessages }, 18000).catch(() => null);
+    const usedStrong = !!completion;
     if (!completion) completion = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450, messages: answerMessages });
     let answer = completion.choices?.[0]?.message?.content?.trim() || 'No answer.';
     // Second check: keep only what the cited sources actually say (skipped if time is short).
-    if (sources.length && /\d/.test(answer) && Date.now() - t0 < (IS_GEMINI ? 9000 : 5000)) {
+    // (skipped when the stronger Gemini model already answered: it is precise, and this saves ~4 s)
+    if (sources.length && /\d/.test(answer) && !(hard && usedStrong) && Date.now() - t0 < (IS_GEMINI ? 9000 : 5000)) {
       try {
         const check = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450, messages: [
           { role: 'system', content: 'You verify answers about construction documents. Compare the DRAFT with the SOURCES. Remove or correct any value, size, height, quantity or note that the sources do not state; never add typical/standard values. If the sources do not contain the answer, say so briefly and name the sheet to check. Keep the same language, the same format (value first, at most 3 lines, ⚡ NEC / 📑 FBC prefixes, no other emojis) and [S#] citations (only citations that support the text). Output only the final answer.' },
