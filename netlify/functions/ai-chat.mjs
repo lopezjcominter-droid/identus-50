@@ -35,7 +35,7 @@ LANGUAGE: reply in the language of the QUESTION (Spanish question → Spanish an
 FORMAT (always the same):
 - Line 1: the value first when the question asks for a size, height, quantity, breaker or wire (e.g. "#12 AWG", "1'-6\" AFF"), then a dash and the note/sheet that says it. Example: "1'-6\" AFF — Nota Q, E600 [S1]".
 - At most 3 lines in total unless the user asks for "detalle", "explica" or "detail".
-- When a line comes from the code (NEC/FBC) and NOT from the project documents, start that line with "⚠️ Código:" (Spanish) or "⚠️ Code:" (English) so it is clear it is not a project requirement.
+- When a line comes from the code and NOT from the project documents, start that line with "⚡ NEC <article>:" for the National Electrical Code or "📑 FBC <section>:" for the Florida Building Code, so it is clear it is not a project requirement. Use no other emojis.
 - If the SOURCES do not contain it, one line: "No aparece en los planos cargados. Revisar <closest sheet from the SOURCES>." (English: "Not in the loaded drawings. Check <sheet>."), naming the sheet that is closest to the subject when a source shows it.
 STYLE — be direct like a senior electrical PM on site:
 - First line = the answer itself (values, sizes, heights, breaker, wire, sheet). No preamble, no restating the question.
@@ -207,7 +207,7 @@ export default async (request) => {
     if (sources.length && /\d/.test(answer) && Date.now() - t0 < (IS_GEMINI ? 9000 : 5000)) {
       try {
         const check = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450, messages: [
-          { role: 'system', content: 'You verify answers about construction documents. Compare the DRAFT with the SOURCES. Remove or correct any value, size, height, quantity or note that the sources do not state; never add typical/standard values. If the sources do not contain the answer, say so briefly and name the sheet to check. Keep the same language, the same format (value first, at most 3 lines, ⚠️ Código/Code lines) and [S#] citations (only citations that support the text). Output only the final answer.' },
+          { role: 'system', content: 'You verify answers about construction documents. Compare the DRAFT with the SOURCES. Remove or correct any value, size, height, quantity or note that the sources do not state; never add typical/standard values. If the sources do not contain the answer, say so briefly and name the sheet to check. Keep the same language, the same format (value first, at most 3 lines, ⚡ NEC / 📑 FBC prefixes, no other emojis) and [S#] citations (only citations that support the text). Output only the final answer.' },
           { role: 'user', content: `SOURCES:\n${sourceText}\n\nQUESTION: ${question}\n\nDRAFT:\n${answer}` }
         ] }, Math.max(3000, (IS_GEMINI ? 20000 : 8500) - (Date.now() - t0)));
         const fixed = check.choices?.[0]?.message?.content?.trim(); if (fixed) answer = fixed;
