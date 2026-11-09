@@ -11741,11 +11741,22 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         clearTimeout(t);
         t = setTimeout(() => {
           const bp = window.innerWidth < 700 ? 'sm' : window.innerWidth < 1200 ? 'md' : 'lg';
-          if (bp !== lastBp) { lastBp = bp; try { updateCharts(); } catch (e) {} }
+          // iPad portrait (820) and landscape (1180) are the same breakpoint, so
+          // also redraw when the width really changed (rotation).
+          const w = window.innerWidth;
+          if (bp !== lastBp || Math.abs(w - (onResize.lastW || w)) > 120) { lastBp = bp; try { updateCharts(); } catch (e) {} }
+          onResize.lastW = w;
         }, 250);
       };
+      onResize.lastW = window.innerWidth;
       window.addEventListener('resize', onResize);
-      window.addEventListener('orientationchange', onResize);
+      // iOS Safari sometimes keeps the portrait width after rotating: reset the
+      // viewport so the page re-lays out to the new width, then redraw.
+      window.addEventListener('orientationchange', () => {
+        const meta = document.querySelector('meta[name="viewport"]');
+        if (meta) { const original = meta.getAttribute('content'); meta.setAttribute('content', original + ', maximum-scale=1'); setTimeout(() => meta.setAttribute('content', original), 400); }
+        setTimeout(() => { window.dispatchEvent(new Event('resize')); onResize(); }, 450);
+      });
     })();
 
     let chartRefreshFrame = null;
