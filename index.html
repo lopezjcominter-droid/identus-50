@@ -11756,7 +11756,19 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         const meta = document.querySelector('meta[name="viewport"]');
         if (meta) { const original = meta.getAttribute('content'); meta.setAttribute('content', original + ', maximum-scale=1'); setTimeout(() => meta.setAttribute('content', original), 400); }
         setTimeout(() => { window.dispatchEvent(new Event('resize')); onResize(); }, 450);
+        // If the page is still laid out at the old width after rotating, reload it
+        // once (the data is saved in Supabase, nothing is lost).
+        setTimeout(() => {
+          const angle = Math.abs(Number(screen.orientation?.angle ?? window.orientation ?? 0));
+          const deviceLandscape = angle === 90;
+          const pageLandscape = window.innerWidth > window.innerHeight;
+          if (deviceLandscape !== pageLandscape && !document.querySelector('.modal.active, .modal[style*="block"]')) {
+            try { sessionStorage.setItem('identusScrollY', String(window.scrollY)); } catch (_) {}
+            location.reload();
+          }
+        }, 1200);
       });
+      try { const y = Number(sessionStorage.getItem('identusScrollY')); if (y) { sessionStorage.removeItem('identusScrollY'); setTimeout(() => window.scrollTo(0, y), 800); } } catch (_) {}
     })();
 
     let chartRefreshFrame = null;
