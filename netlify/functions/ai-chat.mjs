@@ -4,10 +4,10 @@
 // Every Supabase call runs AS THE USER, so RLS decides what they can read.
 // Requires Netlify env OPENAI_API_KEY or GEMINI_API_KEY (see ai/provider.mjs).
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kihsukzcbohmxovbyisi.supabase.co';
-import { AI_KEY, AI_BASE, AI_KEY_NAME, IS_GEMINI, DEFAULT_CHAT_MODEL, DEFAULT_EMBED_MODEL, adaptPayload } from './ai/provider.mjs';
+import { AI_KEY, AI_BASE, AI_KEY_NAME, IS_GEMINI, DEFAULT_CHAT_MODEL, DEFAULT_EMBED_MODEL, adaptPayload, READ } from './ai/provider.mjs';
 const OPENAI_KEY = AI_KEY;
 const CHAT_MODEL = (IS_GEMINI ? '' : process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL;
-const EMBED_MODEL = (IS_GEMINI ? '' : process.env.OPENAI_EMBED_MODEL) || DEFAULT_EMBED_MODEL;
+const EMBED_MODEL = DEFAULT_EMBED_MODEL; // same service as the reading (READ)
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -38,10 +38,11 @@ async function openaiStream(payload, timeoutMs = 25000, onDelta) {
   return { choices: [{ message: { content: text } }], usage: {} };
 }
 async function openai(path, payload, timeoutMs = 25000) {
-  payload = adaptPayload(path, payload);
+  payload = adaptPayload(path, payload, path.startsWith("embeddings") ? READ.isGemini : IS_GEMINI);
   const ctl = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
   let response;
-  try { response = await fetch(`${AI_BASE}/${path}`, { signal: ctl, method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); }
+  const viaRead = path.startsWith('embeddings');
+  try { response = await fetch(`${viaRead ? READ.base : AI_BASE}/${path}`, { signal: ctl, method: 'POST', headers: { Authorization: `Bearer ${viaRead ? READ.key : OPENAI_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); }
   catch (error) { throw Object.assign(new Error(`${IS_GEMINI ? 'Gemini' : 'OpenAI'} did not answer in ${Math.round(timeoutMs / 1000)} s (${payload.model}). Try again or set a faster model.`), { status: 504 }); }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(`${IS_GEMINI ? 'Gemini' : 'OpenAI'} ${response.status}: ${[401, 403].includes(response.status) || /api key/i.test(body?.error?.message || '') ? `the ${AI_KEY_NAME} in Netlify is not valid` : (response.status === 404 ? `model ${payload.model} is not available for this key (set GEMINI_MODEL / OPENAI_CHAT_MODEL in Netlify)` : (body?.error?.message || 'request failed'))}`), { status: 502, aiStatus: response.status });
