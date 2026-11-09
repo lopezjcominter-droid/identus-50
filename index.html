@@ -11768,6 +11768,19 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           }
         }, 1200);
       });
+      // Chrome on iPad may not send the rotate event: check every 1.5 s too.
+      if (/iPad|Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1) {
+        setInterval(() => {
+          const angle = Math.abs(Number(screen.orientation?.angle ?? window.orientation ?? 0));
+          const deviceLandscape = angle === 90;
+          const pageLandscape = window.innerWidth > window.innerHeight;
+          if (deviceLandscape === pageLandscape || document.querySelector('.modal.active, .modal[style*="block"]')) return;
+          let last = 0; try { last = Number(sessionStorage.getItem('identusRotateReload') || 0); } catch (_) {}
+          if (Date.now() - last < 15000) return; // never loop
+          try { sessionStorage.setItem('identusRotateReload', String(Date.now())); sessionStorage.setItem('identusScrollY', String(window.scrollY)); } catch (_) {}
+          location.reload();
+        }, 1500);
+      }
       try { const y = Number(sessionStorage.getItem('identusScrollY')); if (y) { sessionStorage.removeItem('identusScrollY'); setTimeout(() => window.scrollTo(0, y), 800); } } catch (_) {}
     })();
 
