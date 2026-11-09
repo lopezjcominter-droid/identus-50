@@ -54,14 +54,16 @@
     const crop = (sx, sy, sw, sh, maxW) => { const c = document.createElement('canvas'); const k = Math.min(1, maxW / sw); c.width = Math.round(sw * k); c.height = Math.round(sh * k); c.getContext('2d').drawImage(full, sx, sy, sw, sh, 0, 0, c.width, c.height); return c; };
     const W = full.width, H = full.height, hw = Math.ceil(W / 2), hh = Math.ceil(H / 2);
     const parts = [crop(0, 0, W, H, 1600), crop(0, 0, hw, hh, 1600), crop(W - hw, 0, hw, hh, 1600), crop(0, H - hh, hw, hh, 1600), crop(W - hw, H - hh, hw, hh, 1600)];
-    const sb = client(); const paths = [];
-    for (let i = 0; i < parts.length; i++) {
-      const blob = await new Promise(resolve => parts[i].toBlob(resolve, 'image/jpeg', 0.85));
+    // The 5 images of a page upload at the same time (was one after another).
+    const sb = client();
+    const paths = await Promise.all(parts.map(async (part, i) => {
+      const blob = await new Promise(resolve => part.toBlob(resolve, 'image/jpeg', 0.85));
+      part.width = 0; part.height = 0;
       const path = `${pid}/pages/${docId}/p${pageNumber}-${i}.jpg`;
       const up = await sb.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true });
       if (up.error) throw up.error;
-      paths.push(path); parts[i].width = 0; parts[i].height = 0;
-    }
+      return path;
+    }));
     full.width = 0; full.height = 0; try { page.cleanup(); } catch (_) {}
     return paths;
   }
