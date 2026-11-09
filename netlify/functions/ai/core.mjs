@@ -25,11 +25,14 @@ function cropJpeg(bytes, band) {
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kihsukzcbohmxovbyisi.supabase.co';
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-import { AI_KEY, AI_BASE, AI_KEY_NAME, IS_GEMINI, DEFAULT_CHAT_MODEL, DEFAULT_EMBED_MODEL, adaptPayload } from './provider.mjs';
-const OPENAI_KEY = AI_KEY;
+import { READ, adaptPayload as adaptAny } from './provider.mjs';
+// Reading uses the READ service (OpenAI when its key is set).
+const IS_GEMINI = READ.isGemini, AI_BASE = READ.base, AI_KEY_NAME = READ.keyName;
+const adaptPayload = (path, payload) => adaptAny(path, payload, IS_GEMINI);
+const OPENAI_KEY = READ.key;
 // Reading sheets needs the stronger model (Flash-Lite missed notes on dense sheets).
-const MODEL = IS_GEMINI ? (process.env.GEMINI_READ_MODEL || 'gemini-flash-latest') : (process.env.OPENAI_MODEL || DEFAULT_CHAT_MODEL);
-const EMBED_MODEL = (IS_GEMINI ? '' : process.env.OPENAI_EMBED_MODEL) || DEFAULT_EMBED_MODEL;
+const MODEL = READ.model;
+const EMBED_MODEL = READ.embedModel;
 const MAX_ATTEMPTS = Number(process.env.AI_MAX_PAGE_ATTEMPTS || 3);
 const BUCKET = 'ai-docs';
 
