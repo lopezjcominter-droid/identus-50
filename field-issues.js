@@ -128,13 +128,23 @@
   const visible = unit => issues.filter(i => (!unit || (i.apt === unit.apt && (!unit.building || i.building === unit.building)))
     && (filter === 'all' || i.status === filter)
     && (!search || `${i.apt} ${i.building} ${i.issue_type} ${i.description || ''}`.toLowerCase().includes(search)));
-  const card = i => `<div class="fi-card ${i.status === 'resolved' ? 'fi-resolved' : ''}">
-      <div class="fi-card-head"><strong>${esc(i.apt)}</strong><span>${esc(i.building)}${i.floor ? ' · ' + esc(i.floor) : ''}</span><span class="fi-chip">${esc(i.issue_type)}</span><span class="fi-status">${i.status === 'resolved' ? 'Resolved' : 'Open'}</span></div>
-      ${i.description ? `<div class="fi-desc">${esc(i.description)}</div>` : ''}
-      <div class="fi-thumbs">${(i.photos || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
-      <div class="fi-meta">${esc(i.created_by_name || '')} · ${fmt(i.created_at)}${i.resolved_at ? ` · Resolved ${fmt(i.resolved_at)}` : ''}</div>
-      <div class="fi-actions"><button type="button" class="btn btn-secondary" onclick="fiResolve('${i.id}')">${i.status === 'resolved' ? 'Reopen' : '✓ Resolve'}</button><button type="button" class="btn btn-secondary" onclick="fiDownload('${i.id}')">⬇ Photos</button><button type="button" class="btn btn-danger" onclick="fiDelete('${i.id}')">Delete</button></div>
+  // Compact row: unit, type, the comment highlighted, a 📷 icon (tap to see
+  // the photos) and small actions. Keeps long lists short.
+  const card = i => `<div class="fi-row ${i.status === 'resolved' ? 'fi-resolved' : ''}">
+      <div class="fi-row-main">
+        <div class="fi-row-top"><strong>${esc(i.apt)}</strong><span class="fi-muted">${esc(i.building)}</span><span class="fi-chip">${esc(i.issue_type)}</span><span class="fi-status">${i.status === 'resolved' ? '✓ Resolved' : 'Open'}</span></div>
+        <div class="fi-comment">${i.description ? esc(i.description) : '<span class="fi-muted">No comment</span>'}</div>
+        <div class="fi-muted fi-small">${esc(i.created_by_name || '')} · ${fmt(i.created_at)}</div>
+        <div class="fi-thumbs" id="fiPh-${i.id}" hidden>${(i.photos || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
+      </div>
+      <div class="fi-row-actions">
+        ${(i.photos || []).length ? `<button type="button" class="fi-icon" title="Show photos" onclick="fiTogglePhotos('${i.id}')">📷 ${i.photos.length}</button>` : ''}
+        <button type="button" class="fi-icon" title="${i.status === 'resolved' ? 'Reopen' : 'Resolve'}" onclick="fiResolve('${i.id}')">${i.status === 'resolved' ? '↺' : '✓'}</button>
+        <button type="button" class="fi-icon" title="Download photos" onclick="fiDownload('${i.id}')">⬇</button>
+        <button type="button" class="fi-icon fi-del" title="Delete" onclick="fiDelete('${i.id}')">🗑</button>
+      </div>
     </div>`;
+  window.fiTogglePhotos = id => { const el = document.getElementById(`fiPh-${id}`); if (el) el.hidden = !el.hidden; };
   const toolbar = () => `<div class="fi-toolbar">
       ${['open', 'resolved', 'all'].map(f => `<button type="button" class="btn ${filter === f ? 'btn-primary' : 'btn-secondary'}" onclick="fiFilter('${f}')">${f === 'open' ? 'Open' : f === 'resolved' ? 'Resolved' : 'All'} (${issues.filter(i => f === 'all' || i.status === f).length})</button>`).join('')}
       <input type="text" class="form-input fi-search" id="fiSearch" placeholder="Search unit or type" autocomplete="off" data-lpignore="true" data-1p-ignore="true" value="${esc(search)}" oninput="fiSearchInput(this.value)">
@@ -173,6 +183,11 @@
   .fi-chip{background:#FEF3C7;color:#92400E;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600}.fi-status{margin-left:auto;font-size:11px;font-weight:700;color:#64748B}
   .fi-desc{font-size:13px;color:#334155}.fi-meta{font-size:11px;color:#64748B}.fi-actions{display:flex;gap:6px;flex-wrap:wrap}.fi-actions .btn{font-size:12px;padding:4px 10px}
   .fi-empty{color:#64748B;padding:10px 0}
+  .fi-row{display:flex;gap:10px;align-items:flex-start;border:1px solid #E2E8F0;border-left:4px solid #DC2626;border-radius:8px;padding:8px 10px;background:#fff;margin-bottom:6px}
+  .fi-row.fi-resolved{border-left-color:#16A34A;opacity:.8}.fi-row-main{flex:1;min-width:0;display:grid;gap:3px}
+  .fi-row-top{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px}.fi-comment{font-size:14px;font-weight:600;color:#0F172A;overflow-wrap:anywhere}
+  .fi-muted{color:#64748B}.fi-small{font-size:11px}.fi-row-actions{display:flex;gap:4px;flex-shrink:0}
+  .fi-icon{border:1px solid #E2E8F0;background:#F8FAFC;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;white-space:nowrap}.fi-icon:hover{background:#EFF6FF}.fi-del:hover{background:#FEE2E2}
   .fi-unit-pick{position:relative}.fi-unit-results{display:none;position:absolute;left:0;right:0;top:100%;z-index:50;max-height:240px;overflow:auto;background:#fff;border:1px solid #CBD5E1;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.12)}
   .fi-unit-results button{display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:#fff;font-size:13px;cursor:pointer}.fi-unit-results button:hover{background:#EFF6FF}
   .fi-wrap{max-width:900px}`;
