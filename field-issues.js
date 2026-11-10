@@ -60,11 +60,18 @@
   };
   document.addEventListener('click', e => { if (!e.target.closest('.fi-unit-pick')) { const b = document.getElementById('fiUnitResults'); if (b) b.style.display = 'none'; } });
   let picked = [];
+  // Editing: the issue being edited and the photos it keeps.
+  let editing = null; let keptPhotos = [];
+  const preview = () => {
+    const box = document.getElementById('fiPreview'); if (!box) return;
+    box.innerHTML = keptPhotos.map((u, i) => `<span class="fi-thumb"><img src="${esc(u)}" alt=""><button type="button" title="Remove photo" onclick="fiUnkeep(${i})">×</button></span>`).join('')
+      + picked.map((f, i) => `<span class="fi-thumb"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" onclick="fiUnpick(${i})">×</button></span>`).join('');
+  };
+  window.fiUnkeep = i => { keptPhotos.splice(i, 1); preview(); };
   window.fiPick = input => {
     picked = picked.concat(Array.from(input.files || []));
     input.value = '';
-    const box = document.getElementById('fiPreview');
-    if (box) box.innerHTML = picked.map((f, i) => `<span class="fi-thumb"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" onclick="fiUnpick(${i})">×</button></span>`).join('');
+    preview();
   };
   window.fiUnpick = i => { picked.splice(i, 1); window.fiPick({ files: [], value: '' }); };
 
@@ -73,15 +80,23 @@
     const list = units(); const raw = document.getElementById('fiUnit')?.value; const u = raw === '' ? null : list[Number(raw)];
     const type = document.getElementById('fiType')?.value;
     if (!u || !type) { note('Choose the unit from the list and the problem type'); return; }
-    if (!picked.length) { note('Add at least one photo'); return; }
+    if (!picked.length && !keptPhotos.length) { note('Add at least one photo'); return; }
     const btn = document.getElementById('fiSaveBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     try {
-      const urls = await readAndCompressPhotos(picked, 0.7, userName());
-      const row = { project_id: pid(), unit_id: u.id && /^[0-9a-f-]{36}$/i.test(u.id) ? u.id : null, apt: u.apt, building: u.building, floor: u.floor, issue_type: type, description: document.getElementById('fiDesc')?.value.trim() || null, photos: urls, created_by_name: userName() };
-      const { data, error } = await client().from('field_issues').insert(row).select().single();
-      if (error) throw error;
-      issues.unshift(data); picked = [];
-      note('Issue saved');
+      const urls = picked.length ? await readAndCompressPhotos(picked, 0.7, userName()) : [];
+      const fields = { unit_id: u.id && /^[0-9a-f-]{36}$/i.test(u.id) ? u.id : null, apt: u.apt, building: u.building, floor: u.floor, issue_type: type, description: document.getElementById('fiDesc')?.value.trim() || null, photos: [...keptPhotos, ...urls] };
+      if (editing) {
+        const { data, error } = await client().from('field_issues').update(fields).eq('id', editing).select().single();
+        if (error) throw error;
+        issues = issues.map(x => x.id === editing ? data : x);
+        note('Issue updated');
+      } else {
+        const { data, error } = await client().from('field_issues').insert({ ...fields, project_id: pid(), created_by_name: userName() }).select().single();
+        if (error) throw error;
+        issues.unshift(data);
+        note('Issue saved');
+      }
+      picked = []; keptPhotos = []; editing = null;
       rerender();
     } catch (error) { note(`❌ Could not save: ${error.message || 'connection error'}`); }
     finally { if (btn) { btn.disabled = false; btn.textContent = 'Save issue'; } }
@@ -178,9 +193,25 @@
         ${(i.photos || []).length ? `<button type="button" class="fi-icon" title="Show photos" onclick="fiTogglePhotos('${i.id}')">📷 ${i.photos.length}</button>` : ''}
         <button type="button" class="fi-icon" title="${i.status === 'resolved' ? 'Reopen' : 'Resolve'}" onclick="fiResolve('${i.id}')">${i.status === 'resolved' ? '↺' : '✓'}</button>
         <button type="button" class="fi-icon" title="Download photos" onclick="fiDownload('${i.id}')">⬇</button>
+        <button type="button" class="fi-icon" title="Edit" onclick="fiEdit('${i.id}')">✏️</button>
         <button type="button" class="fi-icon fi-del" title="Delete" onclick="fiDelete('${i.id}')">🗑</button>
       </div>
     </div>`;
+  window.fiEdit = id => {
+    const i = issues.find(x => x.id === id); if (!i) return;
+    editing = id; keptPhotos = [...(i.photos || [])]; picked = [];
+    const list = units(); const idx = list.findIndex(u => u.apt === i.apt && u.building === i.building);
+    const f = document.getElementById('fiForm'); if (!f) return;
+    document.getElementById('fiUnit').value = idx >= 0 ? String(idx) : '';
+    document.getElementById('fiUnitSearch').value = idx >= 0 ? unitLabel(list[idx]) : i.apt;
+    document.getElementById('fiType').value = i.issue_type;
+    document.getElementById('fiDesc').value = i.description || '';
+    document.getElementById('fiSaveBtn').textContent = 'Save changes';
+    let cancel = document.getElementById('fiCancelEdit');
+    if (!cancel) { cancel = document.createElement('button'); cancel.type = 'button'; cancel.id = 'fiCancelEdit'; cancel.className = 'btn btn-secondary'; cancel.textContent = 'Cancel edit'; cancel.onclick = () => { editing = null; keptPhotos = []; picked = []; rerender(); }; f.appendChild(cancel); }
+    preview();
+    f.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   window.fiTogglePhotos = id => { const el = document.getElementById(`fiPh-${id}`); if (el) el.hidden = !el.hidden; };
   const toolbar = () => `<div class="fi-toolbar">
       ${['open', 'resolved', 'all'].map(f => `<button type="button" class="btn ${filter === f ? 'btn-primary' : 'btn-secondary'}" onclick="fiFilter('${f}')">${f === 'open' ? 'Open' : f === 'resolved' ? 'Resolved' : 'All'} (${issues.filter(i => f === 'all' || i.status === f).length})</button>`).join('')}
