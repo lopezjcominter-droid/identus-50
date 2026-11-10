@@ -32,9 +32,8 @@
   // ---------- form ----------
   function formHtml(prefill) {
     const list = units();
-    const opts = list.map((u, i) => `<option value="${i}" ${prefill && u.apt === prefill.apt && u.building === prefill.building ? 'selected' : ''}>${esc(unitLabel(u))}</option>`).join('');
     return `<form id="fiForm" class="fi-form" onsubmit="fiSave(event)">
-      <label>Unit / area<select id="fiUnit" class="form-select" required>${prefill ? '' : '<option value="">Select unit…</option>'}${opts}</select></label>
+      <label>Unit / area<div class="fi-unit-pick"><input type="text" id="fiUnitSearch" class="form-input" placeholder="Search unit (e.g. 1204, 3U, Hallway)" autocomplete="off" data-lpignore="true" data-1p-ignore="true" value="${prefill ? esc(unitLabel(prefill)) : ''}" oninput="fiUnitFind(this.value)" onfocus="fiUnitFind(this.value)"><input type="hidden" id="fiUnit" value="${prefill ? list.findIndex(u => u.apt === prefill.apt && u.building === prefill.building) : ''}"><div id="fiUnitResults" class="fi-unit-results"></div></div></label>
       <label>Problem type<select id="fiType" class="form-select" required><option value="">Select type…</option>${TYPES.map(t => `<option>${esc(t)}</option>`).join('')}</select></label>
       <label>Description (optional)<textarea id="fiDesc" class="form-input" rows="2" placeholder="What is wrong?"></textarea></label>
       <div class="fi-photo-btns">
@@ -45,6 +44,21 @@
       <button type="submit" class="btn btn-primary" id="fiSaveBtn">Save issue</button>
     </form>`;
   }
+  window.fiUnitFind = value => {
+    const box = document.getElementById('fiUnitResults'); if (!box) return;
+    const term = String(value || '').toLowerCase().trim();
+    document.getElementById('fiUnit').value = '';
+    const list = units().map((u, i) => ({ u, i })).filter(({ u }) => !term || unitLabel(u).toLowerCase().includes(term)).slice(0, 30);
+    box.innerHTML = list.map(({ u, i }) => `<button type="button" onmousedown="fiUnitChoose(${i})">${esc(unitLabel(u))}</button>`).join('') || '<div class="fi-empty">No match</div>';
+    box.style.display = 'block';
+  };
+  window.fiUnitChoose = i => {
+    const u = units()[i]; if (!u) return;
+    document.getElementById('fiUnit').value = String(i);
+    document.getElementById('fiUnitSearch').value = unitLabel(u);
+    document.getElementById('fiUnitResults').style.display = 'none';
+  };
+  document.addEventListener('click', e => { if (!e.target.closest('.fi-unit-pick')) { const b = document.getElementById('fiUnitResults'); if (b) b.style.display = 'none'; } });
   let picked = [];
   window.fiPick = input => {
     picked = picked.concat(Array.from(input.files || []));
@@ -56,9 +70,9 @@
 
   window.fiSave = async event => {
     event.preventDefault();
-    const list = units(); const u = list[Number(document.getElementById('fiUnit')?.value)];
+    const list = units(); const raw = document.getElementById('fiUnit')?.value; const u = raw === '' ? null : list[Number(raw)];
     const type = document.getElementById('fiType')?.value;
-    if (!u || !type) { note('Select the unit and the problem type'); return; }
+    if (!u || !type) { note('Choose the unit from the list and the problem type'); return; }
     if (!picked.length) { note('Add at least one photo'); return; }
     const btn = document.getElementById('fiSaveBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     try {
@@ -158,6 +172,9 @@
   .fi-card.fi-resolved{border-left-color:#16A34A;opacity:.85}.fi-card-head{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px}
   .fi-chip{background:#FEF3C7;color:#92400E;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600}.fi-status{margin-left:auto;font-size:11px;font-weight:700;color:#64748B}
   .fi-desc{font-size:13px;color:#334155}.fi-meta{font-size:11px;color:#64748B}.fi-actions{display:flex;gap:6px;flex-wrap:wrap}.fi-actions .btn{font-size:12px;padding:4px 10px}
-  .fi-empty{color:#64748B;padding:10px 0}`;
+  .fi-empty{color:#64748B;padding:10px 0}
+  .fi-unit-pick{position:relative}.fi-unit-results{display:none;position:absolute;left:0;right:0;top:100%;z-index:50;max-height:240px;overflow:auto;background:#fff;border:1px solid #CBD5E1;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+  .fi-unit-results button{display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:#fff;font-size:13px;cursor:pointer}.fi-unit-results button:hover{background:#EFF6FF}
+  .fi-wrap{max-width:900px}`;
   document.head.appendChild(css);
 })();
