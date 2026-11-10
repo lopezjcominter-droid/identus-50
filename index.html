@@ -11786,22 +11786,29 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         // If the page is still laid out at the old width after rotating, reload it
         // once (the data is saved in Supabase, nothing is lost).
         setTimeout(() => {
-          const angle = Math.abs(Number(screen.orientation?.angle ?? window.orientation ?? 0));
-          const deviceLandscape = angle === 90;
-          const pageLandscape = window.innerWidth > window.innerHeight;
-          if (deviceLandscape !== pageLandscape && !document.querySelector('.modal.active, .modal[style*="block"]')) {
+          if (window.identusWidthStuck() && !document.querySelector('.modal.active, .modal[style*="block"]')) {
             try { sessionStorage.setItem('identusScrollY', String(window.scrollY)); } catch (_) {}
             location.reload();
           }
         }, 1200);
       });
+      // "Stuck" = the page width does not match the screen side for the current
+      // orientation. Only the WIDTH is compared: the on-screen keyboard changes
+      // the height (that made the page reload while typing in the chat).
+      window.identusWidthStuck = () => {
+        const a = document.activeElement;
+        if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return false;
+        if (document.body.classList.contains('aic-open')) return false;
+        const angle = Math.abs(Number(screen.orientation?.angle ?? window.orientation ?? 0));
+        const long = Math.max(screen.width, screen.height), short = Math.min(screen.width, screen.height);
+        const w = window.innerWidth;
+        // Stuck = still exactly the other orientation's width (Split View widths are different).
+        return angle === 90 ? Math.abs(w - short) <= 2 : Math.abs(w - long) <= 2;
+      };
       // Chrome on iPad may not send the rotate event: check every 1.5 s too.
       if (/iPad|Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1) {
         setInterval(() => {
-          const angle = Math.abs(Number(screen.orientation?.angle ?? window.orientation ?? 0));
-          const deviceLandscape = angle === 90;
-          const pageLandscape = window.innerWidth > window.innerHeight;
-          if (deviceLandscape === pageLandscape || document.querySelector('.modal.active, .modal[style*="block"]')) return;
+          if (!window.identusWidthStuck() || document.querySelector('.modal.active, .modal[style*="block"]')) return;
           let last = 0; try { last = Number(sessionStorage.getItem('identusRotateReload') || 0); } catch (_) {}
           if (Date.now() - last < 15000) return; // never loop
           try { sessionStorage.setItem('identusRotateReload', String(Date.now())); sessionStorage.setItem('identusScrollY', String(window.scrollY)); } catch (_) {}
