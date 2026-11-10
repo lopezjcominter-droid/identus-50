@@ -135,6 +135,7 @@
         <button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="aiKbOpen('${d.id}')">View</button>
         ${d.status === 'ready' || d.status === 'needs_review' || d.status === 'error' ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="aiKbEdit('${d.id}')">Review</button>` : ''}
         ${d.status === 'error' ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick="aiKbRetry('${d.id}')">Retry</button>` : ''}
+        ${d.status === 'pending' || d.status === 'processing' ? `<button type="button" class="btn btn-primary" style="font-size:11px;padding:4px 8px;" title="Read the pending pages now instead of waiting for the next run" onclick="aiKbReadNow(this)">▶ Read now</button>` : ''}
         <button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" title="Read this document again with page images" onclick="aiKbReread(['${d.id}'])">Re-read</button>
         <button type="button" class="btn btn-danger" style="font-size:11px;padding:4px 8px;" onclick="aiKbDelete('${d.id}')">Remove</button>
         ${metaLine(d)}${editor(d)}
@@ -151,7 +152,7 @@
         <div style="display:flex;gap:6px;flex-wrap:wrap;">${tabs}</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <label class="btn btn-secondary" style="font-size:11px;padding:6px 10px;cursor:pointer;${tableMissing ? 'opacity:.5;pointer-events:none;' : ''}">📎 Upload PDFs to ${esc(CATEGORIES.find(c => c.id === activeCategory).label)}<input id="aiKbInput" type="file" multiple accept="application/pdf,.pdf" onchange="aiKbUpload(this)" style="display:none"></label>
-          ${list.length ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:6px 10px;" onclick="aiKbRereadAll()">↻ Re-read all ${esc(CATEGORIES.find(c => c.id === activeCategory).label)}</button>` : ''}
+          <button type="button" class="btn btn-secondary" style="font-size:11px;padding:6px 10px;" title="Ask 5 questions with known answers and score the assistant" onclick="aiKbTest(this)">✔ Test assistant</button> ${list.length ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:6px 10px;" onclick="aiKbRereadAll()">↻ Re-read all ${esc(CATEGORIES.find(c => c.id === activeCategory).label)}</button>` : ''}
           <span id="aiKbMessage" style="font-size:11px;color:#475569;">Files are stored privately for this project only. Identical files are skipped.</span>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">${rows}</div>
@@ -288,6 +289,50 @@
   window.aiKbSaveMeta = id => saveMeta(id);
   window.aiKbToggleCurrent = id => toggleCurrent(id);
   window.aiKbRetry = id => retry(id);
+  // ▶ Read now: process pending pages right away (one call ≈ 1-2 pages).
+  window.aiKbReadNow = async btn => {
+    if (btn) { btn.disabled = true; btn.textContent = 'Reading…'; }
+    try {
+      const token = window.getAccessToken ? await window.getAccessToken() : null;
+      const r = await fetch('/.netlify/functions/ai-process-now', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') }, body: JSON.stringify({ projectId: projectId() }) });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b.error || `Error ${r.status}`);
+      if (typeof toast === 'function') toast('Page read. Tap again to keep reading.');
+    } catch (error) { if (typeof toast === 'function') toast(`❌ ${error.message}`); }
+    await load(); render();
+  };
+  // ✔ Test assistant: known questions → score.
+  const TESTS = [
+    { q: '¿A qué altura van los receptáculos?', ok: /1'\s*-?\s*6|18\s*"|18 ?in/i },
+    { q: '¿Cuál es el calibre mínimo de cable?', ok: /#\s*12/ },
+    { q: '¿Qué cable lleva el range en el panel A1?', ok: /#\s*6/ },
+    { q: '¿Qué breaker lleva el range en el panel A1?', ok: /50\s*A|50 ?amp|2P\s*50|50\s*\/\s*2/i },
+    { q: '¿Qué cable lleva el range en el panel C1?', ok: /#\s*6/ }
+  ];
+  window.aiKbTest = async btn => {
+    if (btn) { btn.disabled = true; btn.textContent = 'Testing… 0/5'; }
+    const token = window.getAccessToken ? await window.getAccessToken() : null;
+    const results = [];
+    for (const [i, t] of TESTS.entries()) {
+      let answer = ''; let pass = false;
+      try {
+        const r = await fetch('/.netlify/functions/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: (typeof SUPABASE_KEY !== 'undefined' ? SUPABASE_KEY : '') }, body: JSON.stringify({ projectId: projectId(), question: t.q, test: true }) });
+        const b = await r.json().catch(() => ({})); answer = b.answer || b.error || `Error ${r.status}`; pass = r.ok && t.ok.test(answer) && !/^no aparece/i.test(answer);
+      } catch (error) { answer = error.message; }
+      results.push({ q: t.q, pass, answer });
+      if (btn) btn.textContent = `Testing… ${i + 1}/5`;
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '✔ Test assistant'; }
+    const score = results.filter(r => r.pass).length;
+    alertBox(`Assistant test: ${score} of ${results.length} correct`, results.map(r => `${r.pass ? '✅' : '❌'} ${r.q}\n   ${String(r.answer).split('\n')[0].slice(0, 140)}`).join('\n\n'));
+  };
+  function alertBox(title, text) {
+    const box = document.createElement('div');
+    box.setAttribute('data-no-translate', '');
+    box.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:2147483001;display:flex;align-items:center;justify-content:center;padding:16px;';
+    box.innerHTML = `<div style="background:#fff;border-radius:10px;max-width:620px;width:100%;max-height:80vh;overflow:auto;padding:16px;font-size:13px;"><strong style="font-size:15px;">${esc(title)}</strong><pre style="white-space:pre-wrap;font-family:inherit;margin:10px 0;">${esc(text)}</pre><button type="button" class="btn btn-primary">Close</button></div>`;
+    box.querySelector('button').onclick = () => box.remove(); document.body.appendChild(box);
+  }
   window.aiKbRelation = (id, action) => relationAction(id, action);
   window.aiKbAddRelation = id => addRelation(id);
   window.aiKbRender = () => { render(); refresh().catch(error => console.warn('AI Knowledge Base', error)); };
