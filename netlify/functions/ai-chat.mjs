@@ -261,10 +261,13 @@ export default async (request) => {
     let answer = completion.choices?.[0]?.message?.content?.trim() || 'No answer.';
     // Second check: keep only what the cited sources actually say (skipped if time is short).
     // (skipped when the stronger Gemini model already answered: it is precise, and this saves ~4 s)
-    if (sources.length && /\d/.test(answer) && !(hard && usedStrong) && Date.now() - t0 < (IS_GEMINI ? 9000 : 5000)) {
+    // Code questions (NEC/FBC) are answered from the code, not the drawings: the
+    // check against the drawings must not replace them.
+    const codeQuestion = /\b(nec|fbc|c[oó]digo|code|art[ií]culo|article)\b/i.test(question) || /⚡\s*NEC|📑\s*FBC/u.test(answer);
+    if (!codeQuestion && sources.length && /\d/.test(answer) && !(hard && usedStrong) && Date.now() - t0 < (IS_GEMINI ? 9000 : 5000)) {
       try {
         const check = await openai('chat/completions', { model: CHAT_MODEL, temperature: 0, seed: 50, max_tokens: 450, messages: [
-          { role: 'system', content: 'You verify answers about construction documents. Compare the DRAFT with the SOURCES. Remove or correct any value, size, height, quantity or note that the sources do not state; never add typical/standard values. If the sources do not contain the answer, say so briefly and name the sheet to check. Keep the same language, the same format (value first, at most 3 lines, ⚡ NEC / 📑 FBC prefixes, no other emojis) and [S#] citations (only citations that support the text). Output only the final answer.' },
+          { role: 'system', content: 'You verify answers about construction documents. Compare the DRAFT with the SOURCES. Keep every line that starts with ⚡ NEC or 📑 FBC exactly as it is (those come from the code, not from the SOURCES). Remove or correct any value, size, height, quantity or note that the sources do not state; never add typical/standard values. If the sources do not contain the answer, say so briefly and name the sheet to check. Keep the same language, the same format (value first, at most 3 lines, ⚡ NEC / 📑 FBC prefixes, no other emojis) and [S#] citations (only citations that support the text). Output only the final answer.' },
           { role: 'user', content: `SOURCES:\n${sourceText}\n\nQUESTION: ${question}\n\nDRAFT:\n${answer}` }
         ] }, Math.max(3000, (IS_GEMINI ? 20000 : 8500) - (Date.now() - t0)));
         const fixed = check.choices?.[0]?.message?.content?.trim(); if (fixed) answer = fixed;
