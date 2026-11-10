@@ -1549,6 +1549,7 @@
 <button onclick="switchMainTab('inspections', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">⚡ Inspections</button>
           <button onclick="switchMainTab('quantity', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📐 Quantity Control</button>
           <button onclick="switchMainTab('official', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">🏁 Official Final</button>
+          <button onclick="switchMainTab('issues', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📷 Issues</button>
         </div>
 
         <div id="dashboardTab">
@@ -1834,6 +1835,7 @@
     <!-- QUANTITY CONTROL TAB                                          -->
     <!-- ============================================================ -->
     <div id="officialTab" style="display:none; width:100%;"><div id="officialTabContent"></div></div>
+    <div id="issuesTab" style="display:none; width:100%;"><div id="issuesTabContent" style="padding:16px 0;"></div></div>
     <div id="quantityTab" style="display:none; width:100%;">
       <div class="quantity-shell">
         <div class="quantity-toolbar">
@@ -2005,6 +2007,7 @@
         <button class="tab-button" onclick="switchDetailsTab('events')">History</button>
         <button class="tab-button" onclick="switchDetailsTab('inspections')">Inspections</button>
         <button class="tab-button" onclick="switchDetailsTab('official_final')">Official Final</button>
+        <button class="tab-button" onclick="switchDetailsTab('issues')">Issues</button>
       </div>
 
       <div id="detailsContent"></div>
@@ -6378,6 +6381,9 @@ Object.assign(APP_TRANSLATIONS.en, {
       const officialTabEl = document.getElementById('officialTab');
       if (officialTabEl) officialTabEl.style.display = tab === 'official' ? 'block' : 'none';
       if (tab === 'official') renderOfficialMainTab();
+      const issuesTabEl = document.getElementById('issuesTab');
+      if (issuesTabEl) issuesTabEl.style.display = tab === 'issues' ? 'block' : 'none';
+      if (tab === 'issues' && typeof window.fiRenderTab === 'function') window.fiRenderTab();
 
       if (tab === 'punch') {
         renderPunchlist();
@@ -6649,6 +6655,11 @@ Object.assign(APP_TRANSLATIONS.en, {
           };
           if (punchHasPhotoCountColumn) punchPayload.photo_count = Number(event.photoCount || event.photos?.length || 0);
 
+          // Photos of a saved item are loaded only when View is opened. If they
+          // are not loaded yet, do not touch them (this used to erase them).
+          if (event.id && isUuid && event._detailsLoaded === false && !(event.photos || []).length && Number(event.photoCount) > 0) {
+            delete punchPayload.description; delete punchPayload.photo_count;
+          }
           if (event.id && isUuid) {
             const { error: updErr } = await sbClient.from('punch_list').update({
               ...punchPayload,
@@ -10600,6 +10611,9 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         html += '</div><div id="eventContent">';
         html += generateEventsForSystem(unit, firstSys);
         html += '</div>';
+      } else if (tab === 'issues') {
+        html = '<div id="fiUnitHost"></div>';
+        setTimeout(() => { if (typeof window.fiRenderUnit === 'function') window.fiRenderUnit(unit); }, 0);
       } else if (tab === 'official_final') {
         renderOfficialFinalTab();
         document.querySelectorAll('.tab-button').forEach((btn, idx) => btn.classList.toggle('active', idx === 4));
@@ -10645,7 +10659,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
 
       document.querySelectorAll('.tab-button').forEach((btn, idx) => {
         btn.classList.remove('active');
-        if ((tab === 'overview' && idx === 0) || (tab === 'photos' && idx === 1) || (tab === 'events' && idx === 2)) {
+        if ((tab === 'overview' && idx === 0) || (tab === 'photos' && idx === 1) || (tab === 'events' && idx === 2) || (tab === 'issues' && idx === 5)) {
           btn.classList.add('active');
         }
       });
@@ -12961,8 +12975,9 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         }
         if (error) throw error;
         if (detail) {
+          // Photos are stored after the PHOTOS marker in "description" (the title never has them).
           const description = String(detail.title || detail.description || '');
-          const encodedPhotos = description.split('\u0001PHOTOS:')[1] || '';
+          const encodedPhotos = String(detail.description || '').split('\u0001PHOTOS:')[1] || description.split('\u0001PHOTOS:')[1] || '';
           let photos = [];
           try { photos = JSON.parse(encodedPhotos || '[]'); } catch (_) { photos = []; }
           item.description = description.split('\u0001PHOTOS:')[0];
@@ -17968,5 +17983,23 @@ document.addEventListener('DOMContentLoaded', function() {
 // it repeatedly rebuilt the report while the user was reading or typing.
 </script>
 <script src="ai-knowledge.js" defer></script>
+<script src="field-issues.js" defer></script>
+<script>
+// Search and normal text boxes must never offer saved e-mails / passwords
+// (the browser treated them like a sign-in form). The sign-in form keeps it.
+(function () {
+  const skip = el => el.closest('#loginOverlay, form[data-auth], .auth-form') || ['password', 'email'].includes(el.type) || /lg(Email|Pass)/.test(el.id || '');
+  const tame = el => {
+    if (!el || el.tagName !== 'INPUT' || el.dataset.noFill || skip(el)) return;
+    if (!['text', 'search', ''].includes(el.type)) return;
+    el.dataset.noFill = '1';
+    el.setAttribute('autocomplete', 'off'); el.setAttribute('autocorrect', 'off'); el.setAttribute('autocapitalize', 'off'); el.setAttribute('spellcheck', 'false');
+    el.setAttribute('data-lpignore', 'true'); el.setAttribute('data-1p-ignore', 'true'); el.setAttribute('data-bwignore', 'true'); el.setAttribute('data-form-type', 'other');
+    if (!el.name || /mail|user|login|pass/i.test(el.name)) el.setAttribute('name', 'f' + Math.random().toString(36).slice(2, 9));
+  };
+  document.addEventListener('focusin', e => tame(e.target), true);
+  document.querySelectorAll('input').forEach(tame);
+})();
+</script>
 </body>
 </html>
