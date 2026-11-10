@@ -234,7 +234,7 @@ export default async (request) => {
 
     const ctx = input.context && typeof input.context === 'object' ? JSON.stringify(input.context).slice(0, 400) : '';
     const cacheKey = `${projectId}|${norm(question).replace(/[^a-z0-9#'" ]+/g, ' ').replace(/\s+/g, ' ').trim()}`;
-    const cached = !history.length && answerCache.get(cacheKey);
+    const cached = !history.length && !input.test && answerCache.get(cacheKey);
     if (cached && Date.now() - cached.at < 6 * 3600 * 1000 && !pendingPages) {
       const r = { ...cached.result, conversationId: input.conversationId || null, cached: true };
       return input.stream ? new Response(JSON.stringify({ done: true, ...r }) + '\n', { status: 200, headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' } }) : json(200, r);
@@ -284,7 +284,7 @@ export default async (request) => {
       .replace(/\(([^()]*)\)/g, (m, inner) => /^[A-Z]{1,2}\d{3}/.test(inner.trim()) ? `(${[...new Set(inner.split(/\s*,\s*/).filter(Boolean))].join(', ')})` : m);
     const usage = completion.usage || {};
 
-    if (!conversationId) {
+    if (!conversationId && !input.test) { // test questions are not saved in History
       const created = await sb('/rest/v1/ai_conversations', auth, { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ project_id: projectId, user_id: user.id, title: question.slice(0, 80), context: input.context || {} }) });
       conversationId = created?.[0]?.id;
     }
