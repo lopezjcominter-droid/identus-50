@@ -265,13 +265,16 @@
   window.fiTogglePhotos = id => { const el = document.getElementById(`fiPh-${id}`); if (el) el.hidden = !el.hidden; };
   const toolbar = () => `<div class="fi-toolbar">
       ${['open', 'resolved', 'all'].map(f => `<button type="button" class="btn ${filter === f ? 'btn-primary' : 'btn-secondary'}" onclick="fiFilter('${f}')">${f === 'open' ? 'Open' : f === 'resolved' ? 'Resolved' : 'All'} (${issues.filter(i => f === 'all' || i.status === f).length})</button>`).join('')}
-      <input type="text" class="form-input fi-search" id="fiSearch" placeholder="Search unit or type" autocomplete="off" data-lpignore="true" data-1p-ignore="true" value="${esc(search)}" oninput="fiSearchInput(this.value)">
+      <input type="search" class="form-input fi-search" id="fiSearch" name="fi-filter-${Date.now()}" placeholder="Search unit or type" autocomplete="off" autocapitalize="none" spellcheck="false" role="searchbox" aria-autocomplete="none" data-form-type="other" data-lpignore="true" data-1p-ignore="true" readonly onpointerdown="this.removeAttribute('readonly')" onkeydown="this.removeAttribute('readonly')" value="${esc(search)}" oninput="fiSearchInput(this.value)">
       <button type="button" class="btn btn-secondary" onclick="fiExportPdf()">📄 Export PDF</button><button type="button" class="btn btn-secondary" onclick="fiExport()" title="Spreadsheet with photo links">⬇ Excel</button>
     </div>`;
   // Used by the unit Closeout PDF.
   window.fiIssuesForUnit = async unit => { try { await load(); } catch (_) {} return issues.filter(i => i.apt === String(unit.apt) && (!unit.building || !i.building || i.building === unit.building)); };
   window.fiFilter = f => { filter = f; rerender(); };
-  window.fiSearchInput = v => { search = String(v || '').toLowerCase().trim(); const host = document.getElementById('fiList'); if (host) host.innerHTML = visible(currentUnit).map(card).join('') || '<div class="fi-empty">No issues.</div>'; };
+  // Browsers sometimes autofill the signed-in e-mail here: never search by an e-mail.
+  const looksLikeEmail = v => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v || '').trim());
+  setInterval(() => { const el = document.getElementById('fiSearch'); if (el && looksLikeEmail(el.value)) { el.value = ''; if (search) window.fiSearchInput(''); } }, 800);
+  window.fiSearchInput = v => { if (looksLikeEmail(v)) { const el = document.getElementById('fiSearch'); if (el) el.value = ''; v = ''; } search = String(v || '').toLowerCase().trim(); const host = document.getElementById('fiList'); if (host) host.innerHTML = visible(currentUnit).map(card).join('') || '<div class="fi-empty">No issues.</div>'; };
 
   let currentUnit = null;
   function rerender() {
