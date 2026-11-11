@@ -172,7 +172,7 @@
             </div>
           </div>
 
-          <div id="finalReadyPanel" class="chart-container" style="display:none;margin-bottom:24px;border-left:4px solid #059669;">
+          <div id="finalReadyPanel" class="chart-container" style="display:none;margin-bottom:24px;border-left:4px solid #059669;min-height:0;height:auto;">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><div class="chart-title">Ready for Official Final</div><div id="finalReadyFilter" style="display:flex;gap:6px;"></div></div>
             <div style="font-size:12px;color:#64748B;margin:6px 0 12px;">Units ready to request the Official Final, and what the closest units still need.</div>
             <div id="finalReadyList" style="max-height:420px;overflow:auto;"></div>
@@ -12914,7 +12914,9 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         if (!panel || !list || !Array.isArray(data) || !data.length) return;
         const rows = data.filter(u => !shouldShowUnit || shouldShowUnit(u)).map(u => ({ u, m: finalReadiness(u) }));
         const ready = rows.filter(r => !r.m.length), close = rows.filter(r => r.m.length && r.m.length <= 3).sort((a, b) => a.m.length - b.m.length);
-        panel.style.display = 'block';
+        // Show the panel only when at least one unit is ready for the Official Final.
+        panel.style.display = ready.length ? 'block' : 'none';
+        if (!ready.length) return;
         const btn = (k, t) => `<button type="button" class="btn ${finalReadyMode === k ? 'btn-primary' : 'btn-secondary'}" style="font-size:12px;padding:5px 10px;" onclick="window.setFinalReadyMode('${k}')">${t}</button>`;
         filt.innerHTML = btn('ready', `✅ Ready (${ready.length})`) + btn('close', `⏳ Almost (${close.length})`);
         const shown = finalReadyMode === 'ready' ? ready : close;
