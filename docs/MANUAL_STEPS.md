@@ -40,3 +40,12 @@ The app → **Admin Users** → **Add user**: name, email, a temporary password 
   - Field Issues (the table has no `updated_at`).
   - Project Setup (admin/PM only).
   - Quantity Control writes only the rows that changed.
+
+## Phase 3
+
+### F. Deploy Preview for the `hardening` branch (point 12)
+1. Netlify → **identus-50** → **Site configuration** → **Build & deploy** → **Branches and deploy contexts** → **Configure**.
+2. **Branch deploys:** choose **Let me add individual branches** → type `hardening` → **Save**.
+3. **Deploy Previews:** leave **Any pull request against your production branch** turned on.
+4. Every push to `hardening` then publishes at `https://hardening--identus-50.netlify.app` without touching production. Run `docs/SMOKE_TEST.md` there before merging.
+⚠️ Each preview deploy also uses Netlify credits. Push to `hardening` in batches.

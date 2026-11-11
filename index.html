@@ -10948,7 +10948,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         html += `
           <div class="event-item">
             <div class="event-time">${date}${event.by ? ' · 👤 ' + event.by : ''}${event.progress !== undefined ? ' · ' + event.progress + '% ' + (event.status || '') : ''}</div>
-            <div class="event-notes">${event.notes}</div>
+            <div class="event-notes">${window.esc(event.notes)}</div>
             ${evI === sysData.events.length - 1 ? `<button type="button" onclick="undoLastEvent(${JSON.stringify(system).replace(/"/g, '&quot;')})" style="margin:4px 0;padding:3px 8px;font-size:12px;border:1px solid #D1D5DB;background:#fff;border-radius:6px;cursor:pointer;">↶ Undo this update</button>` : ''}
             ${event.photos > 0 ? `<div class="event-photos">📸 ${event.photos} photo(s)</div>` : ''}
             ${(event.images || []).map((b, ii) => `<span style="position:relative;display:inline-block;margin:4px 4px 0 0;"><img loading="lazy" src="${storageThumbnailUrl(b, 160)}" data-full="${b}" onerror="this.onerror=null;this.src=this.dataset.full" style="width:64px;height:64px;object-fit:cover;border-radius:6px;cursor:pointer;display:block;" onclick="openPhotoFull(this.dataset.full || this.src)">${photoXBtn(`deleteUnitPhoto(${JSON.stringify(system).replace(/"/g, '&quot;')},${evI},${ii})`)}</span>`).join('')}
@@ -13024,14 +13024,14 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           <div class="issue-card">
             <div class="issue-header">
               <div>
-                <div class="issue-description">${item.description}</div>
+                <div class="issue-description">${window.esc(item.description)}</div>
                 <div class="issue-location">Unit: ${item.location} • ${item.building}</div>
               </div>
               <span class="issue-priority" style="background: ${priorityColor};">${item.priority}</span>
             </div>
             <div class="issue-meta">
               <span class="issue-badge" style="background: ${statusColor}; color: white;">Status: ${displayStatus}</span>
-              <span class="issue-badge">Assigned: ${item.assignee}</span>
+              <span class="issue-badge">Assigned: ${window.esc(item.assignee)}</span>
               <span class="issue-badge">📸 ${item.photoCount} photo(s) — open View to load</span>
             </div>
             <div style="font-size: 11px; color: #6B7280; padding: 8px 0; border-top: 1px solid #E5E7EB; margin-top: 8px;">
@@ -13039,7 +13039,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
               <div>Reviewed: ${reviewedDate}</div>
               <div>Closed: ${closedDate}</div>
               ${formatPunchHistory(item)}
-              ${item.status === 'Closed' && item.resolution ? `<div>Resolution: ${item.resolution}${item.closedBy ? ` · ${item.closedBy}` : ''}</div>` : ''}
+              ${item.status === 'Closed' && item.resolution ? `<div>Resolution: ${window.esc(item.resolution)}${item.closedBy ? ` · ${window.esc(item.closedBy)}` : ''}</div>` : ''}
             </div>
             <div class="issue-actions">
               <button class="btn-xs secondary btn-view-event" data-idx="${idx}">View</button>
@@ -13216,7 +13216,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           <div style="padding: 8px 0;">
             <div style="margin-bottom: 12px;">
               <div style="font-size: 13px; color: #6B7280; margin-bottom: 2px;">Description</div>
-              <div style="font-size: 15px; font-weight: 600;">${item.description}</div>
+              <div style="font-size: 15px; font-weight: 600;">${window.esc(item.description)}</div>
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
               <div>
@@ -13420,7 +13420,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
               <div style="font-size:11px;color:#6B7280;margin-top:2px">Inspector: ${f.inspector || 'Unknown'}</div>
               <div style="font-size:12px;color:#374151;margin-top:2px">${f.description || ''}</div>
               <div style="font-size:11px;color:#6B7280;margin-top:3px">${formatPunchHistory(f)}</div>
-              ${f.comment ? `<div style="font-size:11px;color:#6B7280;margin-top:2px">💬 ${f.comment}</div>` : ''}
+              ${f.comment ? `<div style="font-size:11px;color:#6B7280;margin-top:2px">💬 ${window.esc(f.comment)}</div>` : ''}
             </div>
             <div style="flex-shrink:0">
               <div style="font-size:11px;color:#6B7280">${f.date ? new Date(f.date).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}) : ''}</div>
@@ -13553,7 +13553,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
                 <tr>
                   <td><strong>${item.building}</strong></td>
                   <td>${item.location}</td>
-                  <td>${item.description}</td>
+                  <td>${window.esc(item.description)}</td>
                   <td><span class="priority-${item.priority.toLowerCase()}">${item.priority}</span></td>
                   <td><span class="status-${item.status.toLowerCase().replace(' ', '-')}">${item.status}</span></td>
                   <td>${item.assignee || '-'}</td>
@@ -17165,7 +17165,10 @@ async function inspSubmitInspection() {
     await inspSaveInspections(inspections);
   } catch (error) {
     console.error('Remote inspection save failed:', error);
-    inspShowToast(`Inspection could not be saved: ${error.message || 'connection error'}`, 'error');
+    // Keep the checklist (draft) so the inspector can press Submit again,
+    // and drop the unsaved copy so a retry does not create a duplicate.
+    const idx = inspections.indexOf(record); if (idx >= 0) inspections.splice(idx, 1);
+    inspShowToast(`Could not save — retry. Your answers are kept. (${error.message || 'connection error'})`, 'error');
     return;
   }
   if (typeof addLocalAudit === 'function') addLocalAudit(previous ? 'Reinspection submitted' : 'Inspection submitted', { unit: record.apt, type: record.type, failures: failItems.length, revision: record.revision });
@@ -17634,10 +17637,10 @@ const dateStr = new Date(record.date).toLocaleDateString('en-US', {year:'numeric
         <div class="insp-fail-item">
           <div class="insp-fail-item-header">
             <span class="insp-item-num">${String(item.idx+1).padStart(2,'0')}</span>
-            <span style="font-size:13px;font-weight:600">${item.description}</span>
+            <span style="font-size:13px;font-weight:600">${window.esc(item.description)}</span>
           </div>
           <div class="insp-fail-item-body">
-            <div class="insp-note">💬 ${item.comment}</div>
+            <div class="insp-note">💬 ${window.esc(item.comment)}</div>
             ${item.photoCount > 0 ? `<div class="insp-photo-count">📷 ${item.photoCount} photo(s) attached</div><div class="insp-photo-previews">${(item.photos || []).map(p => `<img loading="lazy" class="insp-photo-thumb" src="${storageThumbnailUrl(p, 240)}" data-full="${p}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Evidence photo">`).join('')}</div>` : ''}
           </div>
         </div>
@@ -17657,7 +17660,7 @@ const dateStr = new Date(record.date).toLocaleDateString('en-US', {year:'numeric
       if (badge && badge.textContent.trim() !== 'FAIL') group.remove();
     });
   }
-  if (summaryItems) summaryItems.innerHTML = '<h3 style="font-size:14px;margin-bottom:10px">Checklist Review</h3>' + record.items.map(item => `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #e5e7eb"><span class="insp-badge ${item.status === 'PASS' ? 'insp-badge-pass' : item.status === 'FAIL' ? 'insp-badge-fail' : 'insp-badge-na'}">${item.status}</span><div style="flex:1"><div style="font-size:13px">${item.description}</div>${item.comment ? `<div class="insp-note">💬 ${item.comment}</div>` : ''}${item.photos?.length ? `<div class="insp-photo-previews">${item.photos.map((p, photoIndex) => `<img loading="lazy" class="insp-photo-thumb" src="${storageThumbnailUrl(p, 240)}" data-full="${p}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Evidence photo ${photoIndex + 1}" title="Unit ${record.apt} · ${record.building} · ${record.type} · Photo ${photoIndex + 1}">`).join('')}</div>` : ''}</div></div>`).join('');
+  if (summaryItems) summaryItems.innerHTML = '<h3 style="font-size:14px;margin-bottom:10px">Checklist Review</h3>' + record.items.map(item => `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #e5e7eb"><span class="insp-badge ${item.status === 'PASS' ? 'insp-badge-pass' : item.status === 'FAIL' ? 'insp-badge-fail' : 'insp-badge-na'}">${item.status}</span><div style="flex:1"><div style="font-size:13px">${window.esc(item.description)}</div>${item.comment ? `<div class="insp-note">💬 ${window.esc(item.comment)}</div>` : ''}${item.photos?.length ? `<div class="insp-photo-previews">${item.photos.map((p, photoIndex) => `<img loading="lazy" class="insp-photo-thumb" src="${storageThumbnailUrl(p, 240)}" data-full="${p}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Evidence photo ${photoIndex + 1}" title="Unit ${record.apt} · ${record.building} · ${record.type} · Photo ${photoIndex + 1}">`).join('')}</div>` : ''}</div></div>`).join('');
   if (summaryItems) {
     summaryItems.querySelectorAll('.insp-photo-previews').forEach(group => {
       const row = group.closest('div[style*="border-bottom"]');
@@ -18147,8 +18150,8 @@ function inspLoadPunchList() {
         <div style="flex:1">
            <div style="font-size:13px;font-weight:600">${f.typeNum ? `${f.typeNum}. ` : ''}${f.type} <span class="insp-badge ${f.status === 'Closed' ? 'insp-badge-pass' : 'insp-badge-fail'}">${f.status === 'Closed' ? 'COMPLETED' : 'HIGH PRIORITY'}</span></div>
           <div style="font-size:12px;color:#64748b;margin-top:2px">Inspector: ${f.inspector || 'Unknown'}</div>
-          <div style="font-size:13px;margin-top:2px">${f.description}</div>
-          <div style="font-size:12px;color:#64748b;margin-top:2px">💬 ${f.comment}</div>
+          <div style="font-size:13px;margin-top:2px">${window.esc(f.description)}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px">💬 ${window.esc(f.comment)}</div>
           ${f.photoCount > 0 ? `<div style="font-size:12px;color:#64748b">📷 ${f.photoCount} foto(s)</div>` : ''}
           <div style="font-size:12px;color:#64748b;margin-top:3px">${formatPunchHistory(f)}</div>
         </div>
