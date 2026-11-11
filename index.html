@@ -6674,11 +6674,18 @@ Object.assign(APP_TRANSLATIONS.en, {
             delete punchPayload.description; delete punchPayload.photo_count;
           }
           if (event.id && isUuid) {
-            const { error: updErr } = await sbClient.from('punch_list').update({
-              ...punchPayload,
-              updated_at: new Date().toISOString()
-            }).eq('id', event.id);
+            // Save only if nobody changed this item since it was loaded.
+            const nextUpdatedAt = new Date().toISOString();
+            let punchUpdate = sbClient.from('punch_list').update({ ...punchPayload, updated_at: nextUpdatedAt }).eq('id', event.id);
+            if (event._updatedAt) punchUpdate = punchUpdate.eq('updated_at', event._updatedAt);
+            const { data: updRows, error: updErr } = await punchUpdate.select('id');
             if (updErr) throw updErr;
+            if (event._updatedAt && (!updRows || !updRows.length)) {
+              alert(`Punch item "${String(event.description || '').slice(0, 60)}" was changed by someone else. The list will reload — please make your change again.`);
+              setTimeout(() => { if (typeof loadPunchlist === 'function') Promise.resolve(loadPunchlist()).then(() => { if (typeof renderPunchlist === 'function') renderPunchlist(); }).catch(() => {}); }, 0);
+              const conflict = new Error('Punch item changed by someone else'); conflict.isConflict = true; throw conflict;
+            }
+            event._updatedAt = nextUpdatedAt;
           } else {
             // The inserted row is already present in local state; only request
             // its id back instead of transferring the full row (including
@@ -6809,7 +6816,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         }
         let { data: plData, error } = await sbClient
           .from('punch_list')
-          .select('id,title,building_id,unit_id,priority,status,assigned_to,created_at,reviewed_at,closed_at,closed_by,resolution,history,source,inspection_id,type,type_num,comment,photo_count')
+          .select('id,title,building_id,unit_id,priority,status,assigned_to,created_at,reviewed_at,closed_at,closed_by,resolution,history,source,inspection_id,type,type_num,comment,photo_count,updated_at')
           .eq('project_id', PROJECT_ID)
           .order('created_at', { ascending: false })
           .range(punchRemoteOffset, punchRemoteOffset + PUNCH_PAGE_SIZE - 1);
@@ -6854,6 +6861,7 @@ Object.assign(APP_TRANSLATIONS.en, {
               // Full photo URLs are loaded only when the user opens View.
               photos: [],
               _detailsLoaded: false,
+              _updatedAt: item.updated_at || null,
               createdAt: item.created_at,
               reviewedAt: item.reviewed_at || null,
               closedAt: item.closed_at || null,
