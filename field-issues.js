@@ -232,9 +232,25 @@
     && (!search || `${i.apt} ${i.building} ${i.issue_type} ${i.description || ''}`.toLowerCase().includes(search)));
   // Compact row: unit, type, the comment highlighted, a 📷 icon (tap to see
   // the photos) and small actions. Keeps long lists short.
-  const card = i => `<div class="fi-row ${i.status === 'resolved' ? 'fi-resolved' : ''}">
+  // Open issues older than 7 days are flagged in red.
+  const daysOpen = i => Math.floor((Date.now() - Date.parse(i.created_at || 0)) / 86400000);
+  const isOld = i => i.status !== 'resolved' && !i._pending && daysOpen(i) > 7;
+  function updateIssuesBadge() {
+    const btn = [...document.querySelectorAll('button.tab-main')].find(b => /switchMainTab\('issues'/.test(b.getAttribute('onclick') || ''));
+    if (!btn) return;
+    const old = issues.filter(isOld).length;
+    let badge = btn.querySelector('.fi-old-badge');
+    if (!old) { if (badge) badge.remove(); return; }
+    if (!badge) { badge = document.createElement('span'); badge.className = 'fi-old-badge'; badge.style.cssText = 'margin-left:6px;background:#DC2626;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;'; btn.appendChild(badge); }
+    badge.textContent = old; badge.title = `${old} open issue(s) older than 7 days`;
+  }
+  window.fiUpdateBadge = updateIssuesBadge;
+  // Load once in the background so the tab shows the count without opening it.
+  const backgroundLoad = tries => { if (window.userRole && !window.authNoProjectAccess) load().then(updateIssuesBadge).catch(() => {}); else if (tries > 0) setTimeout(() => backgroundLoad(tries - 1), 10000); };
+  setTimeout(() => backgroundLoad(6), 8000);
+  const card = i => `<div class="fi-row ${i.status === 'resolved' ? 'fi-resolved' : ''}"${isOld(i) ? ' style="border-left:4px solid #DC2626;"' : ''}>
       <div class="fi-row-main">
-        <div class="fi-row-top"><strong>${esc(i.apt)}</strong><span class="fi-muted">${esc(i.building)}</span><span class="fi-chip">${esc(i.issue_type)}</span><span class="fi-status">${i._pending ? '📴 Pending upload' : i.status === 'resolved' ? '✓ Resolved' : 'Open'}</span></div>
+        <div class="fi-row-top"><strong>${esc(i.apt)}</strong><span class="fi-muted">${esc(i.building)}</span><span class="fi-chip">${esc(i.issue_type)}</span>${isOld(i) ? `<span class="fi-chip" style="background:#FEE2E2;color:#991B1B;">⚠ ${daysOpen(i)} days open</span>` : ''}<span class="fi-status">${i._pending ? '📴 Pending upload' : i.status === 'resolved' ? '✓ Resolved' : 'Open'}</span></div>
         <div class="fi-comment">${i.description ? esc(i.description) : '<span class="fi-muted">No comment</span>'}</div>
         <div class="fi-muted fi-small">${esc(i.created_by_name || '')} · ${fmt(i.created_at)}</div>
         <div class="fi-thumbs" id="fiPh-${i.id}" hidden>${(i.photos || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(typeof storageThumbnailUrl === 'function' ? storageThumbnailUrl(u) : u)}" data-full="${esc(u)}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
@@ -278,6 +294,7 @@
 
   let currentUnit = null;
   function rerender() {
+    updateIssuesBadge();
     if (document.getElementById('fiUnitHost')) return window.fiRenderUnit(currentUnit, true);
     if (document.getElementById('issuesTabContent')) return window.fiRenderTab(true);
   }
