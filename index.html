@@ -9115,7 +9115,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     // Closeout package: one printable PDF with everything about one unit.
     // Change log: every insert/update/delete recorded by database triggers
     // (table project_audit_log). Admin and PM only.
-    async function openChangeLog() {
+    async function openChangeLog(initialFilter = '') {
       if (window.authIsActive && window.authIsActive() && !['admin', 'pm'].includes(window.userRole)) { alert('Admins or PMs only.'); return; }
       if (!sbClient || LOCAL_PROJECT_MODE || window.location.protocol === 'file:') { alert('The change log is available on the live site.'); return; }
       const e = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -9142,7 +9142,9 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         const shown = q ? list.filter(r => text(r).includes(q)) : list;
         body.innerHTML = shown.length ? `<table style="width:100%;border-collapse:collapse;"><thead><tr style="position:sticky;top:0;background:#fff;"><th style="text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;">When</th><th style="text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;">Who</th><th style="text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;">What</th><th style="text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;">Unit</th><th style="text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;">Change</th></tr></thead><tbody>${shown.map(r => `<tr style="border-bottom:1px solid #F1F5F9;vertical-align:top;"><td style="padding:6px;white-space:nowrap;">${e(new Date(r.changed_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}</td><td style="padding:6px;">${e(r.changed_by_name || 'System')}</td><td style="padding:6px;">${e(names[r.table_name] || r.table_name)}</td><td style="padding:6px;font-weight:600;">${e(r.unit_label || '—')}</td><td style="padding:6px;color:#334155;">${summary(r)}</td></tr>`).join('')}</tbody></table><p style="color:#94A3B8;">Showing the latest ${shown.length} changes.</p>` : '<p style="color:#64748B;">No changes recorded yet.</p>';
       };
-      draw('');
+      const firstFilter = String(initialFilter || '').toLowerCase().trim();
+      if (firstFilter) ov.querySelector('#clSearch').value = initialFilter;
+      draw(firstFilter);
       ov.querySelector('#clSearch').oninput = ev => draw(String(ev.target.value || '').toLowerCase().trim());
       ov.querySelector('#clCsv').onclick = () => {
         const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -9151,6 +9153,61 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       };
     }
     window.openChangeLog = openChangeLog;
+
+    // User Activity (admin): last sign-in from Supabase Auth plus the work each
+    // person registered (progress events, inspections, punch, issues), computed
+    // in the database by user_activity_summary() — includes history before the
+    // change log existed.
+    async function openUserActivity() {
+      if (window.authIsActive && window.authIsActive() && window.userRole !== 'admin') { alert('Admins only.'); return; }
+      if (!sbClient || LOCAL_PROJECT_MODE || window.location.protocol === 'file:') { alert('User Activity is available on the live site.'); return; }
+      const e = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      const ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100001;display:flex;align-items:center;justify-content:center;padding:12px;';
+      ov.innerHTML = `<div style="background:#fff;border-radius:12px;width:min(1100px,100%);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3);">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #E5E7EB;"><b style="font-size:16px;color:#0B5394;">📊 User Activity</b><span id="uaSummary" style="font-size:12px;color:#64748B;flex:1;"></span><button type="button" class="btn btn-secondary" id="uaClose" style="font-size:12px;padding:6px 10px;">✕</button></div>
+        <div id="uaBody" style="overflow:auto;padding:0 18px 14px;font-size:12px;"><p style="color:#64748B;">Loading…</p></div></div>`;
+      document.body.appendChild(ov);
+      const close = () => ov.remove();
+      ov.querySelector('#uaClose').onclick = close; ov.addEventListener('click', ev => { if (ev.target === ov) close(); });
+      const body = ov.querySelector('#uaBody');
+      try {
+        const { data: { session } } = await sbClient.auth.getSession();
+        const [usersRes, act] = await Promise.all([
+          proxyFetch('/.netlify/functions/admin-users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action: 'list', projectId: PROJECT_ID, project_id: PROJECT_ID }) }).then(r => r.json()),
+          sbClient.rpc('user_activity_summary', { p_project_id: PROJECT_ID })
+        ]);
+        if (act.error) throw new Error(/function|does not exist/i.test(act.error.message) ? 'Run the User Activity SQL in Supabase first.' : act.error.message);
+        if (usersRes.error) throw new Error(usersRes.error);
+        const members = new Set((usersRes.memberships || []).map(m => String(m.user_id)));
+        const users = (usersRes.users || []).filter(u => !members.size || members.has(String(u.id)) || u.role === 'admin');
+        const key = v => String(v || '').trim().toLowerCase();
+        const byPerson = new Map();
+        (act.data || []).forEach(r => { const k = key(r.person); if (!byPerson.has(k)) byPerson.set(k, []); byPerson.get(k).push(r); });
+        const now = Date.now(), day = 86400000;
+        const rows = users.map(u => {
+          const names = [key(u.name), key(String(u.email || '').split('@')[0]), key(u.email)].filter(Boolean);
+          const acts = names.flatMap(n => byPerson.get(n) || []); names.forEach(n => byPerson.delete(n));
+          const sum = f => acts.reduce((a, r) => a + Number(r[f] || 0), 0);
+          const lastAct = acts.reduce((a, r) => (!a || Date.parse(r.last_at) > Date.parse(a.last_at)) ? r : a, null);
+          const login = u.last_sign_in_at ? Date.parse(u.last_sign_in_at) : 0;
+          const lastSeen = Math.max(login, lastAct ? Date.parse(lastAct.last_at) : 0);
+          const dot = !lastSeen ? '⚪' : now - lastSeen < day && new Date(lastSeen).toDateString() === new Date().toDateString() ? '🟢' : now - lastSeen < 7 * day ? '🟡' : '🔴';
+          const total = sum('total');
+          const mix = acts.filter(r => r.total > 0).sort((a, b) => b.total - a.total).map(r => `${r.kind} ${Math.round(r.total * 100 / total)}%`).join(', ');
+          return { u, dot, login, lastAct, today: sum('today'), week: sum('last7'), total, mix, lastSeen };
+        }).sort((a, b) => b.lastSeen - a.lastSeen);
+        const others = [...byPerson.entries()].map(([k, acts]) => ({ name: acts[0].person, total: acts.reduce((a, r) => a + Number(r.total), 0) }));
+        const when = t => { if (!t) return 'Never'; const d = new Date(t); const days = Math.floor((now - t) / day); const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); return d.toDateString() === new Date().toDateString() ? `Today ${time}` : days < 2 ? `Yesterday ${time}` : `${days} days ago`; };
+        const activeToday = rows.filter(r => r.dot === '🟢').length, activeWeek = rows.filter(r => r.dot === '🟢' || r.dot === '🟡').length, never = rows.filter(r => r.dot === '⚪').length;
+        ov.querySelector('#uaSummary').textContent = `${activeToday} active today · ${activeWeek} this week · ${never} never signed in · ${rows.length} users`;
+        const th = 'text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;position:sticky;top:0;background:#fff;';
+        body.innerHTML = `<table style="width:100%;border-collapse:collapse;"><thead><tr><th style="${th}">User</th><th style="${th}">Role</th><th style="${th}">Last sign-in</th><th style="${th}">Last activity</th><th style="${th}">Today</th><th style="${th}">7 days</th><th style="${th}">Total</th><th style="${th}">Most of the work</th></tr></thead><tbody>${rows.map((r, i) => `<tr data-ua="${i}" style="border-bottom:1px solid #F1F5F9;cursor:pointer;" title="Open this person's changes"><td style="padding:7px 6px;font-weight:600;">${r.dot} ${e(r.u.name || r.u.email)}<div style="font-weight:400;color:#94A3B8;">${e(r.u.email)}${r.u.disabled ? ' · disabled' : ''}</div></td><td style="padding:7px 6px;">${e(r.u.role)}</td><td style="padding:7px 6px;">${when(r.login)}</td><td style="padding:7px 6px;">${r.lastAct ? `${when(Date.parse(r.lastAct.last_at))}<div style="color:#64748B;">${e(r.lastAct.kind)}${r.lastAct.last_what ? ' · ' + e(r.lastAct.last_what) : ''}</div>` : '—'}</td><td style="padding:7px 6px;font-weight:700;">${r.today}</td><td style="padding:7px 6px;">${r.week}</td><td style="padding:7px 6px;">${r.total}</td><td style="padding:7px 6px;color:#334155;">${e(r.mix || '—')}</td></tr>`).join('')}</tbody></table>
+          <p style="color:#94A3B8;margin-top:10px;">🟢 active today · 🟡 this week · 🔴 more than 7 days · ⚪ never signed in. Counts include work from before the change log existed (progress, inspections, closed punch items, issues).${others.length ? `<br>Work recorded under names that don't match a user: ${others.map(o => `${e(o.name)} (${o.total})`).join(', ')}.` : ''}</p>`;
+        body.querySelectorAll('[data-ua]').forEach(tr => tr.addEventListener('click', () => { const r = rows[Number(tr.dataset.ua)]; close(); openChangeLog(r.u.name || r.u.email); }));
+      } catch (err) { body.innerHTML = `<p style="color:#B91C1C;">${e(err.message || err)}</p>`; }
+    }
+    window.openUserActivity = openUserActivity;
 
     async function generateCloseoutPdf(unit) {
       if (!unit) return;

@@ -224,7 +224,7 @@
         ov = document.createElement('div'); ov.id = 'usersModal';
         ov.style.cssText = 'position:fixed;inset:0;z-index:90000;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow:auto;';
         ov.innerHTML = `<div style="background:#fff;border-radius:12px;width:100%;max-width:820px;padding:20px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><h2 style="font-size:18px;margin:0;">👥 Users</h2><button id="uClose" style="border:none;background:none;font-size:22px;cursor:pointer;">✕</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><h2 style="font-size:18px;margin:0;">👥 Users</h2><span style="flex:1"></span><button type="button" class="btn btn-secondary" style="font-size:12px;padding:6px 10px;margin-right:8px;" onclick="window.openUserActivity && window.openUserActivity()">📊 User Activity</button><button id="uClose" style="border:none;background:none;font-size:22px;cursor:pointer;">✕</button></div>
           <div id="uMsg" style="min-height:18px;font-size:13px;margin-bottom:8px;"></div>
           <div id="uList" style="overflow-x:auto;">Loading…</div>
           <h3 style="font-size:14px;margin:18px 0 8px;">Add user</h3>
