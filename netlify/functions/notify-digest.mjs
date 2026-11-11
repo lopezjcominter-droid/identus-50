@@ -1,6 +1,7 @@
 // On demand, for Project Setup: preview the digest or send a test to yourself.
 // POST { action: 'preview' | 'test', projectId } with the user's Bearer token.
 import { rest, loadSettings, buildDigest, recipientsFor, sendEmail } from './digest/core.mjs';
+import { normalizeRole } from './ai/roles.mjs';
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export default async request => {
@@ -15,7 +16,7 @@ export default async request => {
     if (!UUID.test(projectId)) return json(400, { error: 'Invalid project' });
     const [profile] = await rest(`/rest/v1/profiles?user_id=eq.${me.id}&select=role`);
     const [member] = await rest(`/rest/v1/project_members?project_id=eq.${projectId}&user_id=eq.${me.id}&select=role`);
-    const role = String(member?.role || profile?.role || '').toLowerCase();
+    const role = normalizeRole(member?.role || profile?.role);
     if (!['admin', 'pm'].includes(role)) return json(403, { error: 'Admins or PMs only' });
     const settings = await loadSettings(projectId);
     const digest = await buildDigest(projectId, settings, new Date());
