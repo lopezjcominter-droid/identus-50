@@ -9165,7 +9165,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       const ov = document.createElement('div');
       ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100001;display:flex;align-items:center;justify-content:center;padding:12px;';
       ov.innerHTML = `<div style="background:#fff;border-radius:12px;width:min(1100px,100%);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3);">
-        <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #E5E7EB;"><b style="font-size:16px;color:#0B5394;">📊 User Activity</b><span id="uaSummary" style="font-size:12px;color:#64748B;flex:1;"></span><button type="button" class="btn btn-secondary" id="uaWeekBtn" style="font-size:12px;padding:6px 10px;">📈 Weekly</button><button type="button" class="btn btn-secondary" id="uaCsv" style="font-size:12px;padding:6px 10px;">⬇ CSV</button><button type="button" class="btn btn-secondary" id="uaClose" style="font-size:12px;padding:6px 10px;">✕</button></div>
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #E5E7EB;"><b style="font-size:16px;color:#0B5394;">📊 User Activity</b><span id="uaSummary" style="font-size:12px;color:#64748B;flex:1;"></span> <button type="button" class="btn btn-secondary" id="uaSync" style="font-size:12px;padding:6px 10px;display:none;">⇄ Fix roles</button><button type="button" class="btn btn-secondary" id="uaWeekBtn" style="font-size:12px;padding:6px 10px;">📈 Weekly</button><button type="button" class="btn btn-secondary" id="uaCsv" style="font-size:12px;padding:6px 10px;">⬇ CSV</button><button type="button" class="btn btn-secondary" id="uaClose" style="font-size:12px;padding:6px 10px;">✕</button></div>
         <div id="uaWeek" style="display:none;padding:10px 18px;border-bottom:1px solid #E5E7EB;font-size:11px;"></div><div id="uaBody" style="overflow:auto;padding:0 18px 14px;font-size:12px;"><p style="color:#64748B;">Loading…</p></div></div>`;
       document.body.appendChild(ov);
       const close = () => ov.remove();
@@ -9187,7 +9187,9 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         (act.data || []).forEach(r => { const k = key(r.person); if (!byPerson.has(k)) byPerson.set(k, []); byPerson.get(k).push(r); });
         const now = Date.now(), day = 86400000;
         const rows = users.map(u => {
-          const names = [key(u.name), key(String(u.email || '').split('@')[0]), key(u.email)].filter(Boolean);
+          const first = key(String(u.name || '').split(/\s+/)[0]);
+          const firstUnique = first && users.filter(x => key(String(x.name || '').split(/\s+/)[0]) === first).length === 1;
+          const names = [...new Set([key(u.name), key(String(u.email || '').split('@')[0]), key(u.email), firstUnique ? first : ''].filter(Boolean))];
           const acts = names.flatMap(n => byPerson.get(n) || []); names.forEach(n => byPerson.delete(n));
           const sum = f => acts.reduce((a, r) => a + Number(r[f] || 0), 0);
           const lastAct = acts.reduce((a, r) => (!a || Date.parse(r.last_at) > Date.parse(a.last_at)) ? r : a, null);
@@ -9223,6 +9225,24 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           if (res.error) { btn.disabled = false; btn.textContent = 'Inactive 30+ days · Deactivate'; alert(res.error); return; }
           btn.outerHTML = '<span style="font-size:11px;color:#64748B;">Deactivated</span>';
         }));
+        // Global role that differs from the project role: one click aligns them.
+        const mismatched = rows.filter(r => !r.u.disabled && ['pm', 'inspector', 'viewer'].includes(r.projectRole) && r.u.role !== 'admin' && r.projectRole !== r.u.role);
+        const syncBtn = ov.querySelector('#uaSync');
+        if (mismatched.length) {
+          syncBtn.style.display = ''; syncBtn.textContent = `⇄ Fix roles (${mismatched.length})`;
+          syncBtn.title = 'Set each global role equal to the project role';
+          syncBtn.onclick = async () => {
+            if (!confirm(`Set the global role equal to the project role for:\n\n${mismatched.map(r => `• ${r.u.name || r.u.email}: ${r.u.role} → ${r.projectRole}`).join('\n')}`)) return;
+            syncBtn.disabled = true; syncBtn.textContent = 'Fixing…';
+            let ok = 0; const failed = [];
+            for (const r of mismatched) {
+              const res = await proxyFetch('/.netlify/functions/admin-users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action: 'setRole', id: r.u.id, role: r.projectRole }) }).then(x => x.json()).catch(err => ({ error: err.message }));
+              if (res.error) failed.push(`${r.u.name || r.u.email}: ${res.error}`); else ok++;
+            }
+            alert(`${ok} role(s) fixed.${failed.length ? '\n\nNot changed:\n' + failed.join('\n') : ''}`);
+            close(); openUserActivity();
+          };
+        }
         ov.querySelector('#uaWeekBtn').onclick = async () => {
           const box = ov.querySelector('#uaWeek');
           if (box.style.display === 'block') { box.style.display = 'none'; return; }

@@ -116,6 +116,8 @@
         if (window.userName && LOCAL_PROJECT_MODE) localStorage.setItem('cfg_user_name', window.userName);
         applyRole(); window.updateUserLabel();
         sbClient.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); });
+        // A password set or reset by an admin is temporary: ask for a personal one.
+        try { const { data: { user } } = await sbClient.auth.getUser(); if (user?.user_metadata?.must_change_password) window.openChangePassword(true); } catch (_) {}
       };
 
       function applyRole() {
@@ -162,6 +164,35 @@
         }
       }
 
+      // Every user can change their own password. When forced (temporary
+      // password from an admin) the dialog cannot be closed until it is changed.
+      window.openChangePassword = function (forced) {
+        if ($('pwModal')) return;
+        const ov = document.createElement('div'); ov.id = 'pwModal';
+        ov.style.cssText = 'position:fixed;inset:0;z-index:100060;background:rgba(15,23,42,.6);display:flex;align-items:center;justify-content:center;padding:16px;';
+        ov.innerHTML = `<form style="background:#fff;border-radius:12px;padding:22px;width:100%;max-width:360px;box-shadow:0 20px 50px rgba(0,0,0,.3);">
+          <h2 style="font-size:17px;margin:0 0 6px;">🔑 ${forced ? 'Create your own password' : 'Change password'}</h2>
+          <p style="font-size:12px;color:#64748B;margin:0 0 12px;">${forced ? 'You signed in with a temporary password. Choose a new one to continue.' : 'At least 8 characters.'}</p>
+          <input type="password" id="pwNew" autocomplete="new-password" placeholder="New password" minlength="8" required style="width:100%;padding:10px;border:1px solid #D1D5DB;border-radius:6px;margin-bottom:8px;box-sizing:border-box;">
+          <input type="password" id="pwNew2" autocomplete="new-password" placeholder="Repeat new password" minlength="8" required style="width:100%;padding:10px;border:1px solid #D1D5DB;border-radius:6px;margin-bottom:8px;box-sizing:border-box;">
+          <div id="pwMsg" style="min-height:18px;font-size:12px;color:#B91C1C;margin-bottom:8px;"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">${forced ? '' : '<button type="button" id="pwCancel" style="padding:8px 14px;border:1px solid #D1D5DB;background:#fff;border-radius:6px;cursor:pointer;">Cancel</button>'}
+          <button type="submit" id="pwSave" style="padding:8px 14px;border:none;background:#1E40AF;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">Save password</button></div></form>`;
+        document.body.appendChild(ov);
+        if ($('pwCancel')) $('pwCancel').onclick = () => ov.remove();
+        $('pwNew').focus();
+        ov.querySelector('form').onsubmit = async ev => {
+          ev.preventDefault();
+          const a = $('pwNew').value, b = $('pwNew2').value;
+          if (a.length < 8) { $('pwMsg').textContent = 'Use at least 8 characters.'; return; }
+          if (a !== b) { $('pwMsg').textContent = 'The two passwords do not match.'; return; }
+          $('pwSave').disabled = true; $('pwSave').textContent = 'Saving…';
+          const { error } = await sbClient.auth.updateUser({ password: a, data: { must_change_password: false } });
+          if (error) { $('pwSave').disabled = false; $('pwSave').textContent = 'Save password'; $('pwMsg').textContent = /different|same/i.test(error.message) ? 'Choose a password different from the temporary one.' : error.message; return; }
+          ov.remove(); if (typeof toast === 'function') toast('✅ Password changed');
+        };
+      };
+
       window.updateUserLabel = function () {
         const el = $('userLabel'); if (!el) return;
         const localAdmin = typeof LOCAL_PROJECT_MODE !== 'undefined' && LOCAL_PROJECT_MODE;
@@ -179,8 +210,9 @@
         }
         if (!window.authIsActive()) { el.innerHTML = `👤 ${esc(localStorage.getItem('cfg_user_name') || 'No name set')} · <a href="#" onclick="changeUserName();return false;" style="color:#1E40AF;">change</a>`; return; }
         const accessText = window.authNoProjectAccess ? ' <span style="color:#B45309;">(No project access)</span>' : ` <span style="color:#6B7280;">(${roleLabel(window.userRole)})</span>`;
-        el.innerHTML = `👤 ${esc(window.userName || window.authSessionUser?.email || 'Signed-in user')}${accessText} · <a href="#" id="lnkOut" style="color:#1E40AF;">Sign out</a>` + (window.userRole === 'admin' && !window.authNoProjectAccess ? ` · <a href="#" id="lnkUsers" style="color:#1E40AF;">👥 Users</a>` : '');
+        el.innerHTML = `👤 ${esc(window.userName || window.authSessionUser?.email || 'Signed-in user')}${accessText} · <a href="#" id="lnkPw" style="color:#1E40AF;">🔑 Password</a> · <a href="#" id="lnkOut" style="color:#1E40AF;">Sign out</a>` + (window.userRole === 'admin' && !window.authNoProjectAccess ? ` · <a href="#" id="lnkUsers" style="color:#1E40AF;">👥 Users</a>` : '');
         $('lnkOut').onclick = async e => { e.preventDefault(); await performSignOut(); };
+        if ($('lnkPw')) $('lnkPw').onclick = e => { e.preventDefault(); window.openChangePassword(false); };
         if ($('lnkUsers')) $('lnkUsers').onclick = e => { e.preventDefault(); openUsers(); };
       };
 

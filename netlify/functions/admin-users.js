@@ -85,7 +85,7 @@ exports.handler = async (event) => {
       if (password.length < 8) return json(400, { error: 'Password must have at least 8 characters' });
       if (!name) return json(400, { error: 'Name is required' });
       if (!ROLES.includes(role)) return json(400, { error: 'Invalid role' });
-      const created = await rest('/auth/v1/admin/users', { method: 'POST', headers: serviceHeaders(), body: JSON.stringify({ email, password, email_confirm: true, user_metadata: { name } }) });
+      const created = await rest('/auth/v1/admin/users', { method: 'POST', headers: serviceHeaders(), body: JSON.stringify({ email, password, email_confirm: true, user_metadata: { name, must_change_password: true } }) });
       if (!created.ok) return json(400, { error: (created.body && (created.body.msg || created.body.message || created.body.error_description)) || 'Could not create user' });
       const saved = await rest('/rest/v1/profiles', { method: 'POST', headers: serviceHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }), body: JSON.stringify({ user_id: created.body.id, name, role }) });
       if (!saved.ok) return json(500, { error: 'User created but the profile could not be saved.' });
@@ -131,7 +131,7 @@ exports.handler = async (event) => {
     if (action === 'resetPassword') {
       const password = String(req.password || '');
       if (password.length < 8) return json(400, { error: 'Password must have at least 8 characters' });
-      const updated = await rest(`/auth/v1/admin/users/${encodeURIComponent(req.id)}`, { method: 'PUT', headers: serviceHeaders(), body: JSON.stringify({ password }) });
+      const updated = await rest(`/auth/v1/admin/users/${encodeURIComponent(req.id)}`, { method: 'PUT', headers: serviceHeaders(), body: JSON.stringify({ password, user_metadata: { must_change_password: true } }) });
       return updated.ok ? json(200, { ok: true }) : json(500, { error: 'Could not reset password' });
     }
 
