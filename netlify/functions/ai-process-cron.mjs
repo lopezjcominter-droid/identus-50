@@ -10,4 +10,4 @@ export default async () => {
   }
   return new Response('ok');
 };
-export const config = { schedule: '*/10 * * * *' }; // every 10 min (every minute used up the Netlify credits)
+export const config = { schedule: '*/30 * * * *' }; // every 30 min; the queue stops at once when nothing is pending ("Read now" processes immediately)
