@@ -25,3 +25,8 @@ The app → **Admin Users** → **Add user**: name, email, a temporary password 
    - Sign in as a PM: open Project Setup and save.
    - Open the app in a private window without signing in: it must NOT show units.
 4. If something fails to save, run the **ROLLBACK** block at the end of the same file (remove the `-- ` at the start of each line) and tell Claude what failed.
+
+## Phase 2
+
+### D. Change log (point 9) — already applied on 2026-11-11
+`supabase/migrations/20261111_project_audit_log.sql` was run in the SQL Editor. It records every change made to units, progress, punch list, inspections, Official Final and Issues. To view the log, an Admin or PM clicks **🕘 Change Log** in the app.

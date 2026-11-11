@@ -1509,6 +1509,7 @@
           <button class="btn btn-secondary" onclick="exportExcel()">📊 Export Excel</button>
           <button class="btn btn-secondary" onclick="generateClientReport()">📄 Client Report</button>
           <button class="btn btn-secondary" onclick="document.getElementById('restoreInput').click()">📂 Restore</button>
+          <button class="btn btn-secondary" onclick="openChangeLog()">🕘 Change Log</button>
           <input type="file" id="restoreInput" accept=".json" style="display:none" onchange="restoreData(this)">
           <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear Data</button>
           <button class="btn btn-secondary" onclick="promptSetupPassword()" title="Configure project buildings and units (admin only)">⚙️ Project Setup</button>
@@ -10521,6 +10522,45 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     }
 
     // Closeout package: one printable PDF with everything about one unit.
+    // Change log: every insert/update/delete recorded by database triggers
+    // (table project_audit_log). Admin and PM only.
+    async function openChangeLog() {
+      if (window.authIsActive && window.authIsActive() && !['admin', 'pm'].includes(window.userRole)) { alert('Admins or PMs only.'); return; }
+      if (!sbClient || LOCAL_PROJECT_MODE || window.location.protocol === 'file:') { alert('The change log is available on the live site.'); return; }
+      const e = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      const names = { units: 'Unit', unit_systems_status: 'Progress', punch_list: 'Punch', inspection_records: 'Inspection', official_final_records: 'Official Final', field_issues: 'Issue' };
+      const ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100001;display:flex;align-items:center;justify-content:center;padding:12px;';
+      ov.innerHTML = `<div style="background:#fff;border-radius:12px;width:min(980px,100%);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3);">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #E5E7EB;flex-wrap:wrap;"><b style="font-size:16px;color:#0B5394;">🕘 Change Log</b>
+          <input type="search" id="clSearch" placeholder="Filter by unit, user or field…" autocomplete="off" data-lpignore="true" data-1p-ignore="true" style="flex:1;min-width:180px;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;">
+          <button type="button" class="btn btn-secondary" id="clCsv" style="font-size:12px;padding:6px 10px;">⬇ CSV</button>
+          <button type="button" class="btn btn-secondary" id="clClose" style="font-size:12px;padding:6px 10px;">✕</button></div>
+        <div id="clBody" style="overflow:auto;padding:0 18px 14px;font-size:12px;"><p style="color:#64748B;">Loading…</p></div></div>`;
+      document.body.appendChild(ov);
+      const close = () => ov.remove();
+      ov.querySelector('#clClose').onclick = close; ov.addEventListener('click', ev => { if (ev.target === ov) close(); });
+      const { data: rows, error } = await sbClient.from('project_audit_log').select('table_name,unit_label,action,changes,changed_by_name,changed_at').eq('project_id', PROJECT_ID).order('changed_at', { ascending: false }).limit(500);
+      const body = ov.querySelector('#clBody');
+      if (error) { body.innerHTML = `<p style="color:#B91C1C;">${/does not exist|relation/i.test(error.message) ? 'Run the change log SQL in Supabase first.' : e(error.message)}</p>`; return; }
+      const fmtVal = v => { const t = typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? '—'); return t.length > 60 ? t.slice(0, 60) + '…' : t; };
+      const summary = r => r.action === 'update' ? Object.entries(r.changes || {}).map(([k, [a, b]]) => `<b>${e(k)}</b>: ${e(fmtVal(a))} → ${e(fmtVal(b))}`).join('<br>') : (r.action === 'insert' ? 'Created' : 'Deleted');
+      const list = rows || [];
+      const text = r => `${r.unit_label || ''} ${r.changed_by_name || ''} ${names[r.table_name] || r.table_name} ${JSON.stringify(r.changes || {})}`.toLowerCase();
+      const draw = q => {
+        const shown = q ? list.filter(r => text(r).includes(q)) : list;
+        body.innerHTML = shown.length ? `<table style="width:100%;border-collapse:collapse;"><thead><tr style="position:sticky;top:0;background:#fff;"><th style="text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;">When</th><th style="text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;">Who</th><th style="text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;">What</th><th style="text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;">Unit</th><th style="text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;">Change</th></tr></thead><tbody>${shown.map(r => `<tr style="border-bottom:1px solid #F1F5F9;vertical-align:top;"><td style="padding:6px;white-space:nowrap;">${e(new Date(r.changed_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}</td><td style="padding:6px;">${e(r.changed_by_name || 'System')}</td><td style="padding:6px;">${e(names[r.table_name] || r.table_name)}</td><td style="padding:6px;font-weight:600;">${e(r.unit_label || '—')}</td><td style="padding:6px;color:#334155;">${summary(r)}</td></tr>`).join('')}</tbody></table><p style="color:#94A3B8;">Showing the latest ${shown.length} changes.</p>` : '<p style="color:#64748B;">No changes recorded yet.</p>';
+      };
+      draw('');
+      ov.querySelector('#clSearch').oninput = ev => draw(String(ev.target.value || '').toLowerCase().trim());
+      ov.querySelector('#clCsv').onclick = () => {
+        const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const csv = [['When', 'Who', 'What', 'Unit', 'Action', 'Changes'], ...list.map(r => [new Date(r.changed_at).toLocaleString('en-US'), r.changed_by_name || 'System', names[r.table_name] || r.table_name, r.unit_label || '', r.action, JSON.stringify(r.changes || {})])].map(row => row.map(esc).join(',')).join('\n');
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' })); a.download = `${getProjectName().replace(/\s+/g, '-')}-change-log.csv`; a.click();
+      };
+    }
+    window.openChangeLog = openChangeLog;
+
     async function generateCloseoutPdf(unit) {
       if (!unit) return;
       const w = window.open('', '_blank'); if (!w) { alert('Allow pop-ups to create the PDF.'); return; }
