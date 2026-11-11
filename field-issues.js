@@ -47,6 +47,7 @@
     if (done) { note(`✅ ${done} offline issue(s) synced`); rerender(); }
   }
   window.addEventListener('online', () => setTimeout(flushQueue, 1500));
+  setInterval(() => { if (navigator.onLine) flushQueue(); }, 60000);
 
   async function load(force) {
     if (loaded && !force) return;
@@ -112,9 +113,15 @@
     if (!picked.length && !keptPhotos.length) { note('Add at least one photo'); return; }
     const btn = document.getElementById('fiSaveBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     try {
-      if (!navigator.onLine && !editing) {
+      let uploaded = null;
+      if (navigator.onLine && picked.length) {
+        window.__photoUploadDeferred = false;
+        uploaded = await readAndCompressPhotos(picked, 0.7, userName());
+      }
+      const signalDropped = uploaded && uploaded.some(u => String(u).startsWith('data:'));
+      if ((!navigator.onLine || signalDropped) && !editing) {
         // No signal: keep the issue and its photos on this device until it reconnects.
-        const photos = await Promise.all(picked.map(f => compressImage(f, 0.7)));
+        const photos = uploaded || await Promise.all(picked.map(f => compressImage(f, 0.7)));
         const fields = { unit_id: u.id && /^[0-9a-f-]{36}$/i.test(u.id) ? u.id : null, apt: u.apt, building: u.building, floor: u.floor, issue_type: type, description: document.getElementById('fiDesc')?.value.trim() || null };
         const item = { id: 'pending-' + Date.now(), project_id: pid(), fields, photos, created_by_name: userName(), created_at: new Date().toISOString() };
         await qOp(st => st.put(item));
@@ -123,7 +130,8 @@
         picked = []; keptPhotos = []; rerender(); return;
       }
       if (editing && isPending(editing)) { note('This issue is waiting for signal to upload. Edit it after it syncs.'); return; }
-      const urls = picked.length ? await readAndCompressPhotos(picked, 0.7, userName()) : [];
+      if (signalDropped) throw new Error('the signal dropped while uploading photos; try again');
+      const urls = uploaded || (picked.length ? await readAndCompressPhotos(picked, 0.7, userName()) : []);
       const fields = { unit_id: u.id && /^[0-9a-f-]{36}$/i.test(u.id) ? u.id : null, apt: u.apt, building: u.building, floor: u.floor, issue_type: type, description: document.getElementById('fiDesc')?.value.trim() || null, photos: [...keptPhotos, ...urls] };
       if (editing) {
         const { data, error } = await client().from('field_issues').update(fields).eq('id', editing).select().single();

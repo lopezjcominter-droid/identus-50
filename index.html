@@ -9792,10 +9792,20 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     async function uploadToStorage(dataUrl, path, contentType) {
       if (!sbClient || window.location.protocol === 'file:' || LOCAL_PROJECT_MODE) return dataUrl;
       // Offline: keep the photo on the device; the offline queue uploads it later.
-      if (!navigator.onLine && String(dataUrl).startsWith('data:')) return dataUrl;
+      if (!navigator.onLine && String(dataUrl).startsWith('data:')) { window.__photoUploadDeferred = true; return dataUrl; }
       try {
         const blob = await (await fetch(dataUrl)).blob();
-        const { error } = await sbClient.storage.from(STORAGE_BUCKET).upload(path, blob, { contentType: contentType || blob.type || 'image/jpeg', upsert: true });
+        // A weak signal can leave an upload hanging: give up after 45 s.
+        const upload = sbClient.storage.from(STORAGE_BUCKET).upload(path, blob, { contentType: contentType || blob.type || 'image/jpeg', upsert: true });
+        let result;
+        try { result = await Promise.race([upload, new Promise((_, reject) => setTimeout(() => reject(new Error('upload timeout')), 45000))]); }
+        catch (netErr) {
+          // Connection dropped mid-upload: keep the photo on this device; the offline queue uploads it later.
+          if (String(dataUrl).startsWith('data:')) { console.warn('Photo kept on device:', netErr.message); window.__photoUploadDeferred = true; return dataUrl; }
+          throw netErr;
+        }
+        const { error } = result;
+        if (error && /fetch|network|load failed|timeout/i.test(String(error.message || '')) && String(dataUrl).startsWith('data:')) { window.__photoUploadDeferred = true; return dataUrl; }
         if (error) throw error;
         if (/\.jpe?g$/i.test(path) && String(dataUrl).startsWith('data:image')) makeThumbnail(dataUrl).then(t => t && sbClient.storage.from(STORAGE_BUCKET).upload(path.replace(/\.jpe?g$/i, '_t.jpg'), t, { contentType: 'image/jpeg', upsert: true })).catch(() => {});
         return sbClient.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
@@ -9876,6 +9886,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
 
       // Read and compress photos to medium quality (0.6) before storage
       let photoBase64 = [];
+      window.__photoUploadDeferred = false;
       try {
         photoBase64 = photoFiles.length > 0 ? await readAndCompressPhotos(photoFiles, 0.6, userBy) : [];
       } catch (error) {
@@ -9910,20 +9921,31 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         });
       }
 
-      if (unit && unit.id && sbClient && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
+      // Photos that could not be uploaded (signal dropped) stay on this device
+      // with the event, and the offline queue saves everything when it returns.
+      const keepOnDevice = () => {
+        if (typeof window.offlineEnqueue === 'function' && unit && unit.id) { window.offlineEnqueue(unit.id, system); return true; }
+        return false;
+      };
+      let savedOnDevice = false;
+      if (window.__photoUploadDeferred && keepOnDevice()) savedOnDevice = true;
+      if (!savedOnDevice && unit && unit.id && sbClient && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
         // Update only this unit/system (no delete-all + reinsert: faster and never leaves a system "not applicable")
         try { await syncUnitSystemSafe(unit, system); } catch (e) {
+          if ((!navigator.onLine || /fetch|network|load failed|timeout/i.test(String(e?.message || ''))) && keepOnDevice()) { savedOnDevice = true; }
+          else {
           console.error('⚠️ unit system sync failed:', e);
           restoreEventState();
           if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Event'; }
           if (typeof toast === 'function') toast(`Could not save the event: ${e.message || 'connection error'}`);
           return;
+          }
         }
-      } else {
+      } else if (!savedOnDevice) {
         await saveData();
       }
       // Sync to Supabase
-      if (unit && unit.id && sbClient && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
+      if (!savedOnDevice && unit && unit.id && sbClient && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
         try {
 
             // 1. Sync unit_systems_status
@@ -12560,6 +12582,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       const entryKey = e => e.unit_id + '|' + e.system_id;
       async function loadOutbox() { outbox = (await kvGet('outbox')) || []; updateBanner(); }
       async function saveOutbox() { await kvSet('outbox', outbox); updateBanner(); }
+      window.offlineEnqueue = (unitId, system) => enqueue(unitId, system);
       function enqueue(unitId, system) {
         const u = (data || []).find(x => x.id === unitId); const s = u && u.systems[system];
         if (!s) return;
@@ -12603,6 +12626,9 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         }
       }
       window.addEventListener('online', () => { updateBanner(); flushOutbox(); });
+      // A weak signal may never fire 'online': retry pending changes every minute.
+      setInterval(() => { if (outbox.length && navigator.onLine) flushOutbox(); }, 60000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && outbox.length && navigator.onLine) flushOutbox(); });
       window.addEventListener('offline', updateBanner);
 
       // Cache last good data; fall back to it when offline
