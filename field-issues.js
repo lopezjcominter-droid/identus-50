@@ -21,12 +21,41 @@
   const unitLabel = u => `${u.apt} · ${u.building}${u.floor ? ' · ' + u.floor : ''}`;
   const fmt = d => (d ? new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
 
+  // ---------- offline queue: new issues saved without signal ----------
+  const qdb = () => new Promise((res, rej) => { const r = indexedDB.open('identus_fi', 1); r.onupgradeneeded = () => r.result.createObjectStore('q', { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  const qAll = async () => { try { const db = await qdb(); return await new Promise(res => { const q = db.transaction('q').objectStore('q').getAll(); q.onsuccess = () => res(q.result || []); q.onerror = () => res([]); }); } catch (_) { return []; } };
+  const qOp = async (fn) => { try { const db = await qdb(); await new Promise(res => { const tx = db.transaction('q', 'readwrite'); fn(tx.objectStore('q')); tx.oncomplete = res; tx.onerror = res; }); } catch (_) {} };
+  const isPending = id => String(id).startsWith('pending-');
+  let flushing = false;
+  async function flushQueue() {
+    if (flushing || !navigator.onLine || !client() || !pid()) return;
+    const queued = await qAll(); if (!queued.length) return;
+    flushing = true; let done = 0;
+    try {
+      for (const item of queued) {
+        try {
+          const stamp = Date.now();
+          const urls = [];
+          for (const [n, ph] of item.photos.entries()) urls.push(String(ph).startsWith('data:') ? await uploadToStorage(ph, `photos/${pid()}/${stamp}_${n}_${Math.random().toString(36).slice(2, 7)}.jpg`, 'image/jpeg') : ph);
+          const { data, error } = await client().from('field_issues').insert({ ...item.fields, photos: urls, project_id: item.project_id, created_by_name: item.created_by_name, created_at: item.created_at }).select().single();
+          if (error) throw error;
+          await qOp(st => st.delete(item.id));
+          issues = issues.filter(x => x.id !== item.id); issues.unshift(data); done++;
+        } catch (e) { console.warn('fi flush', e); break; }
+      }
+    } finally { flushing = false; }
+    if (done) { note(`✅ ${done} offline issue(s) synced`); rerender(); }
+  }
+  window.addEventListener('online', () => setTimeout(flushQueue, 1500));
+
   async function load(force) {
     if (loaded && !force) return;
     const sb = client(); if (!sb || !pid()) return;
     const { data, error } = await sb.from('field_issues').select('*').eq('project_id', pid()).order('created_at', { ascending: false });
     if (error) { note(`❌ Issues: ${/relation|does not exist/i.test(error.message) ? 'run the field_issues SQL in Supabase first' : error.message}`); return; }
-    issues = data || []; loaded = true;
+    const queued = (await qAll()).filter(q => q.project_id === pid()).map(q => ({ ...q.fields, id: q.id, photos: q.photos, status: 'open', created_by_name: q.created_by_name, created_at: q.created_at, _pending: true }));
+    issues = [...queued, ...(data || [])]; loaded = true;
+    if (queued.length) setTimeout(flushQueue, 500);
   }
 
   // ---------- form ----------
@@ -83,6 +112,17 @@
     if (!picked.length && !keptPhotos.length) { note('Add at least one photo'); return; }
     const btn = document.getElementById('fiSaveBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     try {
+      if (!navigator.onLine && !editing) {
+        // No signal: keep the issue and its photos on this device until it reconnects.
+        const photos = await Promise.all(picked.map(f => compressImage(f, 0.7)));
+        const fields = { unit_id: u.id && /^[0-9a-f-]{36}$/i.test(u.id) ? u.id : null, apt: u.apt, building: u.building, floor: u.floor, issue_type: type, description: document.getElementById('fiDesc')?.value.trim() || null };
+        const item = { id: 'pending-' + Date.now(), project_id: pid(), fields, photos, created_by_name: userName(), created_at: new Date().toISOString() };
+        await qOp(st => st.put(item));
+        issues.unshift({ ...fields, id: item.id, photos, status: 'open', created_by_name: item.created_by_name, created_at: item.created_at, _pending: true });
+        note('📴 Saved on this device — it will upload when the signal returns');
+        picked = []; keptPhotos = []; rerender(); return;
+      }
+      if (editing && isPending(editing)) { note('This issue is waiting for signal to upload. Edit it after it syncs.'); return; }
       const urls = picked.length ? await readAndCompressPhotos(picked, 0.7, userName()) : [];
       const fields = { unit_id: u.id && /^[0-9a-f-]{36}$/i.test(u.id) ? u.id : null, apt: u.apt, building: u.building, floor: u.floor, issue_type: type, description: document.getElementById('fiDesc')?.value.trim() || null, photos: [...keptPhotos, ...urls] };
       if (editing) {
@@ -105,6 +145,7 @@
   // ---------- actions ----------
   window.fiResolve = async id => {
     const i = issues.find(x => x.id === id); if (!i) return;
+    if (isPending(id)) { note('Waiting for signal to upload this issue'); return; }
     const reopen = i.status === 'resolved';
     const patch = reopen ? { status: 'open', resolved_at: null, resolved_by_name: null } : { status: 'resolved', resolved_at: new Date().toISOString(), resolved_by_name: userName() };
     const { error } = await client().from('field_issues').update(patch).eq('id', id);
@@ -113,6 +154,7 @@
   };
   window.fiDelete = async id => {
     if (!confirm('Delete this issue and its record? This cannot be undone.')) return;
+    if (isPending(id)) { await qOp(st => st.delete(id)); issues = issues.filter(x => x.id !== id); rerender(); return; }
     const { error } = await client().from('field_issues').delete().eq('id', id);
     if (error) { note(`❌ ${error.message}`); return; }
     issues = issues.filter(x => x.id !== id); rerender();
@@ -184,10 +226,10 @@
   // the photos) and small actions. Keeps long lists short.
   const card = i => `<div class="fi-row ${i.status === 'resolved' ? 'fi-resolved' : ''}">
       <div class="fi-row-main">
-        <div class="fi-row-top"><strong>${esc(i.apt)}</strong><span class="fi-muted">${esc(i.building)}</span><span class="fi-chip">${esc(i.issue_type)}</span><span class="fi-status">${i.status === 'resolved' ? '✓ Resolved' : 'Open'}</span></div>
+        <div class="fi-row-top"><strong>${esc(i.apt)}</strong><span class="fi-muted">${esc(i.building)}</span><span class="fi-chip">${esc(i.issue_type)}</span><span class="fi-status">${i._pending ? '📴 Pending upload' : i.status === 'resolved' ? '✓ Resolved' : 'Open'}</span></div>
         <div class="fi-comment">${i.description ? esc(i.description) : '<span class="fi-muted">No comment</span>'}</div>
         <div class="fi-muted fi-small">${esc(i.created_by_name || '')} · ${fmt(i.created_at)}</div>
-        <div class="fi-thumbs" id="fiPh-${i.id}" hidden>${(i.photos || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
+        <div class="fi-thumbs" id="fiPh-${i.id}" hidden>${(i.photos || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(typeof storageThumbnailUrl === 'function' ? storageThumbnailUrl(u) : u)}" data-full="${esc(u)}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
       </div>
       <div class="fi-row-actions">
         ${(i.photos || []).length ? `<button type="button" class="fi-icon" title="Show photos" onclick="fiTogglePhotos('${i.id}')">📷 ${i.photos.length}</button>` : ''}
@@ -218,6 +260,8 @@
       <input type="text" class="form-input fi-search" id="fiSearch" placeholder="Search unit or type" autocomplete="off" data-lpignore="true" data-1p-ignore="true" value="${esc(search)}" oninput="fiSearchInput(this.value)">
       <button type="button" class="btn btn-secondary" onclick="fiExportPdf()">📄 Export PDF</button><button type="button" class="btn btn-secondary" onclick="fiExport()" title="Spreadsheet with photo links">⬇ Excel</button>
     </div>`;
+  // Used by the unit Closeout PDF.
+  window.fiIssuesForUnit = async unit => { try { await load(); } catch (_) {} return issues.filter(i => i.apt === String(unit.apt) && (!unit.building || !i.building || i.building === unit.building)); };
   window.fiFilter = f => { filter = f; rerender(); };
   window.fiSearchInput = v => { search = String(v || '').toLowerCase().trim(); const host = document.getElementById('fiList'); if (host) host.innerHTML = visible(currentUnit).map(card).join('') || '<div class="fi-empty">No issues.</div>'; };
 

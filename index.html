@@ -1548,8 +1548,8 @@
           <button onclick="switchMainTab('report', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📈 Report</button>
 <button onclick="switchMainTab('inspections', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">⚡ Inspections</button>
           <button onclick="switchMainTab('quantity', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📐 Quantity Control</button>
-          <button onclick="switchMainTab('official', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">🏁 Official Final</button>
           <button onclick="switchMainTab('issues', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📷 Issues</button>
+          <button onclick="switchMainTab('official', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">🏁 Official Final</button>
         </div>
 
         <div id="dashboardTab">
@@ -1586,6 +1586,12 @@
               <div class="chart-title">Progress Systems</div>
               <canvas id="progressDistChart"></canvas>
             </div>
+          </div>
+
+          <div id="finalReadyPanel" class="chart-container" style="display:none;margin-bottom:24px;border-left:4px solid #059669;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><div class="chart-title">Ready for Official Final</div><div id="finalReadyFilter" style="display:flex;gap:6px;"></div></div>
+            <div style="font-size:12px;color:#64748B;margin:6px 0 12px;">Units ready to request the Official Final, and what the closest units still need.</div>
+            <div id="finalReadyList" style="max-height:420px;overflow:auto;"></div>
           </div>
 
           <div id="inspectionRequiredPanel" class="chart-container" style="display:none;margin-bottom:24px;border-left:4px solid #F59E0B;">
@@ -1998,6 +2004,7 @@
     <div class="modal-content">
       <div class="modal-header">
         <h2 id="detailsTitle">Unit Details</h2>
+        <button type="button" class="btn btn-secondary" style="margin-left:auto;margin-right:8px;font-size:12px;padding:6px 10px;white-space:nowrap;" onclick="generateCloseoutPdf(currentDetailsUnit)">📦 Closeout PDF</button>
         <button class="modal-close" type="button" onclick="closeDetailsModal()">✕</button>
       </div>
 
@@ -8059,7 +8066,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       }
       const clearChoice = await showClearDataConfirm();
       if (clearChoice === 'cancel') return;
-      if (clearChoice === 'backup') backupData();
+      if (clearChoice === 'backup') await backupData();
       {
         const localPreview = LOCAL_PROJECT_MODE || window.location.protocol === 'file:';
         if (localPreview) {
@@ -10518,6 +10525,61 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       if (typeof toast === 'function') toast(`Official final inspection ${form.result.toLowerCase()} and saved`);
     }
 
+    // Closeout package: one printable PDF with everything about one unit.
+    async function generateCloseoutPdf(unit) {
+      if (!unit) return;
+      const w = window.open('', '_blank'); if (!w) { alert('Allow pop-ups to create the PDF.'); return; }
+      w.document.write('<p style="font-family:sans-serif;padding:30px">Preparing closeout package…</p>');
+      const e = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      const d = v => { const t = Date.parse(v || ''); return t ? new Date(t).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'; };
+      try { await loadUnitSystemEvents(unit); } catch (_) {}
+      // Inspections of this unit, latest per type, with their checklist items.
+      let records = [];
+      try { if (typeof inspLoadRemoteModuleDataOnce === 'function') await inspLoadRemoteModuleDataOnce(); records = (inspGetInspections() || []).filter(r => String(r.apt) === String(unit.apt) && (!r.building || String(r.building) === String(unit.building))); await Promise.all(records.map(r => inspEnsureRecordItems(r).catch(() => r))); } catch (_) {}
+      records.sort((a, b) => Date.parse(a.date || 0) - Date.parse(b.date || 0));
+      const types = (typeof INSP_INSPECTION_TYPES !== 'undefined' ? INSP_INSPECTION_TYPES : []).filter(t => typeof inspIsInspectionTypeApplicableForUnit !== 'function' || inspIsInspectionTypeApplicableForUnit(t, unit));
+      let official = { current: null, history: [] };
+      try { if (typeof hydrateOfficialRemote === 'function') await hydrateOfficialRemote(); official = officialFinalEntry(unit); } catch (_) {}
+      const issues = typeof window.fiIssuesForUnit === 'function' ? await window.fiIssuesForUnit(unit) : [];
+      const punches = (Array.isArray(punchlist) ? punchlist : []).filter(p => String(p.location) === String(unit.apt) && (!p.building || !unit.building || String(p.building) === String(unit.building)));
+      let missing = [];
+      try { missing = typeof window.finalReadinessFor === 'function' ? window.finalReadinessFor(unit) : []; } catch (_) {}
+      const project = getProjectName(), address = getProjectAddress();
+      const systems = Object.entries(unit.systems || {});
+      const done100 = s => { const ev = (s.events || []).filter(x => Number(x.progress) >= 100).sort((a, b) => Date.parse(a.timestamp || 0) - Date.parse(b.timestamp || 0)); return ev.length ? d(ev[ev.length - 1].timestamp) : '—'; };
+      const pill = (t, c) => `<span class="pill" style="background:${c}1a;color:${c}">${e(t)}</span>`;
+      const resColor = r => /pass|approved/i.test(r || '') ? '#059669' : /fail|reject/i.test(r || '') ? '#DC2626' : '#64748B';
+      const avg = systems.length ? systems.reduce((a, [, s]) => a + (Number(s.progress) || 0), 0) / systems.length : 0;
+      const photoGrid = urls => urls.length ? `<div class="ph">${urls.map(u => `<img src="${e(u)}">`).join('')}</div>` : '';
+      const off = official.current;
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>Closeout ${e(unit.apt)} - ${e(project)}</title><style>
+        body{font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#0F172A;margin:0;padding:28px;font-size:12px}
+        .cover{border-bottom:3px solid #0B5394;padding-bottom:14px;margin-bottom:18px;display:flex;justify-content:space-between;gap:20px}
+        h1{margin:0;font-size:24px;color:#0B5394}h2{font-size:15px;color:#0B5394;border-bottom:1px solid #CBD5E1;padding-bottom:4px;margin:22px 0 8px}
+        .muted{color:#64748B}.kpis{display:flex;gap:10px;margin:10px 0}.kpi{flex:1;border:1px solid #E2E8F0;border-radius:8px;padding:10px;text-align:center}.kpi b{display:block;font-size:20px}
+        table{width:100%;border-collapse:collapse}th{background:#0B5394;color:#fff;text-align:left;padding:6px;font-size:11px}td{padding:6px;border-bottom:1px solid #E2E8F0;vertical-align:top}
+        .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-weight:700;font-size:11px}
+        .ph{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}.ph img{width:150px;height:112px;object-fit:cover;border-radius:4px;border:1px solid #E2E8F0}
+        .fail{color:#991B1B}.sig{display:flex;gap:40px;margin-top:40px}.sig div{flex:1;border-top:1px solid #0F172A;padding-top:4px}
+        section{break-inside:avoid-page}@media print{body{padding:0}.noprint{display:none}}
+        @page{margin:14mm}</style></head><body>
+        <div class="noprint" style="text-align:right;margin-bottom:10px"><button onclick="print()" style="padding:8px 16px;background:#0B5394;color:#fff;border:0;border-radius:6px;font-weight:700">Save as PDF / Print</button></div>
+        <div class="cover"><div><div class="muted" style="font-weight:700;letter-spacing:1px">UNIT CLOSEOUT PACKAGE</div><h1>Unit ${e(unit.apt)}</h1><div>${e(unit.building)}${unit.floor ? ' · ' + e(unit.floor) : ''}</div><div class="muted">${e(project)}${address ? ' · ' + e(address) : ''}</div></div>
+        <div style="text-align:right"><div class="muted">Generated</div><b>${d(new Date().toISOString())}</b><div style="margin-top:8px">${missing.length ? pill('PENDING ITEMS', '#D97706') : pill('READY FOR CLOSEOUT', '#059669')}</div></div></div>
+        <div class="kpis"><div class="kpi"><b>${Math.round(avg)}%</b>Overall progress</div><div class="kpi"><b>${records.filter(r => !(r.failedCount > 0)).length}/${records.length}</b>Inspections passed</div><div class="kpi"><b style="color:${resColor(off?.result)}">${e(off?.result || 'Not scheduled')}</b>Official Final</div><div class="kpi"><b>${issues.filter(i => i.status !== 'resolved').length + punches.filter(p => p.status !== 'Closed').length}</b>Open items</div></div>
+        ${missing.length ? `<div style="background:#FEF3C7;border-radius:6px;padding:8px 10px;margin-top:6px"><b>Pending:</b> ${missing.map(m => e(m.label)).join(' · ')}</div>` : ''}
+        <section><h2>1. Progress by system</h2><table><tr><th>System</th><th>Progress</th><th>Status</th><th>Completed on</th><th>Updates</th></tr>${systems.map(([n, s]) => { const p = Number(s.progress) || 0; return `<tr><td><b>${e(n)}</b></td><td>${p}%</td><td>${pill(p >= 100 ? 'Completed' : p > 0 ? 'In Progress' : 'Not Started', p >= 100 ? '#059669' : p > 0 ? '#2563EB' : '#DC2626')}</td><td>${p >= 100 ? done100(s) : '—'}</td><td>${(s.events || []).length}</td></tr>`; }).join('')}</table></section>
+        <section><h2>2. Quality inspections</h2>${types.length ? `<table><tr><th>Inspection</th><th>Result</th><th>Date</th><th>Inspector</th><th>Rev.</th></tr>${types.map(t => { const rs = records.filter(r => r.typeId === t.id); const r = rs[rs.length - 1]; return `<tr><td><b>${e(t.name)}</b></td><td>${r ? (r.failedCount > 0 ? pill(`FAILED (${r.failedCount})`, '#DC2626') : pill('PASSED', '#059669')) : pill('PENDING', '#D97706')}</td><td>${r ? d(r.date) : '—'}</td><td>${r ? e(r.inspector) : '—'}</td><td>${r ? rs.length : '—'}</td></tr>${r && r.failedCount > 0 ? `<tr><td colspan="5" class="fail">${(r.items || []).filter(i => i.status === 'FAIL').map(i => `• ${e(i.description)}${i.comment ? ' — ' + e(i.comment) : ''}`).join('<br>')}</td></tr>` : ''}`; }).join('')}</table>` : '<p class="muted">No inspections apply.</p>'}</section>
+        <section><h2>3. Official Final inspection</h2>${off ? `<table><tr><th>Result</th><th>Date</th><th>Inspector</th><th>Agency</th><th>Certificate</th></tr><tr><td>${pill(off.result || '—', resColor(off.result))}</td><td>${d(off.date)}</td><td>${e(off.inspector || '—')}</td><td>${e(off.company || '—')}</td><td>${e(off.certificate || '—')}</td></tr></table>${off.comments ? `<p><b>Comments:</b> ${e(off.comments)}</p>` : ''}${off.reportUrl ? `<p><b>Report:</b> <a href="${e(off.reportUrl)}">${e(off.reportName || 'Open report')}</a></p>` : ''}${photoGrid(off.photoUrls || [])}` : '<p class="muted">Not recorded yet.</p>'}</section>
+        <section><h2>4. Punch list</h2>${punches.length ? `<table><tr><th>Description</th><th>Priority</th><th>Status</th><th>Closed</th></tr>${punches.map(p => `<tr><td>${e(p.description)}</td><td>${e(p.priority || '')}</td><td>${pill(p.status || 'Open', p.status === 'Closed' ? '#059669' : '#D97706')}</td><td>${p.closedAt ? d(p.closedAt) + (p.closedBy ? ' · ' + e(p.closedBy) : '') : '—'}</td></tr>`).join('')}</table>` : '<p class="muted">No punch items.</p>'}</section>
+        <section><h2>5. Field issues</h2>${issues.length ? `<table><tr><th>Type</th><th>Comment</th><th>Reported</th><th>Status</th></tr>${issues.map(i => `<tr><td>${e(i.issue_type)}</td><td>${e(i.description || '')}</td><td>${d(i.created_at)} · ${e(i.created_by_name || '')}</td><td>${pill(i.status === 'resolved' ? 'Resolved' : 'Open', i.status === 'resolved' ? '#059669' : '#D97706')}</td></tr>`).join('')}</table>` : '<p class="muted">No field issues.</p>'}</section>
+        <section><h2>6. Photo record</h2>${systems.map(([n, s]) => { const urls = (s.events || []).flatMap(x => x.images || []).filter(u => u && !String(u).startsWith('data:')).slice(-8); return urls.length ? `<div style="break-inside:avoid"><b>${e(n)}</b>${photoGrid(urls)}</div>` : ''; }).join('') || '<p class="muted">No photos.</p>'}</section>
+        <div class="sig"><div>QA/QC Manager — name, signature, date</div><div>General Contractor — name, signature, date</div></div>
+        </body></html>`;
+      w.document.open(); w.document.write(html); w.document.close();
+    }
+    window.generateCloseoutPdf = generateCloseoutPdf;
+
     async function openDetailsModal(apt, building, floor, evt) {
       evt.stopPropagation();
       const unit = data.find(u => u.apt === apt && u.building === building && u.floor === floor);
@@ -11049,10 +11111,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       try {
         const url = new URL(value, window.location.href);
         const marker = '/storage/v1/object/public/';
-        if (!url.pathname.includes(marker)) return value;
-        url.pathname = url.pathname.replace(marker, '/storage/v1/render/image/public/');
-        url.searchParams.set('width', String(width));
-        url.searchParams.set('quality', String(quality));
+        if (!url.pathname.includes(marker) || !/\.jpe?g$/i.test(url.pathname) || /_t\.jpg$/i.test(url.pathname)) return value;
+        url.pathname = url.pathname.replace(/\.jpe?g$/i, '_t.jpg');
         return url.toString();
       } catch (_) {
         return value;
@@ -11095,12 +11155,23 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       }
     }
     let storageOk = true;
+    // Small copy (360px) used by lists and grids; the full photo opens on tap.
+    function makeThumbnail(dataUrl, max = 360) {
+      return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => { const k = Math.min(1, max / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); c.toBlob(b => resolve(b), 'image/jpeg', 0.7); };
+        img.onerror = () => resolve(null); img.src = dataUrl;
+      });
+    }
     async function uploadToStorage(dataUrl, path, contentType) {
       if (!sbClient || window.location.protocol === 'file:' || LOCAL_PROJECT_MODE) return dataUrl;
+      // Offline: keep the photo on the device; the offline queue uploads it later.
+      if (!navigator.onLine && String(dataUrl).startsWith('data:')) return dataUrl;
       try {
         const blob = await (await fetch(dataUrl)).blob();
         const { error } = await sbClient.storage.from(STORAGE_BUCKET).upload(path, blob, { contentType: contentType || blob.type || 'image/jpeg', upsert: true });
         if (error) throw error;
+        if (/\.jpe?g$/i.test(path) && String(dataUrl).startsWith('data:image')) makeThumbnail(dataUrl).then(t => t && sbClient.storage.from(STORAGE_BUCKET).upload(path.replace(/\.jpe?g$/i, '_t.jpg'), t, { contentType: 'image/jpeg', upsert: true })).catch(() => {});
         return sbClient.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
       } catch (e) { storageOk = false; throw e; }
     }
@@ -11347,7 +11418,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       form.innerHTML = SYSTEMS.map(sys => `
         <div class="form-group">
           <label class="form-label">${systemDisplayName(sys)}</label>
-          ${typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(sys) ? '<div style="padding:8px 10px;border:1px solid #BFDBFE;border-radius:6px;background:#EFF6FF;color:#1E3A8A;font-size:11px;">Managed in Quantity Control: takeoff vs installed quantities.</div>' : `<div class="form-row"><input type="number" class="form-input" placeholder="%" min="0" max="100" value="0" data-system="${sys}" data-field="progress" onchange="validateProgress(this)"><select class="form-select" data-system="${sys}" data-field="status"><option value="Behind">Behind</option><option value="At Risk">At Risk</option><option value="In Progress" selected>In Progress</option><option value="Completed">Completed</option></select></div>`}
+          ${typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(sys) ? '<div style="padding:8px 10px;border:1px solid #BFDBFE;border-radius:6px;background:#EFF6FF;color:#1E3A8A;font-size:11px;">Managed in Quantity Control: takeoff vs installed quantities.</div>' : `<div class="form-row"><input type="number" class="form-input" placeholder="%" min="0" max="100" value="0" data-system="${sys}" data-field="progress" onchange="validateProgress(this)" oninput="const st=this.parentElement.querySelector('[data-field=status]'); if(st) st.value=progressToStatus(Math.min(100,Math.max(0,parseInt(this.value)||0)))"><select class="form-select" data-system="${sys}" data-field="status" disabled title="Set automatically from %"><option value="Behind" selected>Not Started (0%)</option><option value="At Risk">In Progress (1–99%)</option><option value="In Progress">In Progress (1–99%)</option><option value="Completed">Completed (100%)</option></select></div>`}
         </div>
       `).join('');
     }
@@ -12410,6 +12481,31 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     }
 
     // ===== Daily automatic backup (goes to the Storage bucket; embedded photos are left out to keep it small) =====
+    // Snapshot of the cloud modules (inspections, Official Final, Quantity
+    // Control, Issues) so a backup file holds the whole project, not only units.
+    const BACKUP_PROJECT_TABLES = ['inspection_records','inspection_drafts','inspection_required_tasks','official_final_records','official_inspection_requests','quantity_templates','quantity_floor_plans','quantity_unit_states','quantity_installed_marks','quantity_revisions','field_issues'];
+    async function backupCloudTables() {
+      const out = {}; if (!sbClient || LOCAL_PROJECT_MODE || window.location.protocol === 'file:') return out;
+      const pageAll = async (q) => { const rows = []; for (let f = 0; ; f += 1000) { const { data: d, error } = await q().range(f, f + 999); if (error) throw error; rows.push(...(d || [])); if (!d || d.length < 1000) break; } return rows; };
+      await Promise.all(BACKUP_PROJECT_TABLES.map(async t => { try { out[t] = await pageAll(() => sbClient.from(t).select('*').eq('project_id', PROJECT_ID)); } catch (e) { console.warn('backup skip', t, e.message); } }));
+      const recIds = (out.inspection_records || []).map(r => r.id).filter(Boolean);
+      const unitIds = (data || []).map(u => u.id).filter(Boolean);
+      const chunked = async (t, col, ids) => { const rows = []; for (let i = 0; i < ids.length; i += 200) rows.push(...await pageAll(() => sbClient.from(t).select('*').in(col, ids.slice(i, i + 200)))); return rows; };
+      try { out.inspection_record_items = await chunked('inspection_record_items', 'inspection_record_id', recIds); } catch (e) { console.warn('backup skip items', e.message); }
+      try { out.inspection_events = await chunked('inspection_events', 'unit_id', unitIds); } catch (e) { console.warn('backup skip events', e.message); }
+      return out;
+    }
+    async function restoreCloudTables(tables) {
+      if (!tables || !sbClient || LOCAL_PROJECT_MODE || window.location.protocol === 'file:') return [];
+      const order = ['inspection_records','inspection_record_items','inspection_events','inspection_drafts','inspection_required_tasks','official_final_records','official_inspection_requests','quantity_templates','quantity_floor_plans','quantity_unit_states','quantity_revisions','quantity_installed_marks','field_issues'];
+      const failed = [];
+      for (const t of order) {
+        const rows = tables[t]; if (!Array.isArray(rows) || !rows.length) continue;
+        for (let i = 0; i < rows.length; i += 500) { const { error } = await sbClient.from(t).upsert(rows.slice(i, i + 500)); if (error) { console.warn('restore', t, error.message); failed.push(t); break; } }
+      }
+      return failed;
+    }
+
     async function autoBackupDaily() {
       try {
         if (window.authIsActive && window.authIsActive() && window.userRole !== 'admin') return;
@@ -12417,7 +12513,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         if (localStorage.getItem('cfg_last_auto_backup') === today) return;
         if (!sbClient || !data || data.length === 0) return;
         const strip = u => ({ ...u, systems: Object.fromEntries(Object.entries(u.systems).map(([k, s]) => [k, { ...s, events: (s.events || []).map(e => ({ ...e, images: (e.images || []).filter(i => !String(i).startsWith('data:')) })) }])) });
-        const backup = { version: 1, exportedAt: new Date().toISOString(), units: data.map(strip), punchlist: (typeof punchlist !== 'undefined' ? punchlist : []) };
+        const backup = { version: 2, exportedAt: new Date().toISOString(), units: data.map(strip), punchlist: (typeof punchlist !== 'undefined' ? punchlist : []), cloudTables: await backupCloudTables() };
         const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
         const { error } = await sbClient.storage.from(STORAGE_BUCKET).upload(`backups/${PROJECT_ID}/${today}.json`, blob, { contentType: 'application/json', upsert: true });
         if (!error) { localStorage.setItem('cfg_last_auto_backup', today); console.log('✅ Daily backup saved'); }
@@ -12441,19 +12537,105 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     }
     window.addEventListener('load', () => setTimeout(scheduleDailyBackup, 30000));
 
-    function exportExcel() {
+    // Professional Excel report (.xlsx): Summary, Progress matrix and Detail,
+    // with styled headers, colors by progress, frozen headers and filters.
+    async function exportExcel() {
+      if (!window.ExcelJS) {
+        try {
+          await new Promise((resolve, reject) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'; sc.onload = resolve; sc.onerror = reject; document.head.appendChild(sc); });
+        } catch (_) { return exportExcelCsv(); }
+      }
+      const project = getProjectName(); const address = getProjectAddress ? getProjectAddress() : '';
+      const today = new Date();
+      const wb = new ExcelJS.Workbook(); wb.creator = 'Identus 50 QA/QC'; wb.created = today;
+      const NAVY = 'FF0B5394', LIGHT = 'FFF1F5F9', WHITE = 'FFFFFFFF';
+      const fillFor = p => p >= 100 ? 'FFD1FAE5' : p > 0 ? 'FFDBEAFE' : 'FFFEE2E2';
+      const fontFor = p => p >= 100 ? 'FF065F46' : p > 0 ? 'FF1E3A8A' : 'FF991B1B';
+      const statusOf = p => p >= 100 ? 'Completed' : p > 0 ? 'In Progress' : 'Not Started';
+      const border = { top: { style: 'thin', color: { argb: 'FFE2E8F0' } }, left: { style: 'thin', color: { argb: 'FFE2E8F0' } }, bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } }, right: { style: 'thin', color: { argb: 'FFE2E8F0' } } };
+      const title = (ws, text, cols) => {
+        ws.mergeCells(1, 1, 1, cols); const t = ws.getCell(1, 1); t.value = project; t.font = { bold: true, size: 16, color: { argb: NAVY } };
+        ws.mergeCells(2, 1, 2, cols); const s2 = ws.getCell(2, 1); s2.value = `${text} · ${address ? address + ' · ' : ''}${today.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`; s2.font = { color: { argb: 'FF475569' } };
+      };
+      const header = (row) => row.eachCell(c => { c.font = { bold: true, color: { argb: WHITE } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }; c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; c.border = border; });
+      const systems = SYSTEMS.filter(sys => data.some(u => u.systems && u.systems[sys]));
+
+      // 1) Summary
+      const sum = wb.addWorksheet('Summary', { views: [{ showGridLines: false }] });
+      title(sum, 'QA/QC Progress Report', 4);
+      let tp = 0, tn = 0; const units = { done: 0, prog: 0, none: 0 }; const byB = {}, bySys = {};
+      data.forEach(u => {
+        const vals = Object.values(u.systems || {}).map(x => Number(x.progress) || 0);
+        const avg = vals.length ? vals.reduce((a, v) => a + v, 0) / vals.length : 0;
+        units[avg >= 100 ? 'done' : vals.some(v => v > 0) ? 'prog' : 'none']++;
+        const b = byB[u.building] = byB[u.building] || { n: 0, tp: 0, tn: 0 }; b.n++;
+        Object.entries(u.systems || {}).forEach(([sys, x]) => { const p = Number(x.progress) || 0; tp += p; tn++; b.tp += p; b.tn++; const y = bySys[sys] = bySys[sys] || { tp: 0, tn: 0, done: 0 }; y.tp += p; y.tn++; if (p >= 100) y.done++; });
+      });
+      const pct = (a, n) => n ? Math.round((a / n) * 10) / 10 : 0;
+      sum.addRow([]);
+      const kpiRow = sum.addRow(['Overall progress', 'Units', 'Completed', 'In progress']); header(kpiRow);
+      const kv = sum.addRow([pct(tp, tn) / 100, data.length, units.done, units.prog]);
+      kv.eachCell(c => { c.font = { bold: true, size: 14 }; c.alignment = { horizontal: 'center' }; c.border = border; }); kv.getCell(1).numFmt = '0.0%';
+      sum.addRow([]);
+      header(sum.addRow(['Building', 'Units', 'Progress', '']));
+      Object.entries(byB).forEach(([k, v]) => { const r = sum.addRow([k, v.n, pct(v.tp, v.tn) / 100]); r.getCell(3).numFmt = '0.0%'; r.eachCell(c => c.border = border); });
+      sum.addRow([]);
+      header(sum.addRow(['System', 'Progress', 'Units completed', 'Units']));
+      systems.forEach(sys => { const v = bySys[sys] || { tp: 0, tn: 0, done: 0 }; const r = sum.addRow([sys, pct(v.tp, v.tn) / 100, v.done, v.tn]); r.getCell(2).numFmt = '0.0%'; r.eachCell(c => c.border = border); });
+      sum.columns = [{ width: 30 }, { width: 16 }, { width: 18 }, { width: 14 }];
+
+      // 2) Progress matrix: one row per unit, one column per system
+      const mx = wb.addWorksheet('Progress by unit', { views: [{ state: 'frozen', xSplit: 3, ySplit: 4 }] });
+      const cols = ['Unit', 'Building', 'Floor', ...systems, 'Average'];
+      title(mx, 'Progress by unit and system', cols.length);
+      mx.addRow([]);
+      header(mx.addRow(cols));
+      data.slice().sort((a, b) => String(a.building).localeCompare(String(b.building)) || String(a.apt).localeCompare(String(b.apt), undefined, { numeric: true })).forEach(u => {
+        const vals = systems.map(sys => (u.systems && u.systems[sys]) ? (Number(u.systems[sys].progress) || 0) : null);
+        const have = vals.filter(v => v != null);
+        const avg = have.length ? have.reduce((a, v) => a + v, 0) / have.length : 0;
+        const r = mx.addRow([u.apt, u.building, u.floor, ...vals.map(v => v == null ? '—' : v / 100), avg / 100]);
+        r.eachCell((c, i) => {
+          c.border = border;
+          if (i > 3 && typeof c.value === 'number') { const p = c.value * 100; c.numFmt = '0%'; c.alignment = { horizontal: 'center' }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillFor(p) } }; c.font = { color: { argb: fontFor(p) }, bold: i === cols.length }; }
+          if (i > 3 && c.value === '—') { c.alignment = { horizontal: 'center' }; c.font = { color: { argb: 'FF94A3B8' } }; }
+        });
+      });
+      mx.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: cols.length } };
+      mx.columns = cols.map((_, i) => ({ width: i < 3 ? 14 : 13 }));
+      mx.getRow(4).height = 32;
+
+      // 3) Detail: last update per unit/system
+      const dt = wb.addWorksheet('Detail', { views: [{ state: 'frozen', ySplit: 4 }] });
+      const dcols = ['Unit', 'Building', 'Floor', 'System', 'Progress', 'Status', 'Photos', 'Last update', 'Updated by'];
+      title(dt, 'Detail by unit and system', dcols.length);
+      dt.addRow([]); header(dt.addRow(dcols));
+      data.forEach(u => Object.entries(u.systems || {}).forEach(([sys, x]) => {
+        const ev = x.events || []; const last = ev.length ? ev[ev.length - 1] : null; const p = Number(x.progress) || 0;
+        const r = dt.addRow([u.apt, u.building, u.floor, sys, p / 100, statusOf(p), Number(x.photos) || 0, last ? new Date(last.timestamp) : null, last && last.by ? last.by : '']);
+        r.getCell(5).numFmt = '0%'; r.getCell(8).numFmt = 'mmm d, yyyy h:mm AM/PM';
+        r.getCell(6).font = { bold: true, color: { argb: fontFor(p) } }; r.getCell(6).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillFor(p) } };
+        r.eachCell(c => { c.border = border; });
+      }));
+      dt.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: dcols.length } };
+      dt.columns = [{ width: 12 }, { width: 14 }, { width: 12 }, { width: 26 }, { width: 11 }, { width: 14 }, { width: 9 }, { width: 22 }, { width: 18 }];
+
+      [sum, mx, dt].forEach(ws => { ws.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } }; ws.headerFooter = { oddFooter: `&L${project}&RPage &P of &N` }; });
+      const buf = await wb.xlsx.writeBuffer();
+      const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const a = document.createElement('a'); a.href = url; a.download = `${project.replace(/\s+/g, '-')}-QAQC-progress-${today.toISOString().split('T')[0]}.xlsx`; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+    // Fallback if the Excel library cannot load (offline): simple CSV.
+    function exportExcelCsv() {
       const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
       const rows = [['Unit', 'Building', 'Floor', 'System', 'Progress %', 'Status', 'Photos', 'Last update', 'Updated by']];
       data.forEach(u => Object.entries(u.systems).forEach(([sys, s]) => {
-        const ev = (s.events || []);
-        const last = ev.length ? ev[ev.length - 1] : null;
+        const ev = (s.events || []); const last = ev.length ? ev[ev.length - 1] : null;
         rows.push([u.apt, u.building, u.floor, sys, s.progress, s.status, s.photos || 0, last ? new Date(last.timestamp).toLocaleString('en-US') : '', last && last.by ? last.by : '']);
       }));
-      const csv = '\ufeff' + rows.map(r => r.map(esc).join(',')).join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `${getProjectName().replace(/\s+/g, '-')}-progress-${new Date().toISOString().split('T')[0]}.csv`; a.click();
+      const url = URL.createObjectURL(new Blob(['﻿' + rows.map(r => r.map(esc).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' }));
+      const a = document.createElement('a'); a.href = url; a.download = `${getProjectName().replace(/\s+/g, '-')}-progress-${new Date().toISOString().split('T')[0]}.csv`; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
     }
 
@@ -12494,14 +12676,14 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       w.document.open(); w.document.write(html); w.document.close();
     }
 
-    function backupData() {
+    async function backupData() {
       if (window.authIsActive && window.authIsActive() && window.userRole !== 'admin') { alert('Only administrators can create backups.'); return; }
       const localPreview = LOCAL_PROJECT_MODE || window.location.protocol === 'file:';
       const localBackupValue = key => localPreview ? JSON.parse(localStorage.getItem(key) || 'null') : null;
       const inspectionDrafts = {};
       if (localPreview) Object.keys(localStorage).filter(key => key.startsWith('inspection_draft_')).forEach(key => { inspectionDrafts[key] = localStorage.getItem(key); });
       const backup = {
-        version: 1,
+        version: 2,
         exportedAt: new Date().toISOString(),
         units: data,
         punchlist: punchlist,
@@ -12513,7 +12695,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         quantityControl: localBackupValue('quantity_control_v1') || {},
         inspectionDrafts,
         deletedPunchIds: localPreview ? JSON.parse(localStorage.getItem('local_deleted_punch_ids') || '[]') : [],
-        auditLog: localPreview ? JSON.parse(localStorage.getItem('local_audit_log') || '[]') : []
+        auditLog: localPreview ? JSON.parse(localStorage.getItem('local_audit_log') || '[]') : [],
+        cloudTables: await backupCloudTables()
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -12563,6 +12746,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:') {
             await syncDataToSupabase();
             await savePunchlist();
+            const failed = await restoreCloudTables(backup.cloudTables);
+            if (failed.length) alert('Some modules could not be restored: ' + failed.join(', '));
           }
           if (typeof addLocalAudit === 'function') addLocalAudit('Backup restored', { units: data.length, punchItems: punchlist.length });
           alert('✅ Restore complete!');
@@ -13839,7 +14024,9 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         // Never leave "Saving…" forever: after 2 minutes release the button and say so.
         let guard; const stuck = new Promise(res => { guard = setTimeout(() => res('stuck'), 120000); });
         try {
-          const r = await Promise.race([o.apply(this, arguments), stuck]);
+          let r;
+          try { r = await Promise.race([o.apply(this, arguments), stuck]); }
+          catch (err) { if (!navigator.onLine && uid) { enqueue(uid, sys); return; } throw err; }
           if (r === 'stuck') { const b = document.querySelector('#addEventModal button[type=submit]'); if (b) { b.disabled = false; b.textContent = 'Save Event'; } toast('The save did not finish (connection waited too long). Reload the page and add the photos again.', 10000); return; }
           if (!navigator.onLine && uid) enqueue(uid, sys); return r;
         }
@@ -14039,6 +14226,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         if (typeof inspLoadRemoteModuleDataOnce === 'function' && !window.__inspNotifLoaded) { window.__inspNotifLoaded = true; Promise.resolve(inspLoadRemoteModuleDataOnce()).then(() => renderInspectionRequiredTasks()).catch(() => {}); }
         const tasks = syncInspectionRequiredTasks().filter(task => !task.resolvedAt && (!shouldShowUnit || (data || []).some(unit => String(unit.apt) === String(task.apt) && shouldShowUnit(unit))));
         panel.style.display = tasks.length ? 'block' : 'none';
+        try { renderFinalReadyPanel(); } catch (e) { console.warn('finalReady', e); }
         list.innerHTML = tasks.map(task => { const officialReady = task.kind === 'official_ready'; return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid #E5E7EB;flex-wrap:wrap;"><div><div style="font-size:13px;font-weight:600;color:#1F2937;">Unit ${String(task.apt)} · ${String(task.system)}</div><div style="font-size:12px;color:#64748B;margin-top:3px;">${officialReady ? 'QA/QC and internal inspections passed for Rough-In, Trim-Out, Data, and Fire Alarm · Official inspection ready' : `System completed at 100% · Inspection required${task.lastAttempt ? ' · Previous inspection failed' : ''}`}</div></div><button type="button" class="btn btn-primary" data-inspection-start="${String(task.apt).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" data-inspection-kind="${officialReady ? 'official_ready' : 'system'}" style="font-size:12px;padding:7px 10px;">${officialReady ? 'Request Official Inspection' : 'Start Inspection'}</button></div>`; }).join('');
         list.querySelectorAll('[data-inspection-start]').forEach(button => {
           button.addEventListener('click', event => {
@@ -14049,6 +14237,39 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         });
       }
       window.renderInspectionRequiredTasks = renderInspectionRequiredTasks;
+      // Ready for Official Final: same rule as the official-ready task, but it
+      // lists what is missing for every unit so the team knows what to close.
+      let finalReadyMode = 'ready';
+      function finalReadiness(unit) {
+        const missing = [];
+        QUANTITY_SYSTEMS.filter(system => (unit.systems || {})[system]).forEach(system => { const p = Number(unit.systems[system].progress || 0); if (p < 100) missing.push({ kind: 'qty', label: `${system} ${Math.round(p)}%` }); });
+        const allRecords = typeof inspGetInspections === 'function' ? inspGetInspections() : [];
+        const types = (typeof INSP_INSPECTION_TYPES !== 'undefined' ? INSP_INSPECTION_TYPES : []).filter(type => typeof inspIsInspectionTypeApplicableForUnit !== 'function' || inspIsInspectionTypeApplicableForUnit(type, unit));
+        const unitRecords = allRecords.filter(r => String(r.apt) === String(unit.apt) && (!r.building || String(r.building) === String(unit.building)));
+        types.forEach(type => {
+          const latest = unitRecords.filter(r => r.typeId === type.id).sort((x, y) => Date.parse(x.date || 0) - Date.parse(y.date || 0)).at(-1);
+          if (!latest) missing.push({ kind: 'insp', label: `${type.name || type.id} pending` });
+          else if (latest.failedCount > 0) missing.push({ kind: 'fail', label: `${type.name || type.id} failed` });
+        });
+        if (!types.length) missing.push({ kind: 'insp', label: 'No inspections set up' });
+        return missing;
+      }
+      function renderFinalReadyPanel() {
+        const panel = document.getElementById('finalReadyPanel'), list = document.getElementById('finalReadyList'), filt = document.getElementById('finalReadyFilter');
+        if (!panel || !list || !Array.isArray(data) || !data.length) return;
+        const rows = data.filter(u => !shouldShowUnit || shouldShowUnit(u)).map(u => ({ u, m: finalReadiness(u) }));
+        const ready = rows.filter(r => !r.m.length), close = rows.filter(r => r.m.length && r.m.length <= 3).sort((a, b) => a.m.length - b.m.length);
+        panel.style.display = 'block';
+        const btn = (k, t) => `<button type="button" class="btn ${finalReadyMode === k ? 'btn-primary' : 'btn-secondary'}" style="font-size:12px;padding:5px 10px;" onclick="window.setFinalReadyMode('${k}')">${t}</button>`;
+        filt.innerHTML = btn('ready', `✅ Ready (${ready.length})`) + btn('close', `⏳ Almost (${close.length})`);
+        const shown = finalReadyMode === 'ready' ? ready : close;
+        const color = { qty: '#1E40AF;background:#DBEAFE', insp: '#92400E;background:#FEF3C7', fail: '#991B1B;background:#FEE2E2' };
+        const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        list.innerHTML = shown.length ? shown.map(({ u, m }) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-top:1px solid #E5E7EB;flex-wrap:wrap;"><div><div style="font-size:13px;font-weight:700;color:#1F2937;">Unit ${esc(u.apt)} <span style="font-weight:400;color:#64748B;">· ${esc(u.building)}${u.floor ? ' · ' + esc(u.floor) : ''}</span></div>${m.length ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;">${m.map(x => `<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;color:${color[x.kind]};">${esc(x.label)}</span>`).join('')}</div>` : '<div style="font-size:12px;color:#059669;margin-top:3px;">All quantity at 100% and inspections passed</div>'}</div>${m.length ? '' : `<button type="button" class="btn btn-primary" style="font-size:12px;padding:6px 10px;" onclick="window.startInspectionRequiredTask(${JSON.stringify(String(u.apt)).replace(/"/g, '&quot;')}, 'official_ready')">Request Official</button>`}</div>`).join('') : `<div style="padding:10px 0;color:#64748B;font-size:13px;">${finalReadyMode === 'ready' ? 'No units ready yet.' : 'No units within 3 items of being ready.'}</div>`;
+      }
+      window.setFinalReadyMode = k => { finalReadyMode = k; renderFinalReadyPanel(); };
+      window.renderFinalReadyPanel = renderFinalReadyPanel;
+      window.finalReadinessFor = finalReadiness;
       // Used by the Official Final request (outside this block).
       window.getInspectionRequiredTasks = getInspectionRequiredTasks;
       window.saveInspectionRequiredTasks = saveInspectionRequiredTasks;
