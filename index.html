@@ -13266,8 +13266,11 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           punchlist = punchlist.filter(item => !relatedPunch(item));
           inspRemoteRecords = keptInspections;
           try {
-            localStorage.setItem('inspections_data', JSON.stringify(keptInspections));
-            localStorage.setItem('local_punchlist', JSON.stringify(punchlist));
+            // Browser copies are only for the local preview; production reads Supabase.
+            if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
+              localStorage.setItem('inspections_data', JSON.stringify(keptInspections));
+              localStorage.setItem('local_punchlist', JSON.stringify(punchlist));
+            }
             localStorage.removeItem(`inspection_draft_${apt}_${typeId}`);
           } catch (_) {}
           try {
