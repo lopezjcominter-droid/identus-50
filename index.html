@@ -13147,6 +13147,17 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
   };
   document.addEventListener('focusin', e => tame(e.target), true);
   document.querySelectorAll('input').forEach(tame);
+  // Every search box: if the browser drops the signed-in e-mail in it, clear it
+  // and re-run that search so the list is not filtered by an e-mail.
+  const isSearch = el => el.type === 'search' || /search|buscar|filter/i.test((el.placeholder || '') + ' ' + (el.id || '') + ' ' + (el.className || ''));
+  const isEmail = v => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v || '').trim());
+  const clean = el => {
+    if (!el || el.tagName !== 'INPUT' || skip(el) || !isSearch(el) || !isEmail(el.value)) return;
+    el.value = '';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  ['input', 'change', 'focusin', 'animationstart'].forEach(type => document.addEventListener(type, e => clean(e.target), true));
+  setInterval(() => document.querySelectorAll('input').forEach(clean), 1000);
 })();
 </script>
 </body>
