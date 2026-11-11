@@ -30,3 +30,13 @@ The app → **Admin Users** → **Add user**: name, email, a temporary password 
 
 ### D. Change log (point 9) — already applied on 2026-11-11
 `supabase/migrations/20261111_project_audit_log.sql` was run in the SQL Editor. It records every change made to units, progress, punch list, inspections, Official Final and Issues. To view the log, an Admin or PM clicks **🕘 Change Log** in the app.
+
+### E. Concurrency (point 10) — what is protected
+- **Progress (unit_systems_status):** saves only if the row did not change since it was read (`updated_at` match). On conflict it merges the events of both people and retries (already existed; verified).
+- **Punch list:** an item is saved only if nobody changed it since it was loaded. Otherwise the user sees "changed by someone else", and the list reloads.
+- **Inspections:** each inspection or re-inspection is a new record, so two people can't overwrite each other.
+- **Not covered yet (low risk):**
+  - Official Final, which is edited by 1–2 people.
+  - Field Issues (the table has no `updated_at`).
+  - Project Setup (admin/PM only).
+  - Quantity Control writes only the rows that changed.
