@@ -58,9 +58,9 @@ The app → **Admin Users** → **Add user**: name, email, a temporary password 
 - The `ai-process-cron` function runs every 10 minutes, about 4,300 times a month, even when no document is waiting to be read.
 - The digest runs hourly, 720 times a month, and sends one email a day per project.
 
-**Recommended changes** (code, about 3 lines; Claude can make them when you approve):
-1. `netlify/functions/ai-process-cron.mjs`: change `schedule: '*/10 * * * *'` to `'*/30 * * * *'`, and have the function do nothing when the queue is empty. The **▶ Read now** button still processes right away whenever you upload drawings.
-2. `netlify/functions/notify-digest-cron.mjs`: change `@hourly` to one fixed time, for example `'0 10 * * *'`, which is 6:00 a.m. in Florida (10:00 UTC; 11:00 UTC in winter). The catch is that every project then gets it at the same time.
+**Changes** (applied on 2026-11-11):
+1. ✅ `ai-process-cron`: now runs every 30 minutes, and stops right away when nothing is pending. **▶ Read now** still works immediately.
+2. ⏸ The digest **stays hourly**. Each project picks its own send hour in its settings, and the cron has to pass through that exact hour. Every run that isn't the chosen hour ends after one quick read.
 3. Group your changes: merge `hardening` → `main` once a day at most.
 
 **Usage alerts:**
