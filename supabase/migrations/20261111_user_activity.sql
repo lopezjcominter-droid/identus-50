@@ -2,8 +2,9 @@
 -- computed inside the database from data that already exists (progress
 -- events, inspections, punch list, issues) plus the change log. Only small
 -- totals travel to the browser.
+drop function if exists public.user_activity_summary(uuid, text);
 create or replace function public.user_activity_summary(p_project_id uuid, p_tz text default 'America/New_York')
-returns table (person text, kind text, total bigint, last7 bigint, today bigint, last_at timestamptz, last_what text)
+returns table (person text, kind text, total bigint, last7 bigint, today bigint, last_at timestamptz, last_what text, last30 bigint, days30 text[])
 language sql stable security definer set search_path to 'public' as $$
   with allowed as (select has_project_access(p_project_id, array['admin','pm']) as ok),
   progress as (
@@ -36,7 +37,9 @@ language sql stable security definer set search_path to 'public' as $$
   select person, kind, count(*),
          count(*) filter (where at >= now() - interval '7 days'),
          count(*) filter (where (at at time zone p_tz)::date = (now() at time zone p_tz)::date),
-         max(at), max(what) filter (where rn = 1)
+         max(at), max(what) filter (where rn = 1),
+         count(*) filter (where at >= now() - interval '30 days'),
+         array_agg(distinct ((at at time zone p_tz)::date)::text) filter (where at >= now() - interval '30 days')
   from ranked, allowed where allowed.ok
   group by person, kind;
 $$;
