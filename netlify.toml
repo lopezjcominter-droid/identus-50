@@ -4,9 +4,3 @@
 
 [functions]
   directory = "netlify/functions"
-
-[[redirects]]
-  from = "/api/supabase-proxy"
-  to = "/.netlify/functions/supabase-proxy"
-  status = 200
-  force = true

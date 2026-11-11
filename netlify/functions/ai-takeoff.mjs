@@ -6,6 +6,7 @@
 // stores the finished takeoff in the chat history.
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kihsukzcbohmxovbyisi.supabase.co';
 import { AI_KEY, AI_BASE, AI_KEY_NAME, IS_GEMINI, DEFAULT_CHAT_MODEL, adaptPayload } from './ai/provider.mjs';
+import { normalizeRole } from './ai/roles.mjs';
 const OPENAI_KEY = AI_KEY;
 const MODEL = (IS_GEMINI ? '' : process.env.OPENAI_TAKEOFF_MODEL || process.env.OPENAI_MODEL) || DEFAULT_CHAT_MODEL;
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -41,7 +42,7 @@ export default async (request) => {
     const user = await sb('/auth/v1/user', auth);
     if (!user?.id) return json(401, { error: 'Sign in again.' });
     const member = await sb(`/rest/v1/project_members?project_id=eq.${projectId}&user_id=eq.${user.id}&select=role`, auth).catch(() => []);
-    if (!['admin', 'pm', 'inspector', 'qa inspector', 'inspection'].includes(String(member?.[0]?.role || '').toLowerCase())) return json(403, { error: 'Admin, PM and Inspector only.' });
+    if (!['admin', 'pm', 'inspector'].includes(normalizeRole(member?.[0]?.role))) return json(403, { error: 'Admin, PM and Inspector only.' });
 
     if (input.save) {
       const question = String(input.question || '').slice(0, 2000); const answer = String(input.answer || '').slice(0, 6000);
