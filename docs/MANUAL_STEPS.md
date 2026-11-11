@@ -16,3 +16,12 @@ The app → **Admin Users** → **Add user**: name, email, a temporary password 
 - Create one user for each person; don't share accounts.
 - To remove access: use **Deactivate**, or set the role to **None** for the project.
 - The old shared password (3010) no longer works anywhere in the app.
+
+### C. Apply roles + security policies (points 2 and 3)
+1. Run this when nobody is saving, for example at night.
+2. Supabase → **SQL Editor** → **New query** → paste all of `supabase/migrations/20261111_roles_and_rls_hardening.sql` → **Run**. It should finish with "Success".
+3. Check right away (5 min):
+   - Sign in as an inspector: update progress on a unit with a photo, close a punch item, save an inspection.
+   - Sign in as a PM: open Project Setup and save.
+   - Open the app in a private window without signing in: it must NOT show units.
+4. If something fails to save, run the **ROLLBACK** block at the end of the same file (remove the `-- ` at the start of each line) and tell Claude what failed.
