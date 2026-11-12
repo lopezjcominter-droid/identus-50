@@ -117,7 +117,7 @@
         applyRole(); window.updateUserLabel();
         sbClient.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); });
         // A password set or reset by an admin is temporary: ask for a personal one.
-        try { const { data: { user } } = await sbClient.auth.getUser(); if (user?.user_metadata?.must_change_password) window.openChangePassword(true); } catch (_) {}
+        try { if (window.authSessionUser?.user_metadata?.must_change_password) window.openChangePassword(true); } catch (_) {}
       };
 
       function applyRole() {
