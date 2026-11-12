@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+<title>Document · Identus 50</title>
+<style>
+  :root { --bar: #0F172A; --bg: #334155; }
+  html, body { margin: 0; height: 100%; background: var(--bg); font-family: -apple-system, Segoe UI, Arial, sans-serif; }
+  #bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bar); color: #fff; flex-wrap: wrap; }
+  #bar b { flex: 1; min-width: 120px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bar button, #bar a { padding: 6px 11px; border: none; border-radius: 6px; background: #fff; color: #0F172A; font-weight: 600; font-size: 13px; cursor: pointer; text-decoration: none; }
+  #bar input { width: 52px; padding: 5px; border-radius: 6px; border: none; text-align: center; font-size: 13px; }
+  #pages { padding: 12px 8px 40px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .pg { background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.35); position: relative; }
+  .pg canvas { display: block; width: 100%; height: 100%; }
+  .pg .n { position: absolute; top: 6px; right: 8px; font-size: 11px; color: #64748B; background: rgba(255,255,255,.85); padding: 1px 6px; border-radius: 8px; }
+  .pg.cited { outline: 4px solid #F59E0B; }
+  #msg { color: #E2E8F0; text-align: center; padding: 30px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <b id="title">Document</b>
+  <button type="button" id="prev">‹</button>
+  <span><input id="pageInput" type="number" min="1" value="1"> / <span id="total">…</span></span>
+  <button type="button" id="next">›</button>
+  <button type="button" id="zoomOut">−</button>
+  <button type="button" id="zoomIn">+</button>
+  <a id="download" target="_blank" rel="noopener">Download</a>
+</div>
+<div id="pages"><div id="msg">Loading document…</div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+// Opens a PDF from the AI chat at the cited page. Parameters come in the hash
+// (#u=<signed url>&p=<page>&t=<title>) so the temporary link is not sent to
+// any server log. Every page can be scrolled; pages render as they come into view.
+(async () => {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const url = params.get('u'); const startPage = Math.max(1, Number(params.get('p')) || 1);
+  const title = params.get('t') || 'Document';
+  const $ = id => document.getElementById(id);
+  $('title').textContent = title; document.title = `${title} · p.${startPage}`;
+  if (!url || !/^https:\/\/[a-z0-9-]+\.supabase\.co\//i.test(url)) { $('msg').textContent = 'Document link is missing or expired. Open it again from the chat.'; return; }
+  $('download').href = url;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  let pdf;
+  try { pdf = await pdfjsLib.getDocument({ url }).promise; }
+  catch (e) { $('msg').textContent = 'Could not open the document (the link expires after 10 minutes). Open it again from the chat.'; return; }
+  const total = pdf.numPages; $('total').textContent = total; $('pageInput').max = total;
+  const first = await pdf.getPage(1); const base = first.getViewport({ scale: 1 });
+  let zoom = 1; const holder = $('pages'); holder.innerHTML = '';
+  const fitWidth = () => Math.min(holder.clientWidth - 16, 1400) * zoom;
+  const boxes = [];
+  for (let n = 1; n <= total; n++) {
+    const box = document.createElement('div'); box.className = 'pg' + (n === startPage ? ' cited' : ''); box.dataset.n = n;
+    box.innerHTML = `<span class="n">${n}</span>`;
+    holder.appendChild(box); boxes.push(box);
+  }
+  const sizeBoxes = () => boxes.forEach(box => { const w = fitWidth(); box.style.width = `${w}px`; box.style.height = `${w * base.height / base.width}px`; });
+  sizeBoxes();
+  const rendering = new Map();
+  async function render(box) {
+    const n = Number(box.dataset.n); const key = `${n}@${zoom}`;
+    if (box.dataset.done === key || rendering.get(n) === key) return;
+    rendering.set(n, key);
+    const page = await pdf.getPage(n);
+    const v1 = page.getViewport({ scale: 1 });
+    box.style.height = `${fitWidth() * v1.height / v1.width}px`;
+    const scale = fitWidth() / v1.width; const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const viewport = page.getViewport({ scale: scale * ratio });
+    const canvas = document.createElement('canvas'); canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    if (rendering.get(n) !== key) return;
+    box.querySelector('canvas')?.remove(); box.prepend(canvas); box.dataset.done = key;
+  }
+  const io = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) render(e.target); }), { rootMargin: '600px 0px' });
+  boxes.forEach(b => io.observe(b));
+  // Current page indicator
+  const current = () => { const mid = window.innerHeight / 2; let best = 1; boxes.forEach(b => { const r = b.getBoundingClientRect(); if (r.top <= mid) best = Number(b.dataset.n); }); return best; };
+  window.addEventListener('scroll', () => { $('pageInput').value = current(); }, { passive: true });
+  const go = n => { n = Math.min(total, Math.max(1, n)); const top = boxes[n - 1].offsetTop - $('bar').offsetHeight - 8; window.scrollTo({ top }); $('pageInput').value = n; };
+  $('prev').onclick = () => go(current() - 1);
+  $('next').onclick = () => go(current() + 1);
+  $('pageInput').onchange = e => go(Number(e.target.value) || 1);
+  const rezoom = f => { const n = current(); zoom = Math.min(4, Math.max(0.4, zoom * f)); boxes.forEach(b => { delete b.dataset.done; }); sizeBoxes(); go(n); boxes.forEach(b => { io.unobserve(b); io.observe(b); }); };
+  $('zoomIn').onclick = () => rezoom(1.3); $('zoomOut').onclick = () => rezoom(1 / 1.3);
+  await render(boxes[startPage - 1]);
+  go(startPage);
+})();
+</script>
+</body>
+</html>
