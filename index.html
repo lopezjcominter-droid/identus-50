@@ -2098,6 +2098,12 @@ Object.assign(APP_TRANSLATIONS.en, {
           const headers = await quantityAuthHeaders(); const q = async path => { const r = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers }), 12000, 'Quantity Control request'); if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`); return r.json(); };
           if (quantitySystemColumns == null) quantitySystemColumns = await quantityDetectSystemColumns(headers);
           const systemColumn = quantitySystemColumns ? ',system' : '';
+          // Start every query at once (they used to run one after another).
+          // Errors are kept and handled exactly where they were before.
+          const settle = promise => promise.then(value => ({ value }), error => ({ error }));
+          const marksPromise = settle(q(`quantity_installed_mark_counts?project_id=eq.${PROJECT_ID}${unitIdFilter}&select=unit_id,item_index,installed_count${systemColumn}`));
+          const contoursPromise = unitOnly ? null : settle(q(`quantity_contours?project_id=eq.${PROJECT_ID}&select=floor_plan_id,unit_label,points`));
+          const areasPromise = quantityAreaTableMissing ? null : settle(q(`quantity_area_states?project_id=eq.${PROJECT_ID}&select=area_key,payload`));
           const [templates, plans, states] = await Promise.all([
             q(`quantity_templates?project_id=eq.${PROJECT_ID}&is_active=eq.true${unitTypeFilter}&select=unit_type,name,mime_type,storage_path,system_drawings,checklist,version,updated_at`),
             unitOnly ? Promise.resolve([]) : q(`quantity_floor_plans?project_id=eq.${PROJECT_ID}&is_active=eq.true&select=id,building_id,floor,name,mime_type,storage_path,version,updated_at`),
@@ -2106,7 +2112,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           // Counts only; coordinates load per unit/system when it is opened.
           let marks = [];
           try {
-            marks = await q(`quantity_installed_mark_counts?project_id=eq.${PROJECT_ID}${unitIdFilter}&select=unit_id,item_index,installed_count${systemColumn}`);
+            const r = await marksPromise; if (r.error) throw r.error; marks = r.value;
           } catch (error) {
             console.warn('Installed mark count view unavailable; marks will load when a unit is opened.', error);
           }
@@ -2117,7 +2123,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           // built-in defaults are stored).
           if (!unitOnly) {
             try {
-              const contourRows = await q(`quantity_contours?project_id=eq.${PROJECT_ID}&select=floor_plan_id,unit_label,points`);
+              const r = await contoursPromise; if (r.error) throw r.error; const contourRows = r.value;
               const planKeyById = new Map(Object.entries(store.sitePlans).map(([key, plan]) => [String(plan.id), key]));
               store.contours = {};
               (contourRows || []).forEach(row => {
@@ -2151,7 +2157,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           // Special areas (hallways…): checklist, marks, revisions and contours.
           if (!quantityAreaTableMissing) {
             try {
-              const areaRows = await q(`quantity_area_states?project_id=eq.${PROJECT_ID}&select=area_key,payload`);
+              const r = await areasPromise; if (r.error) throw r.error; const areaRows = r.value;
               const areasByKey = new Map(quantitySpecialAreasForSave().map(area => [area.key, area]));
               (areaRows || []).forEach(row => {
                 const area = areasByKey.get(String(row.area_key)); const payload = row.payload || {};
@@ -3631,6 +3637,39 @@ Object.assign(APP_TRANSLATIONS.en, {
         quantityPdfRasterCache.delete(oldestKey); try { oldest.bitmap.close(); } catch (_) {}
       }
     }
+    // Rendered floor/unit drawings are also kept in the browser's Cache Storage,
+    // so opening the same plan again (even after reloading the app) shows it
+    // at once instead of rendering the PDF again (several seconds on big
+    // sheets). A new upload has a new storage path, so it never shows stale.
+    const QUANTITY_RASTER_STORE = 'identus-qc-raster-v1';
+    const quantitySkipPersistedRaster = new Set();
+    const quantityRasterUrl = key => `https://qc-raster.local/${encodeURIComponent(String(key))}`;
+    async function quantityLoadPersistedRaster(key) {
+      try {
+        if (!key || !('caches' in window) || typeof createImageBitmap !== 'function') return null;
+        const store = await caches.open(QUANTITY_RASTER_STORE);
+        const res = await store.match(quantityRasterUrl(key));
+        if (!res) return null;
+        const baseWidth = Number(res.headers.get('x-base-width')), baseHeight = Number(res.headers.get('x-base-height'));
+        if (!baseWidth || !baseHeight) return null;
+        const bitmap = await createImageBitmap(await res.blob());
+        return { bitmap, baseWidth, baseHeight };
+      } catch (_) { return null; }
+    }
+    function quantityPersistRaster(key, canvas, baseWidth, baseHeight) {
+      try {
+        if (!key || !('caches' in window) || !canvas || !canvas.toBlob) return;
+        canvas.toBlob(async blob => {
+          try {
+            if (!blob) return;
+            const store = await caches.open(QUANTITY_RASTER_STORE);
+            await store.put(quantityRasterUrl(key), new Response(blob, { headers: { 'content-type': blob.type, 'x-base-width': String(baseWidth), 'x-base-height': String(baseHeight) } }));
+            const keys = await store.keys();
+            for (const old of keys.slice(0, Math.max(0, keys.length - 24))) await store.delete(old);
+          } catch (_) {}
+        }, 'image/webp', 0.9);
+      } catch (_) {}
+    }
     async function quantityPdfBytes(key, source) {
       let blob = quantityPdfBlobCache.get(key);
       if (blob) { quantityPdfBlobCache.delete(key); quantityPdfBlobCache.set(key, blob); }
@@ -3692,7 +3731,12 @@ Object.assign(APP_TRANSLATIONS.en, {
       const job = { cancelled: false, task: null };
       quantityPdfRenderJobs.set(canvas, job);
       const wantsBaseView = (Number(qualityScale) || 1) <= 1;
-      const raster = wantsBaseView ? quantityPdfRasterCache.get(pdfKey) : null;
+      let raster = wantsBaseView ? quantityPdfRasterCache.get(pdfKey) : null;
+      if (!raster && wantsBaseView && !quantitySkipPersistedRaster.delete(pdfKey)) {
+        raster = await quantityLoadPersistedRaster(pdfKey);
+        if (job.cancelled || !canvas.isConnected) { try { raster?.bitmap.close(); } catch (_) {} return; }
+        if (raster) quantityRememberPdfRaster(pdfKey, raster);
+      }
       try {
         let page = null;
         if (!raster) {
@@ -3787,6 +3831,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           const close = Math.abs(raster.bitmap.width - targetWidth) / Math.max(1, targetWidth) < 0.12 && Math.abs(raster.bitmap.height - targetHeight) / Math.max(1, targetHeight) < 0.12;
           if (!close) {
             quantityPdfRasterCache.delete(pdfKey); try { raster.bitmap.close(); } catch (_) {}
+            quantitySkipPersistedRaster.add(pdfKey); // a different size is needed: render the PDF again
             quantityPdfRenderJobs.delete(canvas);
             return quantityRenderPdf(canvas, dataUrl, qualityScale, pdfKey);
           }
@@ -3816,6 +3861,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         try { page.cleanup(); } catch (_) {}
         if (wantsBaseView && !job.cancelled && typeof createImageBitmap === 'function') {
           try { quantityRememberPdfRaster(pdfKey, { bitmap: await createImageBitmap(canvas), baseWidth: baseViewport.width, baseHeight: baseViewport.height }); } catch (_) {}
+          quantityPersistRaster(pdfKey, canvas, baseViewport.width, baseViewport.height);
         }
         }
         if (board?.classList.contains('quantity-contour-editor-board')) {
@@ -5025,6 +5071,8 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (typeof inspShowTab === 'function') inspShowTab('new');
         if (typeof inspGoStep === 'function') inspGoStep(1);
       } else if (tab === 'quantity') {
+        // Start loading the PDF viewer now, in parallel with the data.
+        if (typeof quantityEnsurePdfJs === 'function') quantityEnsurePdfJs().catch(() => {});
         renderQuantityControl();
         if (!quantityUsesLocalStorage() && !quantityRemoteReady) {
           withTimeout(quantityHydrateRemote(), 15000, 'Quantity Control hydration')
