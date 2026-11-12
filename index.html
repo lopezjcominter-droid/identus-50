@@ -132,7 +132,7 @@
           <button onclick="switchMainTab('report', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📈 Report</button>
 <button onclick="switchMainTab('inspections', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">⚡ Inspections</button>
           <button onclick="switchMainTab('quantity', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📐 Quantity Control</button>
-          <button onclick="switchMainTab('issues', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📷 Issues</button>
+          <button onclick="switchMainTab('issues', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">📷 Field Issues</button>
           <button onclick="switchMainTab('official', this)" class="tab-main" style="padding: 12px 20px; background: none; border: none; font-size: 14px; font-weight: 600; color: #6B7280; border-bottom: 3px solid transparent; cursor: pointer; margin-bottom: -2px;">🏁 Official Final</button>
         </div>
 
@@ -598,7 +598,7 @@
         <button class="tab-button" onclick="switchDetailsTab('events')">History</button>
         <button class="tab-button" onclick="switchDetailsTab('inspections')">Inspections</button>
         <button class="tab-button" onclick="switchDetailsTab('official_final')">Official Final</button>
-        <button class="tab-button" onclick="switchDetailsTab('issues')">Issues</button>
+        <button class="tab-button" onclick="switchDetailsTab('issues')">Field Issues</button>
       </div>
 
       <div id="detailsContent"></div>
@@ -10065,8 +10065,12 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       } else if (!savedOnDevice) {
         await saveData();
       }
-      // Sync to Supabase
-      if (!savedOnDevice && unit && unit.id && sbClient && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
+      // The history and photos already live in unit_systems_status (events)
+      // and Storage. The old extra copies in inspection_events/photos were never
+      // read and the database rejects them (no insert permission), which made a
+      // saved event look failed. They are no longer written.
+      const writeLegacyEventCopies = false;
+      if (writeLegacyEventCopies && !savedOnDevice && unit && unit.id && sbClient && window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE) {
         try {
 
             // 1. Sync unit_systems_status
