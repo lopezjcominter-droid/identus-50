@@ -427,9 +427,14 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     // PDFs open in a new tab with the whole document, already at the cited
     // page (iPad browsers ignore "#page=N"). Other files open as before.
     const title = `${c.sheet || c.file || 'Document'}${c.revision ? ` · Rev ${c.revision}` : ''}`;
-    const target = /\.pdf$/i.test(path)
-      ? `pdf-viewer.html#${new URLSearchParams({ u: data.signedUrl, p: String(Number(c.page) || 1), t: title }).toString()}`
-      : data.signedUrl;
+    // Computers: the browser's own PDF viewer (pinch/trackpad zoom) opens at
+    // the cited page with "#page=N". iPad/iPhone browsers ignore "#page=N",
+    // so there the app's viewer opens the whole document at that page.
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const page = String(Number(c.page) || 1);
+    const target = !/\.pdf$/i.test(path) ? data.signedUrl
+      : isIOS ? `pdf-viewer.html#${new URLSearchParams({ u: data.signedUrl, p: page, t: title }).toString()}`
+      : `${data.signedUrl}#page=${page}`;
     if (tab) tab.location.href = target; else window.open(target, '_blank');
   }
   // Takeoff: count symbols on the chosen sheet, one quarter per call in parallel.
