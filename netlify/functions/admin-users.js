@@ -122,6 +122,15 @@ exports.handler = async (event) => {
       return updated.ok ? json(200, { ok: true }) : json(500, { error: 'Could not change role' });
     }
 
+    if (action === 'setName') {
+      const name = String(req.name || '').trim().slice(0, 80);
+      if (!name) return json(400, { error: 'Name is required' });
+      const saved = await rest(`/rest/v1/profiles?user_id=eq.${encodeURIComponent(req.id)}`, { method: 'PATCH', headers: serviceHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify({ name }) });
+      if (!saved.ok) return json(500, { error: 'Could not change the name' });
+      await rest(`/auth/v1/admin/users/${encodeURIComponent(req.id)}`, { method: 'PUT', headers: serviceHeaders(), body: JSON.stringify({ user_metadata: { name } }) });
+      return json(200, { ok: true });
+    }
+
     if (action === 'setActive') {
       if (req.id === myId) return json(400, { error: 'You cannot disable yourself' });
       const updated = await rest(`/auth/v1/admin/users/${encodeURIComponent(req.id)}`, { method: 'PUT', headers: serviceHeaders(), body: JSON.stringify({ ban_duration: req.active ? 'none' : '876000h' }) });
