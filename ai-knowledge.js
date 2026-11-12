@@ -410,7 +410,7 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     const el = document.createElement('div'); el.className = `aic-m aic-${who}`; el.textContent = text;
     if (citations?.length) {
       const wrap = document.createElement('div');
-      const seenDocs = new Set(); citations.filter(c => { const k = c.documentId || c.sheet; if (seenDocs.has(k)) return false; seenDocs.add(k); return true; }).forEach(c => { const b = document.createElement('span'); b.className = 'aic-cite'; b.title = 'Open document'; b.textContent = `${c.sheet || c.file || ''}${c.revision ? ` · Rev ${String(c.revision).replace(/^\s*rev(ision)?\.?\s*/i, '')}` : ''} · p.${c.page || 1}${c.current ? ' · current' : ''}`; b.onclick = () => chatOpenCitation(c); wrap.appendChild(b); });
+      const seenDocs = new Set(); citations.filter(c => { const k = `${c.documentId || c.sheet}|${c.page || 1}`; if (seenDocs.has(k)) return false; seenDocs.add(k); return true; }).forEach(c => { const b = document.createElement('span'); b.className = 'aic-cite'; b.title = 'Open document'; b.textContent = `${c.sheet || c.file || ''}${c.revision ? ` · Rev ${String(c.revision).replace(/^\s*rev(ision)?\.?\s*/i, '')}` : ''} · p.${c.page || 1}${c.current ? ' · current' : ''}`; b.onclick = () => chatOpenCitation(c); wrap.appendChild(b); });
       el.appendChild(wrap);
     }
     box.appendChild(el); box.scrollTop = box.scrollHeight; return el;
@@ -421,7 +421,68 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     if (!path) { const r = await sb.from('ai_documents').select('storage_path').eq('id', c.documentId).maybeSingle(); path = r.data?.storage_path; }
     if (!path) return;
     const { data } = await sb.storage.from(BUCKET).createSignedUrl(path, 600);
-    if (data?.signedUrl) window.open(`${data.signedUrl}#page=${c.page || 1}`, '_blank', 'noopener');
+    if (!data?.signedUrl) return;
+    // Browsers on iPad ignore "#page=N", so PDFs open in our own viewer at
+    // the cited page. Other files (images) open as before.
+    if (!/\.pdf$/i.test(path)) { window.open(data.signedUrl, '_blank', 'noopener'); return; }
+    openCitationViewer(data.signedUrl, Number(c.page) || 1, `${c.sheet || c.file || 'Document'}${c.revision ? ` · Rev ${c.revision}` : ''}`);
+  }
+  async function loadPdfJs() {
+    if (window.pdfjsLib) return window.pdfjsLib;
+    if (typeof window.quantityEnsurePdfJs === 'function') return window.quantityEnsurePdfJs();
+    await new Promise((resolve, reject) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'; sc.onload = resolve; sc.onerror = reject; document.head.appendChild(sc); });
+    return window.pdfjsLib;
+  }
+  async function openCitationViewer(url, startPage, title) {
+    const old = document.getElementById('aicViewer'); if (old) old.remove();
+    const ov = document.createElement('div'); ov.id = 'aicViewer';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:100070;background:rgba(15,23,42,.85);display:flex;flex-direction:column;';
+    const btn = 'padding:7px 12px;border:none;border-radius:6px;background:#fff;color:#0F172A;font-weight:600;cursor:pointer;font-size:13px;';
+    ov.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;color:#fff;flex-wrap:wrap;">
+      <b style="flex:1;min-width:120px;font-size:14px;" id="aicvTitle"></b>
+      <button type="button" id="aicvPrev" style="${btn}">‹</button><span id="aicvPage" style="font-size:13px;min-width:70px;text-align:center;">…</span><button type="button" id="aicvNext" style="${btn}">›</button>
+      <button type="button" id="aicvZoomOut" style="${btn}">−</button><button type="button" id="aicvZoomIn" style="${btn}">+</button>
+      <a id="aicvFull" target="_blank" rel="noopener" style="${btn}text-decoration:none;">Full PDF</a>
+      <button type="button" id="aicvClose" style="${btn}">✕</button></div>
+      <div id="aicvBody" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;text-align:center;padding:0 8px 16px;"><p style="color:#CBD5E1;">Loading…</p></div>`;
+    document.body.appendChild(ov);
+    const $v = id => ov.querySelector('#' + id);
+    $v('aicvTitle').textContent = title; $v('aicvFull').href = `${url}#page=${startPage}`;
+    $v('aicvClose').onclick = () => ov.remove();
+    try {
+      const pdfjs = await loadPdfJs();
+      pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      const pdf = await pdfjs.getDocument({ url }).promise;
+      let pageNo = Math.min(Math.max(1, startPage), pdf.numPages), zoom = 1, task = null;
+      const body = $v('aicvBody');
+      const draw = async () => {
+        if (!ov.isConnected) return;
+        $v('aicvPage').textContent = `${pageNo} / ${pdf.numPages}`;
+        $v('aicvFull').href = `${url}#page=${pageNo}`;
+        const page = await pdf.getPage(pageNo);
+        const base = page.getViewport({ scale: 1 });
+        const fit = Math.max(200, Math.min(body.clientWidth - 16, 1400)) / base.width;
+        const viewport = page.getViewport({ scale: fit * zoom });
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width * ratio); canvas.height = Math.floor(viewport.height * ratio);
+        canvas.style.cssText = `width:${Math.floor(viewport.width)}px;height:${Math.floor(viewport.height)}px;background:#fff;box-shadow:0 4px 20px rgba(0,0,0,.4);`;
+        const ctx = canvas.getContext('2d'); ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        try { task?.cancel(); } catch (_) {}
+        task = page.render({ canvasContext: ctx, viewport });
+        try { await task.promise; } catch (_) { return; }
+        body.innerHTML = ''; body.appendChild(canvas); body.scrollTop = 0;
+      };
+      $v('aicvPrev').onclick = () => { if (pageNo > 1) { pageNo--; draw(); } };
+      $v('aicvNext').onclick = () => { if (pageNo < pdf.numPages) { pageNo++; draw(); } };
+      $v('aicvZoomIn').onclick = () => { zoom = Math.min(4, zoom * 1.4); draw(); };
+      $v('aicvZoomOut').onclick = () => { zoom = Math.max(0.5, zoom / 1.4); draw(); };
+      $v('aicvClose').onclick = () => { ov.remove(); try { pdf.destroy(); } catch (_) {} };
+      await draw();
+    } catch (err) {
+      // Fallback: open the PDF in a new tab (Chrome on PC honors #page).
+      ov.remove(); window.open(`${url}#page=${startPage}`, '_blank', 'noopener');
+    }
   }
   // Takeoff: count symbols on the chosen sheet, one quarter per call in parallel.
   async function chatTakeoff(t, question, waiting, token) {
