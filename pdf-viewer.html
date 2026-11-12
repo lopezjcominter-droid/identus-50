@@ -6,12 +6,12 @@
 <title>Document · Identus 50</title>
 <style>
   :root { --bar: #0F172A; --bg: #334155; }
-  html, body { margin: 0; height: 100%; background: var(--bg); font-family: -apple-system, Segoe UI, Arial, sans-serif; }
-  #bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bar); color: #fff; flex-wrap: wrap; }
+  html, body { margin: 0; background: var(--bg); font-family: -apple-system, Segoe UI, Arial, sans-serif; }
+  #bar { position: fixed; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bar); color: #fff; flex-wrap: wrap; }
   #bar b { flex: 1; min-width: 120px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #bar button, #bar a { padding: 6px 11px; border: none; border-radius: 6px; background: #fff; color: #0F172A; font-weight: 600; font-size: 13px; cursor: pointer; text-decoration: none; }
   #bar input { width: 52px; padding: 5px; border-radius: 6px; border: none; text-align: center; font-size: 13px; }
-  #pages { padding: 12px 8px 40px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  #pages { padding: 70px 8px 40px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
   .pg { background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.35); position: relative; }
   .pg canvas { display: block; width: 100%; height: 100%; }
   .pg .n { position: absolute; top: 6px; right: 8px; font-size: 11px; color: #64748B; background: rgba(255,255,255,.85); padding: 1px 6px; border-radius: 8px; }
