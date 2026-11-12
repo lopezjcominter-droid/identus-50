@@ -8,7 +8,7 @@
   <title>Identus 50</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" media="print" onload="this.media='all'">
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
   <script>
     // Monitor Supabase library loading
     window.addEventListener('load', () => {
@@ -1238,37 +1238,57 @@ Object.assign(APP_TRANSLATIONS.en, {
     'Toca para agregar fotos':'Click to add photos', 'puedes agregar varias':'multiple allowed', 'Registrar Fallo':'Report Failure',
     'Confirmar Fallo':'Confirm Failure', 'Sin inspecciones':'No inspections', 'Aún no hay inspecciones registradas':'No inspections recorded yet'
   });
-  function translatePageText(lang) {
+  // Translation is compiled once per language into a single regular
+  // expression (before: one new RegExp per phrase per text node, ~0.7 s on
+  // every screen change). It can translate the whole page or only the parts
+  // that changed.
+  const translationCache = {};
+  function translatorFor(lang) {
+    if (translationCache[lang]) return translationCache[lang];
     const map = APP_TRANSLATIONS[lang] || APP_TRANSLATIONS.en;
-    const entries = Object.entries(map).sort((a, b) => b[0].length - a[0].length);
-    const translateValue = (input) => entries.reduce((value, [from, to]) => {
-      // "Panel" is a valid dashboard translation, but never rewrite the
-      // electrical term "Electrical Panel / Load Center" to "Dashboard".
-      if (from === 'Panel' && /Electrical Panel\b/i.test(value)) return value;
+    const entries = Object.entries(map).filter(([from, to]) => from && typeof to === 'string').sort((a, b) => b[0].length - a[0].length);
+    const lookup = new Map(entries);
+    const parts = entries.map(([from]) => {
       const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const wholeWord = /^[\p{L}\p{N} ]+$/u.test(from);
-      const pattern = wholeWord
-        ? `(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`
-        : escaped;
-      return value.replace(new RegExp(pattern, 'gu'), to);
-    }, input);
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    const nodes = []; let node;
-    while ((node = walker.nextNode())) nodes.push(node);
-    nodes.forEach(n => {
-        if (!n.nodeValue.trim() || n.parentElement?.closest('script,style,textarea,input,[data-no-translate]')) return;
-        const value = translateValue(n.nodeValue);
-        if (n.nodeValue !== value) n.nodeValue = value;
+      return /^[\p{L}\p{N} ]+$/u.test(from) ? `(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])` : escaped;
+    });
+    const re = parts.length ? new RegExp(parts.join('|'), 'gu') : null;
+    const translateValue = input => {
+      if (!re || !input) return input;
+      return input.replace(re, match => {
+        // "Panel" is a valid dashboard translation, but never rewrite the
+        // electrical term "Electrical Panel / Load Center" to "Dashboard".
+        if (match === 'Panel' && /Electrical Panel\b/i.test(input)) return match;
+        return lookup.has(match) ? lookup.get(match) : match;
       });
-      document.querySelectorAll('[placeholder],[title],[aria-label]').forEach(el => {
-        ['placeholder','title','aria-label'].forEach(attr => {
-          const current = el.getAttribute(attr);
-          if (!current || el.closest('[data-no-translate]')) return;
-          const value = translateValue(current);
-          if (value !== current) el.setAttribute(attr, value);
-        });
-      });
+    };
+    return (translationCache[lang] = translateValue);
   }
+  function translateRoots(lang, roots) {
+    const translateValue = translatorFor(lang);
+    const skip = el => !el || el.closest('script,style,textarea,input,[data-no-translate]');
+    const doText = n => {
+      if (!n.nodeValue || !n.nodeValue.trim() || skip(n.parentElement)) return;
+      const value = translateValue(n.nodeValue);
+      if (n.nodeValue !== value) n.nodeValue = value;
+    };
+    const doAttrs = el => ['placeholder', 'title', 'aria-label'].forEach(attr => {
+      const current = el.getAttribute(attr);
+      if (!current || el.closest('[data-no-translate]')) return;
+      const value = translateValue(current);
+      if (value !== current) el.setAttribute(attr, value);
+    });
+    roots.forEach(root => {
+      if (!root || !root.isConnected) return;
+      if (root.nodeType === Node.TEXT_NODE) { doText(root); return; }
+      if (root.nodeType !== Node.ELEMENT_NODE) return;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node; while ((node = walker.nextNode())) doText(node);
+      if (root.matches('[placeholder],[title],[aria-label]')) doAttrs(root);
+      root.querySelectorAll('[placeholder],[title],[aria-label]').forEach(doAttrs);
+    });
+  }
+  function translatePageText(lang) { translateRoots(lang, [document.body]); }
   function setAppLanguage(lang, reloadPage = false) {
     const safeLang = lang === 'es' ? 'es' : 'en';
     localStorage.setItem('cfg_language', safeLang);
@@ -1311,13 +1331,22 @@ Object.assign(APP_TRANSLATIONS.en, {
   function installLanguageObserver() {
     if (window._languageObserver || !document.body) return;
     let timer = null;
-    window._languageObserver = new MutationObserver(() => {
+    let pendingRoots = new Set();
+    window._languageObserver = new MutationObserver(records => {
       if (window._languageApplying) return;
+      // Translate only what changed, not the whole page.
+      records.forEach(r => {
+        if (r.type === 'childList') r.addedNodes.forEach(n => pendingRoots.add(n));
+        else pendingRoots.add(r.target);
+      });
       clearTimeout(timer);
       timer = setTimeout(() => {
         window._languageApplying = true;
         window._languageObserver.disconnect();
-        translatePageText(localStorage.getItem('cfg_language') || 'en');
+        const roots = [...pendingRoots]; pendingRoots = new Set();
+        const set = new Set(roots);
+        const top = roots.filter(n => { for (let p = n.parentNode; p; p = p.parentNode) if (set.has(p)) return false; return true; });
+        translateRoots(localStorage.getItem('cfg_language') || 'en', top);
         window._languageApplying = false;
         window._languageObserver.observe(document.body, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['placeholder','title','aria-label'] });
       }, 180);
@@ -1528,6 +1557,8 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     async function detectUnitStatusProjectScope() {
       if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:' || !sbClient) return false;
+      // The column exists in production (checked 2026-11-11): skip the probe request.
+      unitStatusHasProjectId = true; return true;
       try {
         const { error } = await sbClient.from('unit_systems_status').select('project_id').limit(1);
         unitStatusHasProjectId = !error;
