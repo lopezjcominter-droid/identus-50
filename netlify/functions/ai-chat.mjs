@@ -165,6 +165,36 @@ export default async (request) => {
       const first = String(profile?.[0]?.name || user.user_metadata?.full_name || user.user_metadata?.name || '').trim().split(/\s+/)[0];
       return json(200, { answer: english ? `Hi${first ? `, ${first}` : ''}. What do you need to check?` : `Hola${first ? `, ${first}` : ''}. ¿Qué necesita revisar?`, question, citations: [], conversationId: input.conversationId || null });
     }
+    // Saved answers (table ai_answer_cache): the same first question in the
+    // project is answered at once, with no search and no AI call, while no
+    // document was added, changed or removed, and for at most 7 days.
+    const cacheEligible = !history.length && !input.test;
+    const qNorm = String(question).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9#'" ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const ctxKey = input.context && typeof input.context === 'object' ? JSON.stringify(input.context).slice(0, 200) : '';
+    const questionKey = `${qNorm}${ctxKey ? `|${ctxKey}` : ''}`.slice(0, 500);
+    let docsVersion = '';
+    if (cacheEligible && qNorm) {
+      const [docRows, hitRows] = await Promise.all([
+        sb(`/rest/v1/ai_documents?project_id=eq.${projectId}&select=updated_at&order=updated_at.desc&limit=5000`, auth).catch(() => null),
+        sb(`/rest/v1/ai_answer_cache?project_id=eq.${projectId}&question_key=eq.${encodeURIComponent(questionKey)}&select=result,docs_version,created_at,hits`, auth).catch(() => [])
+      ]);
+      if (Array.isArray(docRows)) docsVersion = `${docRows.length}:${docRows[0]?.updated_at || ''}`;
+      const hit = hitRows?.[0];
+      if (hit && docsVersion && hit.docs_version === docsVersion && Date.now() - Date.parse(hit.created_at) < 7 * 86400000) {
+        let cachedConversation = conversationId;
+        if (!cachedConversation) {
+          const created = await sb('/rest/v1/ai_conversations', auth, { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ project_id: projectId, user_id: user.id, title: question.slice(0, 80), context: input.context || {} }) }).catch(() => null);
+          cachedConversation = created?.[0]?.id || null;
+        }
+        if (cachedConversation) await sb('/rest/v1/ai_messages', auth, { method: 'POST', body: JSON.stringify([
+          { conversation_id: cachedConversation, project_id: projectId, role: 'user', content: question },
+          { conversation_id: cachedConversation, project_id: projectId, role: 'assistant', content: hit.result.answer, citations: hit.result.citations || [] }
+        ]) }).catch(() => {});
+        sb(`/rest/v1/ai_answer_cache?project_id=eq.${projectId}&question_key=eq.${encodeURIComponent(questionKey)}`, auth, { method: 'PATCH', body: JSON.stringify({ hits: (hit.hits || 0) + 1 }) }).catch(() => {});
+        const r = { ...hit.result, question, conversationId: cachedConversation, cached: true, usage: undefined };
+        return input.stream ? new Response(JSON.stringify({ done: true, ...r }) + '\n', { status: 200, headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' } }) : json(200, r);
+      }
+    }
     const t0 = Date.now();
     // Rewrite the question into drawing/spec terms (English + Spanish) for a better search.
     let rewritten = '';
@@ -315,6 +345,10 @@ export default async (request) => {
     if (pendingPages > 0) answer += `\n(${pendingPages} ${isSpanish ? (pendingPages === 1 ? 'página aún en lectura' : 'páginas aún en lectura') + '; la respuesta puede estar incompleta' : (pendingPages === 1 ? 'page' : 'pages') + ' still being read; the answer may be incomplete'})`;
     const result = { answer, question, citations: used, conversationId, usage };
     answerCache.set(cacheKey, { at: Date.now(), result });
+    // Keep it for the whole team (not answers still waiting for pages or "not found").
+    if (cacheEligible && docsVersion && !pendingPages && used.length && !/^(no aparece|not in the loaded)/i.test(answer)) {
+      await sb('/rest/v1/ai_answer_cache?on_conflict=project_id,question_key', auth, { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ project_id: projectId, question_key: questionKey, docs_version: docsVersion, result: { answer, citations: used }, hits: 0, created_at: new Date().toISOString() }) }).catch(() => {});
+    }
     return result;
     };
     if (input.stream) {
