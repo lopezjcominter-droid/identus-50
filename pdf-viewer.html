@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Document · Identus 50</title>
 <style>
   :root { --bar: #0F172A; --bg: #334155; }
@@ -11,8 +11,8 @@
   #bar b { flex: 1; min-width: 120px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #bar button, #bar a { padding: 6px 11px; border: none; border-radius: 6px; background: #fff; color: #0F172A; font-weight: 600; font-size: 13px; cursor: pointer; text-decoration: none; }
   #bar input { width: 52px; padding: 5px; border-radius: 6px; border: none; text-align: center; font-size: 13px; }
-  #pages { padding: 70px 8px 40px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-  .pg { background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.35); position: relative; }
+  #pages { padding: 70px 8px 40px; touch-action: pan-x pan-y; transform-origin: 0 0; }
+  .pg { margin: 0 auto 12px; background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.35); position: relative; }
   .pg canvas { display: block; width: 100%; height: 100%; }
   .pg .n { position: absolute; top: 6px; right: 8px; font-size: 11px; color: #64748B; background: rgba(255,255,255,.85); padding: 1px 6px; border-radius: 8px; }
   .pg.cited { outline: 4px solid #F59E0B; }
@@ -50,7 +50,7 @@
   const total = pdf.numPages; $('total').textContent = total; $('pageInput').max = total;
   const first = await pdf.getPage(1); const base = first.getViewport({ scale: 1 });
   let zoom = 1; const holder = $('pages'); holder.innerHTML = '';
-  const fitWidth = () => Math.min(holder.clientWidth - 16, 1400) * zoom;
+  const fitWidth = () => Math.min(window.innerWidth - 24, 1400) * zoom;
   const boxes = [];
   for (let n = 1; n <= total; n++) {
     const box = document.createElement('div'); box.className = 'pg' + (n === startPage ? ' cited' : ''); box.dataset.n = n;
@@ -68,7 +68,9 @@
     const v1 = page.getViewport({ scale: 1 });
     box.style.height = `${fitWidth() * v1.height / v1.width}px`;
     const scale = fitWidth() / v1.width; const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    const viewport = page.getViewport({ scale: scale * ratio });
+    // Cap the canvas size so big zooms do not run out of memory.
+    const safe = Math.sqrt(16000000 / Math.max(1, (v1.width * scale) * (v1.height * scale)));
+    const viewport = page.getViewport({ scale: scale * Math.min(ratio, safe) });
     const canvas = document.createElement('canvas'); canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
     await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
     if (rendering.get(n) !== key) return;
@@ -83,8 +85,43 @@
   $('prev').onclick = () => go(current() - 1);
   $('next').onclick = () => go(current() + 1);
   $('pageInput').onchange = e => go(Number(e.target.value) || 1);
-  const rezoom = f => { const n = current(); zoom = Math.min(4, Math.max(0.4, zoom * f)); boxes.forEach(b => { delete b.dataset.done; }); sizeBoxes(); go(n); boxes.forEach(b => { io.unobserve(b); io.observe(b); }); };
+  // Zoom keeping the point under the fingers (or the screen center) in place.
+  const rezoomAt = (f, cx = window.innerWidth / 2, cy = window.innerHeight / 2) => {
+    const next = Math.min(6, Math.max(0.4, zoom * f)); f = next / zoom; if (Math.abs(f - 1) < 0.01) return;
+    const px = window.scrollX + cx, py = window.scrollY + cy - 70;
+    zoom = next; boxes.forEach(b => { delete b.dataset.done; }); sizeBoxes();
+    window.scrollTo(px * f - cx, py * f - cy + 70);
+    boxes.forEach(b => { io.unobserve(b); io.observe(b); });
+  };
+  const rezoom = f => rezoomAt(f);
   $('zoomIn').onclick = () => rezoom(1.3); $('zoomOut').onclick = () => rezoom(1 / 1.3);
+  // Two fingers: pinch to zoom (the view stretches while pinching, then the
+  // pages are drawn again sharp). One finger: move around (normal scroll).
+  let pinch = null;
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  holder.addEventListener('touchstart', e => {
+    if (e.touches.length === 2) { e.preventDefault(); pinch = { d0: dist(e.touches), cx: (e.touches[0].clientX + e.touches[1].clientX) / 2, cy: (e.touches[0].clientY + e.touches[1].clientY) / 2, s: 1 }; }
+  }, { passive: false });
+  holder.addEventListener('touchmove', e => {
+    if (!pinch || e.touches.length !== 2) return; e.preventDefault();
+    pinch.s = Math.min(6 / zoom, Math.max(0.4 / zoom, dist(e.touches) / pinch.d0));
+    const ox = window.scrollX + pinch.cx, oy = window.scrollY + pinch.cy;
+    holder.style.transformOrigin = `${ox}px ${oy}px`; holder.style.transform = `scale(${pinch.s})`;
+  }, { passive: false });
+  const endPinch = () => { if (!pinch) return; const p = pinch; pinch = null; holder.style.transform = ''; holder.style.transformOrigin = '0 0'; rezoomAt(p.s, p.cx, p.cy); };
+  holder.addEventListener('touchend', e => { if (e.touches.length < 2) endPinch(); });
+  holder.addEventListener('touchcancel', endPinch);
+  // Safari gesture events (iPad): block the page zoom, the pinch above handles it.
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
+  // Computer: trackpad pinch (or Ctrl + wheel) zooms at the pointer.
+  let wheelTimer = null, wheelF = 1, wheelAt = null;
+  window.addEventListener('wheel', e => {
+    if (!e.ctrlKey) return; e.preventDefault();
+    wheelF *= Math.exp(-e.deltaY * 0.01); wheelAt = [e.clientX, e.clientY];
+    holder.style.transformOrigin = `${window.scrollX + e.clientX}px ${window.scrollY + e.clientY}px`; holder.style.transform = `scale(${Math.min(6 / zoom, Math.max(0.4 / zoom, wheelF))})`;
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => { const f = Math.min(6 / zoom, Math.max(0.4 / zoom, wheelF)); wheelF = 1; holder.style.transform = ''; holder.style.transformOrigin = '0 0'; rezoomAt(f, wheelAt[0], wheelAt[1]); }, 180);
+  }, { passive: false });
   await render(boxes[startPage - 1]);
   go(startPage);
 })();

@@ -432,9 +432,11 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     // so there the app's viewer opens the whole document at that page.
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     const page = String(Number(c.page) || 1);
+    // Every device uses the app's viewer: opens at the cited page, pinch to
+    // zoom and one finger to move (iPad browsers ignore "#page=N").
+    void isIOS;
     const target = !/\.pdf$/i.test(path) ? data.signedUrl
-      : isIOS ? `pdf-viewer.html#${new URLSearchParams({ u: data.signedUrl, p: page, t: title }).toString()}`
-      : `${data.signedUrl}#page=${page}`;
+      : `pdf-viewer.html#${new URLSearchParams({ u: data.signedUrl, p: page, t: title }).toString()}`;
     if (tab) tab.location.href = target; else window.open(target, '_blank');
   }
   // Takeoff: count symbols on the chosen sheet, one quarter per call in parallel.
