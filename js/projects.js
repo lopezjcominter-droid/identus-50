@@ -283,7 +283,7 @@
   }
   async function createNewProject(knownRows) {
     if (!isAdmin()) { alert('Only an admin can create projects.'); return; }
-    const sources = (knownRows || await loadSummary()).filter(r => tabOf(r) === 'active');
+    const sources = (knownRows || await loadSummary()).filter(r => tabOf(r) === 'active' && (r.units == null || Number(r.units) > 0)); // only projects that are set up can be copied
     let users = [];
     if (!isLocal()) { try { users = (await adminUsers('list', { projectId: PROJECT_ID })).users || []; } catch (_) {} }
     users = users.filter(u => !u.disabled && u.role !== 'admin').sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
@@ -347,6 +347,13 @@
   // admin's password — and is only moved to "Deleted" (hidden, all data kept),
   // so it can still be restored.
   async function hardDeleteEmptyProject(id) {
+    // Double check right before deleting: refuse if the project has any data
+    // now (e.g. someone applied its setup in the meantime).
+    for (const t of ['units', 'inspection_records', 'field_issues', 'punch_list', 'official_final_records']) {
+      const { count, error } = await client().from(t).select('id', { count: 'exact', head: true }).eq('project_id', id);
+      if (error) throw new Error(`Could not verify the project is empty (${t}): ${error.message}`);
+      if (count) throw new Error('This project already has data, so it was not deleted. Use Delete… in its details (needs name + password).');
+    }
     for (const t of ['quantity_templates', 'quantity_floor_plans', 'project_setup_config', 'notification_settings', 'project_members', 'buildings']) {
       try { await client().from(t).delete().eq('project_id', id); } catch (_) {}
     }
