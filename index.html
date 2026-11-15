@@ -1415,8 +1415,8 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     // Project name/address are shared through the Supabase `projects` table (same for every device)
     let sharedProject = null;
-    function getProjectName() { return (sharedProject && sharedProject.name) || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? localStorage.getItem('cfg_project_name') : '') || 'Ability Housing'; }
-    function getProjectAddress() { return (sharedProject && sharedProject.address) || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? (localStorage.getItem('cfg_project_address') ?? '') : '') || '5121 North Pine Hills Road'; }
+    function getProjectName() { return (sharedProject && sharedProject.name) || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? localStorage.getItem('cfg_project_name') : '') || (String(PROJECT_ID) === String(DEFAULT_PROJECT_ID) ? 'Ability Housing' : 'Project'); }
+    function getProjectAddress() { return (sharedProject && sharedProject.address) || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? (localStorage.getItem('cfg_project_address') ?? '') : '') || (String(PROJECT_ID) === String(DEFAULT_PROJECT_ID) ? '5121 North Pine Hills Road' : ''); }
     function applyProjectName() {
       const n = getProjectName();
       const el = document.getElementById('projectNameLabel');
@@ -7400,7 +7400,12 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         if (select) select.value = project.id;
       });
     }
-    function selectSetupProject(projectId) { selectProjectFromCatalog(projectId); }
+    // Live site: choosing another project here opens that project (its own
+    // setup and data) instead of loading its name into this one.
+    function selectSetupProject(projectId) {
+      if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:' && projectId && projectId !== PROJECT_ID) { selectHeaderProject(projectId); return; }
+      selectProjectFromCatalog(projectId);
+    }
     // Project switcher, details, archive and portfolio live in js/projects.js.
     function selectHeaderProject(projectId) {
       if (!projectId) return;
@@ -8050,7 +8055,9 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       // Step 0: Apply Supabase connection settings if changed
       const newUrl = document.getElementById('setupSupabaseUrl').value.trim();
       const newKey = document.getElementById('setupSupabaseKey').value.trim();
-      const newPid = document.getElementById('setupProjectId').value.trim();
+      // Live site: Apply always saves into the project that is open (never into
+      // another project chosen in a field), so projects never mix.
+      const newPid = localPreview ? document.getElementById('setupProjectId').value.trim() : PROJECT_ID;
       // Connection settings are committed only after the user confirms the changes.
 
       const pn = (document.getElementById('setupProjectName').value || '').trim() || getProjectName();
@@ -11391,13 +11398,13 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       try {
         if (window.authIsActive && window.authIsActive() && window.userRole !== 'admin') return;
         const today = new Date().toISOString().split('T')[0];
-        if (localStorage.getItem('cfg_last_auto_backup') === today) return;
+        if (localStorage.getItem(`cfg_last_auto_backup_${PROJECT_ID}`) === today) return;
         if (!sbClient || !data || data.length === 0) return;
         const strip = u => ({ ...u, systems: Object.fromEntries(Object.entries(u.systems).map(([k, s]) => [k, { ...s, events: (s.events || []).map(e => ({ ...e, images: (e.images || []).filter(i => !String(i).startsWith('data:')) })) }])) });
         const backup = { version: 2, exportedAt: new Date().toISOString(), units: data.map(strip), punchlist: (typeof punchlist !== 'undefined' ? punchlist : []), cloudTables: await backupCloudTables() };
         const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
         const { error } = await sbClient.storage.from(STORAGE_BUCKET).upload(`backups/${PROJECT_ID}/${today}.json`, blob, { contentType: 'application/json', upsert: true });
-        if (!error) { localStorage.setItem('cfg_last_auto_backup', today); console.log('✅ Daily backup saved'); }
+        if (!error) { localStorage.setItem(`cfg_last_auto_backup_${PROJECT_ID}`, today); console.log('✅ Daily backup saved'); }
         else console.warn('Daily backup skipped:', error.message);
       } catch (e) { console.warn('autoBackupDaily', e); }
     }

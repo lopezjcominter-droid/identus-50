@@ -52,6 +52,11 @@
     try {
       const { data } = await client().from('projects').select('id,name,address,client,contractor,permit_number,start_date,end_date,logo_path,status').eq('id', PROJECT_ID).maybeSingle();
       if (data) window.currentProjectInfo = { ...data, logoUrl: logoUrl(data.logo_path) };
+      // A deleted project stays closed for everyone but admins, even from an old link.
+      if (data && deleted(data) && window.userRole !== 'admin' && PROJECT_ID !== DEFAULT_PROJECT_ID) {
+        alert('This project was deleted. Opening the main project.');
+        selectHeaderProject(DEFAULT_PROJECT_ID);
+      }
     } catch (_) {}
   }
   // Text lines for report headers (empty fields are left out).

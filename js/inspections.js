@@ -1224,7 +1224,7 @@ function inspSelectUnit(apt) {
   if (!inspCurrentUnit) return;
   window.inspLastSelectedUnit = inspCurrentUnit;
   window.inspHistoryUnitFilter = String(apt);
-  try { sessionStorage.setItem('inspActiveUnit', JSON.stringify(inspCurrentUnit)); } catch (_) {}
+  try { sessionStorage.setItem(`inspActiveUnit_${PROJECT_ID}`, JSON.stringify(inspCurrentUnit)); } catch (_) {}
   window.inspReturnAfterInspection = 'unit-search';
   inspGoStep(2);
   const el = document.getElementById('insp-types-unit-title');
@@ -1277,13 +1277,13 @@ function inspRenderTypeGrid() {
   if (!inspCurrentUnit && window.inspLastSelectedUnit) inspCurrentUnit = window.inspLastSelectedUnit;
   if (!inspCurrentUnit) {
     try {
-      const saved = JSON.parse(sessionStorage.getItem('inspActiveUnit') || 'null');
+      const saved = JSON.parse(sessionStorage.getItem(`inspActiveUnit_${PROJECT_ID}`) || 'null');
       if (saved) inspCurrentUnit = saved;
     } catch (_) {}
   }
   if (!inspCurrentUnit) return;
   window.inspLastSelectedUnit = inspCurrentUnit;
-  try { sessionStorage.setItem('inspActiveUnit', JSON.stringify(inspCurrentUnit)); } catch (_) {}
+  try { sessionStorage.setItem(`inspActiveUnit_${PROJECT_ID}`, JSON.stringify(inspCurrentUnit)); } catch (_) {}
   const inspections = inspGetInspections();
   const unitInspections = inspections.filter(r => r.apt === inspCurrentUnit.apt);
   // Keep every checklist visible. Project Setup only controls whether it is enabled.
@@ -1900,7 +1900,7 @@ function inspReturnToTypeList() {
   if (!inspCurrentUnit) {
     inspCurrentUnit = window.inspLastSelectedUnit || null;
     if (!inspCurrentUnit) {
-      try { inspCurrentUnit = JSON.parse(sessionStorage.getItem('inspActiveUnit') || 'null'); } catch (_) {}
+      try { inspCurrentUnit = JSON.parse(sessionStorage.getItem(`inspActiveUnit_${PROJECT_ID}`) || 'null'); } catch (_) {}
     }
   }
   if (!inspCurrentUnit) {
@@ -3110,7 +3110,7 @@ function inspCloseInspectionView() {
     if (!inspCurrentUnit) {
       inspCurrentUnit = window.inspLastSelectedUnit || null;
       if (!inspCurrentUnit) {
-        try { inspCurrentUnit = JSON.parse(sessionStorage.getItem('inspActiveUnit') || 'null'); } catch (_) {}
+        try { inspCurrentUnit = JSON.parse(sessionStorage.getItem(`inspActiveUnit_${PROJECT_ID}`) || 'null'); } catch (_) {}
       }
     }
     const tab = document.querySelector('.tab-main[onclick*=\"inspections\"]');
