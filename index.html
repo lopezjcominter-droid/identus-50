@@ -7709,10 +7709,12 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const startAt = Number(cfg.startAt) === 0 ? 0 : 1;
       const basePrefix = cfg.prefix == null ? '' : String(cfg.prefix);
       const floors = Array.isArray(cfg.floorConfigs) && cfg.floorConfigs.length
-        ? cfg.floorConfigs.map(f => ({ floor: Math.max(1, parseInt(f.floor) || 1), count: Math.max(1, parseInt(f.unitsPerFloor) || 1), prefix: f.prefix == null || f.prefix === '' ? basePrefix : String(f.prefix), model: String(f.model || '').trim(), underground: f.underground }))
+        ? cfg.floorConfigs.map(f => ({ floor: Math.max(1, parseInt(f.floor) || 1), count: Math.max(1, parseInt(f.unitsPerFloor) || 1), prefix: f.prefix == null || f.prefix === '' ? basePrefix : String(f.prefix), model: String(f.model || '').trim(), underground: f.underground, exact: String(f.unitList || '').trim() ? setupParseUnitList(f.unitList) : null }))
         : Array.from({ length: Math.max(1, parseInt(cfg.floors) || 1) }, (_, i) => ({ floor: i + 1, count: Math.max(1, parseInt(cfg.unitsPerFloor) || 1), prefix: basePrefix, model: '' }));
       const list = [];
-      floors.forEach(f => { for (let u = 0; u < f.count; u++) list.push({ apt: `${f.prefix}${f.floor}${String(u + startAt).padStart(2, '0')}`, floor: `Floor ${f.floor}`, floorNumber: f.floor, model: f.model, underground: f.underground }); });
+      floors.forEach(f => {
+        if (f.exact) { f.exact.forEach(u => list.push({ apt: u.apt, floor: `Floor ${f.floor}`, floorNumber: f.floor, model: u.model || f.model, underground: f.underground })); return; }
+        for (let u = 0; u < f.count; u++) list.push({ apt: `${f.prefix}${f.floor}${String(u + startAt).padStart(2, '0')}`, floor: `Floor ${f.floor}`, floorNumber: f.floor, model: f.model, underground: f.underground }); });
       return list;
     }
     window.setupUnitList = setupUnitList;
@@ -7726,7 +7728,27 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         <label style="font-size:10px;color:#64748B;">Units<input class="setup-floor-units" type="number" min="1" max="99" value="${setupFloorValue(cfg.unitsPerFloor, unitsPerFloor)}" style="width:100%;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"></label>
         <label style="font-size:10px;color:#64748B;">Prefix<input class="setup-floor-prefix" type="text" maxlength="3" value="${setupFloorValue(cfg.prefix, prefix)}" style="width:100%;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"></label>
         <label style="font-size:10px;color:#64748B;">Unit model<input class="setup-floor-model" type="text" placeholder="A1 / B1" value="${setupFloorValue(cfg.model)}" style="width:100%;padding:5px;border:1px solid #CBD5E1;border-radius:5px;"></label><label style="font-size:10px;color:#64748B;display:flex;align-items:center;gap:3px;white-space:nowrap;"><input class="setup-floor-underground" type="checkbox" ${cfg.underground !== false && (cfg.underground === true || Number(cfg.floor || i + 1) === 1) ? "checked" : ""}> Underground</label>
+        <label style="grid-column:1/-1;font-size:10px;color:#64748B;">Exact unit numbers (optional — when the plan skips numbers). Ranges, commas or one per line; a model after the number is kept: <i>100 LW-A1, 101, 103-107, 110</i>
+          <textarea class="setup-floor-list" rows="1" placeholder="Leave empty to number automatically" style="width:100%;padding:5px;border:1px solid #CBD5E1;border-radius:5px;font-size:12px;resize:vertical;">${String(cfg.unitList || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</textarea></label>
+        <div style="grid-column:1/-1;margin-top:-2px;"><button type="button" onclick="setupImportUnitsFromPlan(this)" style="padding:4px 9px;border:1px solid #2563EB;color:#2563EB;background:#fff;border-radius:5px;font-size:11px;cursor:pointer;">📄 Import units from floor plan (PDF)</button> <span style="font-size:10px;color:#94A3B8;">Then use "Copy from" to repeat this floor on typical floors.</span></div>
       </div>`).join('');
+    }
+    // "100 LW-A1, 101-105, 110" -> [{apt:'100', model:'LW-A1'}, {apt:'101'}, … {apt:'110'}]
+    function setupParseUnitList(text) {
+      const out = [];
+      String(text || '').split(/[,;\n]+/).map(t => t.trim()).filter(Boolean).forEach(entry => {
+        const [first, ...rest] = entry.replace(/^(\d+)\s*[-–]\s*(\d+)/, '$1-$2').split(/\s+/);
+        const model = rest.join(' ').trim();
+        const range = first.match(/^(\d+)-(\d+)$/);
+        if (range) {
+          const a = parseInt(range[1], 10), b = parseInt(range[2], 10), width = range[1].length;
+          if (b >= a && b - a <= 200) for (let n = a; n <= b; n++) out.push({ apt: String(n).padStart(width, '0'), model });
+          return;
+        }
+        out.push({ apt: first, model });
+      });
+      const seen = new Set();
+      return out.filter(u => u.apt && !seen.has(u.apt) && seen.add(u.apt));
     }
     function toggleSetupFloorEditor(id) {
       const editor = document.getElementById(`${id}_floorEditor`);
@@ -7743,7 +7765,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         prefix, startAt: Number(row.querySelector('.setup-start-at')?.value) === 0 ? 0 : 1,
         floors: parseInt(row.querySelector('.setup-building-floors')?.value, 10) || 1,
         unitsPerFloor: parseInt(row.querySelector('.setup-building-units')?.value, 10) || 1,
-        floorConfigs: custom ? Array.from(row.querySelectorAll('.setup-floor-row')).map(r => ({ floor: r.querySelector('.setup-floor-number')?.value, unitsPerFloor: r.querySelector('.setup-floor-units')?.value, prefix: (r.querySelector('.setup-floor-prefix')?.value || '').trim() || prefix, model: r.querySelector('.setup-floor-model')?.value })) : null
+        floorConfigs: custom ? Array.from(row.querySelectorAll('.setup-floor-row')).map(r => ({ floor: r.querySelector('.setup-floor-number')?.value, unitsPerFloor: r.querySelector('.setup-floor-units')?.value, prefix: (r.querySelector('.setup-floor-prefix')?.value || '').trim() || prefix, model: r.querySelector('.setup-floor-model')?.value, unitList: r.querySelector('.setup-floor-list')?.value || '' })) : null
       };
     }
     function setupUpdateNumberPreview(id) {
@@ -7751,7 +7773,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       if (!row || !box) return;
       const list = setupUnitList(setupBuildingConfigFromRow(row));
       const byFloor = new Map(); list.forEach(u => { if (!byFloor.has(u.floor)) byFloor.set(u.floor, []); byFloor.get(u.floor).push(u.apt); });
-      const parts = [...byFloor.entries()].map(([f, apts]) => `${f.replace('Floor ', 'F')}: <b>${apts[0]}</b>${apts.length > 1 ? `–<b>${apts[apts.length - 1]}</b>` : ''}`);
+      const parts = [...byFloor.entries()].map(([f, apts]) => `${f.replace('Floor ', 'F')}: <b>${apts[0]}</b>${apts.length > 1 ? `–<b>${apts[apts.length - 1]}</b>` : ''} (${apts.length})`);
       box.innerHTML = `Unit numbers (${list.length}): ${parts.slice(0, 6).join(' · ')}${parts.length > 6 ? ` · … ${parts.length - 6} more floors` : ''}`;
     }
     // Keep one row per floor when FLOORS changes (values already typed are kept;
@@ -7768,7 +7790,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         unitsPerFloor: row.querySelector('.setup-floor-units')?.value,
         prefix: row.querySelector('.setup-floor-prefix')?.value,
         model: row.querySelector('.setup-floor-model')?.value,
-        underground: !!row.querySelector('.setup-floor-underground')?.checked
+        underground: !!row.querySelector('.setup-floor-underground')?.checked,
+        unitList: row.querySelector('.setup-floor-list')?.value || ''
       }));
       if (existing.length === count) { setupUpdateNumberPreview(id); return; }
       const prefix = existing[0]?.prefix || '';
@@ -7788,7 +7811,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const sourceValues = {
         units: source.querySelector('.setup-floor-units')?.value || '1',
         prefix: source.querySelector('.setup-floor-prefix')?.value || '',
-        model: source.querySelector('.setup-floor-model')?.value || '', underground: !!source.querySelector('.setup-floor-underground')?.checked
+        model: source.querySelector('.setup-floor-model')?.value || '', underground: !!source.querySelector('.setup-floor-underground')?.checked,
+        unitList: source.querySelector('.setup-floor-list')?.value || ''
       };
       editor.querySelectorAll('.setup-floor-target:checked').forEach(check => {
         const target = check.closest('.setup-floor-row');
@@ -7798,8 +7822,111 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         target.querySelector('.setup-floor-model').value = sourceValues.model;
         const underground = target.querySelector('.setup-floor-underground');
         if (underground) underground.checked = sourceValues.underground;
+        const list = target.querySelector('.setup-floor-list');
+        if (list) list.value = setupRenumberUnitList(sourceValues.unitList, sourceFloor, target.querySelector('.setup-floor-number')?.value);
         check.checked = false;
       });
+    }
+    // "300 S2, 301-305" copied from floor 3 to floor 4 -> "400 S2, 401-405".
+    function setupRenumberUnitList(text, fromFloor, toFloor) {
+      const from = String(parseInt(fromFloor, 10) || ''), to = String(parseInt(toFloor, 10) || '');
+      if (!text || !from || !to || from === to) return text || '';
+      return String(text).replace(/\b\d{3,5}\b/g, n => n.startsWith(from) && n.length - from.length === 2 ? to + n.slice(from.length) : n);
+    }
+    function setupLoadPdfJs() {
+      if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+      return new Promise((resolve, reject) => {
+        const sc = document.createElement('script');
+        sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+        sc.onload = () => window.pdfjsLib ? resolve(window.pdfjsLib) : reject(new Error('PDF.js did not initialize'));
+        sc.onerror = () => reject(new Error('PDF.js failed to load'));
+        document.head.appendChild(sc);
+      });
+    }
+    const SETUP_NON_UNIT = /\b(STAIRS?|MECH|ELEC|ELECTRICAL|TECH|CORRIDOR|HALL|STORAGE|GARAGE|AMENIT\w*|DECK|FITNESS|RESTROOMS?|JAN\w*|ROOM|LOBBY|TRASH|LAUNDRY|OFFICE|LEASING|MAIL\w*|BIKE|ELEV\w*|PUMP|FIRE|FCC|IDF|MDF|VEST\w*|POOL|CLUB\w*|UTIL\w*|RISER|SHAFT|LOUNGE|BOH|LOADING|PARKING|TERRACE|ROOF|SHAFT|CHUTE|GENERATOR|METER|TELECOM)\b/i;
+    // Unit labels are short model codes (LW-A1, TH-B7 ALT, S2, A2.1, C); room names (STAIR 1, COURTYARD) are not.
+    function setupLooksLikeUnit(label) {
+      const t = String(label || '').trim().toUpperCase();
+      return /^[A-Z]{1,3}(-[A-Z]{0,3})?\d*(\.\d+)?( ALT)?$/.test(t) && !SETUP_NON_UNIT.test(t);
+    }
+    // Reads room numbers and the label just above each one from a text PDF (in the browser, no AI).
+    async function setupExtractRoomsFromPdf(file) {
+      const pdfjs = await setupLoadPdfJs();
+      pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+      const rooms = new Map();
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const vh = page.getViewport({ scale: 1 }).height;
+        const tc = await page.getTextContent();
+        const words = tc.items.filter(it => it.str && it.str.trim()).map(it => {
+          const h = Math.abs(it.transform[3]) || it.height || 1, x0 = it.transform[4], bottom = vh - it.transform[5];
+          return { text: it.str.trim(), x0, x1: x0 + (it.width || 0), top: bottom - h, bottom };
+        }).sort((a, b) => Math.round(a.top) - Math.round(b.top) || a.x0 - b.x0);
+        const lines = [];
+        words.forEach(w => {
+          const L = lines.find(L => Math.abs(L.top - w.top) < 1.5 && w.x0 - L.x1 >= -1 && w.x0 - L.x1 < 6);
+          if (L) { L.text += ' ' + w.text; L.x1 = w.x1; } else lines.push({ ...w });
+        });
+        const isNum = t => /^\d{3,4}[A-Z]?$/.test(t);
+        const labels = lines.filter(L => !isNum(L.text));
+        lines.filter(L => isNum(L.text)).forEach(n => {
+          if (rooms.has(n.text)) return;
+          const cx = (n.x0 + n.x1) / 2;
+          const cand = labels.filter(L => n.top - L.bottom > 0 && n.top - L.bottom < 9 && Math.abs((L.x0 + L.x1) / 2 - cx) < 25);
+          if (!cand.length) return;
+          cand.sort((a, b) => (n.top - a.bottom) - (n.top - b.bottom));
+          rooms.set(n.text, cand[0].text.replace(/\s*-\s*/g, '-').trim());
+        });
+      }
+      return [...rooms.entries()].map(([apt, label]) => ({ apt, label })).sort((a, b) => a.apt.length - b.apt.length || a.apt.localeCompare(b.apt, undefined, { numeric: true }));
+    }
+    function setupImportUnitsFromPlan(btn) {
+      const row = btn.closest('.setup-floor-row');
+      const floor = String(parseInt(row?.querySelector('.setup-floor-number')?.value, 10) || '');
+      const input = document.createElement('input');
+      input.type = 'file'; input.accept = 'application/pdf,.pdf';
+      input.onchange = async () => {
+        const file = input.files?.[0]; if (!file) return;
+        const oldText = btn.textContent; btn.disabled = true; btn.textContent = 'Reading plan…';
+        let rooms = [];
+        try { rooms = await setupExtractRoomsFromPdf(file); }
+        catch (e) { alert('Could not read this PDF: ' + (e.message || e)); return; }
+        finally { btn.disabled = false; btn.textContent = oldText; }
+        const onFloor = rooms.filter(r => r.apt.startsWith(floor) && r.apt.replace(/[A-Z]$/, '').length - floor.length === 2);
+        if (!onFloor.length) { alert(`No room numbers for floor ${floor} were found in this PDF. If the plan is a scanned image, type the unit numbers by hand.`); return; }
+        setupShowImportReview(row, floor, onFloor, file.name);
+      };
+      input.click();
+    }
+    function setupShowImportReview(row, floor, rooms, fileName) {
+      const esc = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+      ov.innerHTML = `<div style="background:#fff;border-radius:10px;max-width:520px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);">
+        <div style="padding:14px 16px;border-bottom:1px solid #E2E8F0;"><b>Floor ${esc(floor)} — units found in ${esc(fileName)}</b><div style="font-size:12px;color:#64748B;margin-top:4px;">Stairs, MECH, ELEC, corridors and common areas are unchecked. Check or uncheck before using the list.</div></div>
+        <div style="overflow:auto;padding:8px 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:4px 10px;">
+          ${rooms.map((r, i) => { const unit = setupLooksLikeUnit(r.label); return `<label style="font-size:12px;display:flex;gap:6px;align-items:center;${unit ? '' : 'color:#94A3B8;'}"><input type="checkbox" data-i="${i}" ${unit ? 'checked' : ''}> <b>${esc(r.apt)}</b> ${esc(r.label)}</label>`; }).join('')}
+        </div>
+        <div style="padding:12px 16px;border-top:1px solid #E2E8F0;display:flex;gap:8px;justify-content:space-between;align-items:center;">
+          <label style="font-size:12px;color:#475569;"><input type="checkbox" class="imp-model" checked> Keep labels as unit model</label>
+          <span><span class="imp-count" style="font-size:12px;color:#475569;margin-right:8px;"></span><button type="button" class="imp-cancel" style="padding:7px 12px;border:1px solid #CBD5E1;background:#fff;border-radius:6px;cursor:pointer;">Cancel</button>
+          <button type="button" class="imp-ok" style="padding:7px 12px;border:0;background:#2563EB;color:#fff;border-radius:6px;cursor:pointer;">Use this list</button></span>
+        </div></div>`;
+      document.body.appendChild(ov);
+      const count = () => { ov.querySelector('.imp-count').textContent = `${ov.querySelectorAll('input[data-i]:checked').length} units`; };
+      ov.addEventListener('change', count); count();
+      ov.querySelector('.imp-cancel').onclick = () => ov.remove();
+      ov.querySelector('.imp-ok').onclick = () => {
+        const keepModel = ov.querySelector('.imp-model').checked;
+        const picked = [...ov.querySelectorAll('input[data-i]:checked')].map(c => rooms[+c.dataset.i]);
+        const list = row.querySelector('.setup-floor-list');
+        if (list.value.trim() && !confirm('Replace the unit numbers already typed for this floor?')) return;
+        list.value = picked.map(r => keepModel ? `${r.apt} ${r.label}` : r.apt).join(', ');
+        const units = row.querySelector('.setup-floor-units'); if (units) units.value = Math.min(99, picked.length);
+        ov.remove();
+        const id = row.closest('[id^="setupBuilding_"]')?.id; if (id) setupUpdateNumberPreview(id);
+      };
     }
     function addSetupBuilding({ name = '', floors = 3, unitsPerFloor = 10, prefix = null, startAt = 1, type = 'residential', enabled = true, undergroundEnabled = true, activeSystems = null, floorConfigs = null, specialAreas = [], plan = '', planName = '', planType = '', planHistory = [] } = {}) {
       setupBuildingCount++;
@@ -8163,7 +8290,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             unitsPerFloor: parseInt(floorRow.querySelector('.setup-floor-units')?.value) || 1,
             prefix: floorRow.querySelector('.setup-floor-prefix')?.value.trim() || prefix,
             model: floorRow.querySelector('.setup-floor-model')?.value.trim() || '',
-            underground: !!floorRow.querySelector('.setup-floor-underground')?.checked
+            underground: !!floorRow.querySelector('.setup-floor-underground')?.checked,
+            unitList: (floorRow.querySelector('.setup-floor-list')?.value || '').trim()
           })) : null;
            const specialAreas = collectSetupSpecialAreas(row);
            const undergroundEnabled = row.querySelector('.setup-underground-enabled')?.checked !== false;
