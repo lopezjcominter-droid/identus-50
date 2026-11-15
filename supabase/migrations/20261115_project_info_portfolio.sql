@@ -33,3 +33,8 @@ language sql stable security definer set search_path to 'public' as $$
 $$;
 grant execute on function public.project_picker_summary() to authenticated;
 select 'ok' as result;
+
+-- Admins can remove a project (the app only does it for empty projects; a
+-- project with data is marked status = 'Deleted' and can be restored).
+drop policy if exists projects_admin_delete on public.projects;
+create policy projects_admin_delete on public.projects for delete to authenticated using (current_profile_role() = 'admin');

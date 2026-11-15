@@ -12,6 +12,8 @@
   const isAdmin = () => window.userRole === 'admin' || isLocal();
   const canManage = r => isAdmin() || (r && r.my_role === 'pm');
   const archived = r => /^archived$/i.test(String(r.status || ''));
+  const deleted = r => /^deleted$/i.test(String(r.status || ''));
+  const tabOf = r => deleted(r) ? 'deleted' : archived(r) ? 'archived' : 'active';
   const LOGO_BUCKET = 'identus-files';
   const logoUrl = path => {
     if (!path) return '';
@@ -87,9 +89,10 @@
     const rankOf = r => r.id === PROJECT_ID ? -1 : (recent.indexOf(r.id) >= 0 ? recent.indexOf(r.id) : 999);
     rows.sort((a, b) => rankOf(a) - rankOf(b) || String(a.name || '').localeCompare(String(b.name || '')));
     const when = t => { if (!t) return 'No activity yet'; const d = Math.floor((Date.now() - Date.parse(t)) / 86400000); return d <= 0 ? 'Active today' : d === 1 ? 'Active yesterday' : `Active ${d} days ago`; };
-    const counts = { active: rows.filter(r => !archived(r)).length, archived: rows.filter(archived).length };
+    if (!isAdmin()) for (let i = rows.length - 1; i >= 0; i--) if (deleted(rows[i])) rows.splice(i, 1);
+    const counts = { active: rows.filter(r => tabOf(r) === 'active').length, archived: rows.filter(r => tabOf(r) === 'archived').length, deleted: rows.filter(r => tabOf(r) === 'deleted').length };
     const drawTabs = () => {
-      ov.querySelector('#ppTabs').innerHTML = ['active', 'archived'].map(k => `<button type="button" data-tab="${k}" style="padding:4px 12px;border-radius:14px;border:1px solid ${tab === k ? '#1D4ED8' : '#CBD5E1'};background:${tab === k ? '#1D4ED8' : '#fff'};color:${tab === k ? '#fff' : '#334155'};font-size:12px;font-weight:600;cursor:pointer;">${k === 'active' ? 'Active' : 'Archived'} (${counts[k]})</button>`).join('');
+      ov.querySelector('#ppTabs').innerHTML = ['active', 'archived', ...(counts.deleted ? ['deleted'] : [])].map(k => `<button type="button" data-tab="${k}" style="padding:4px 12px;border-radius:14px;border:1px solid ${tab === k ? '#1D4ED8' : '#CBD5E1'};background:${tab === k ? '#1D4ED8' : '#fff'};color:${tab === k ? '#fff' : '#334155'};font-size:12px;font-weight:600;cursor:pointer;">${({ active: 'Active', archived: 'Archived', deleted: 'Deleted' })[k]} (${counts[k]})</button>`).join('');
       ov.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; drawTabs(); draw(ov.querySelector('#ppSearch').value.trim().toLowerCase()); });
     };
     const card = r => {
@@ -101,7 +104,7 @@
         <button type="button" data-pid="${e(r.id)}" style="display:flex;flex:1;min-width:0;text-align:left;gap:12px;align-items:center;padding:12px;border:1px solid ${current ? '#93C5FD' : 'transparent'};background:${current ? '#EFF6FF' : '#fff'};border-radius:8px;cursor:pointer;${archived(r) ? 'opacity:.75;' : ''}">
           ${logo ? `<img src="${e(logo)}" alt="" style="width:40px;height:40px;border-radius:8px;object-fit:contain;background:#F8FAFC;border:1px solid #E2E8F0;flex-shrink:0;">` : `<div style="width:40px;height:40px;border-radius:8px;background:${archived(r) ? '#94A3B8' : '#1E40AF'};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">${e(initials)}</div>`}
           <div style="flex:1;min-width:0;">
-            <div style="font-weight:700;color:#0F172A;font-size:14px;">${e(r.name)}${current ? ' <span style="font-size:11px;font-weight:600;color:#1D4ED8;background:#DBEAFE;padding:1px 7px;border-radius:9px;margin-left:4px;">Current</span>' : ''}${archived(r) ? ' <span style="font-size:11px;font-weight:600;color:#475569;background:#E2E8F0;padding:1px 7px;border-radius:9px;margin-left:4px;">Archived</span>' : ''}</div>
+            <div style="font-weight:700;color:#0F172A;font-size:14px;">${e(r.name)}${current ? ' <span style="font-size:11px;font-weight:600;color:#1D4ED8;background:#DBEAFE;padding:1px 7px;border-radius:9px;margin-left:4px;">Current</span>' : ''}${archived(r) ? ' <span style="font-size:11px;font-weight:600;color:#475569;background:#E2E8F0;padding:1px 7px;border-radius:9px;margin-left:4px;">Archived</span>' : ''}${deleted(r) ? ' <span style="font-size:11px;font-weight:600;color:#B91C1C;background:#FEE2E2;padding:1px 7px;border-radius:9px;margin-left:4px;">Deleted</span>' : ''}</div>
             <div style="font-size:12px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ${e(r.address || 'No address')}</div>
             ${meta ? `<div style="font-size:11px;color:#475569;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${meta}</div>` : ''}
             ${empty ? `<div style="font-size:11px;color:#B45309;margin-top:3px;">Not set up yet — open it and use Project Setup to add buildings and units${r.my_role ? ` · Your role: <b>${e(r.my_role)}</b>` : ''}</div>` : ''}
@@ -113,8 +116,8 @@
       </div>`;
     };
     const draw = q => {
-      const shown = rows.filter(r => (tab === 'archived') === archived(r)).filter(r => !q || `${r.name} ${r.address} ${r.client || ''} ${r.contractor || ''} ${r.permit_number || ''}`.toLowerCase().includes(q));
-      ov.querySelector('#ppList').innerHTML = shown.length ? shown.map(card).join('') : `<p style="color:#64748B;padding:10px;">${tab === 'archived' ? 'No archived projects.' : 'No projects found.'}</p>`;
+      const shown = rows.filter(r => tabOf(r) === tab).filter(r => !q || `${r.name} ${r.address} ${r.client || ''} ${r.contractor || ''} ${r.permit_number || ''}`.toLowerCase().includes(q));
+      ov.querySelector('#ppList').innerHTML = shown.length ? shown.map(card).join('') : `<p style="color:#64748B;padding:10px;">${tab === 'active' ? 'No projects found.' : `No ${tab} projects.`}</p>`;
       active = -1;
       ov.querySelectorAll('[data-pid]').forEach(b => b.onclick = () => {
         const pid = b.dataset.pid; if (pid === PROJECT_ID) { close(); return; }
@@ -154,7 +157,7 @@
         ${isAdmin() && r.units != null && !Number(r.units) ? `<div style="border:1px dashed #93C5FD;background:#EFF6FF;border-radius:8px;padding:10px;margin-bottom:12px;"><div style="font-size:12px;font-weight:600;color:#1E3A8A;margin-bottom:6px;">This project is not set up yet</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><select id="pdCopyFrom" style="flex:1;min-width:160px;padding:7px;border:1px solid #CBD5E1;border-radius:6px;font-size:13px;"><option value="">Copy setup from…</option></select><button type="button" id="pdCopyBtn" style="padding:7px 12px;border:none;background:#1D4ED8;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">Copy</button></div><div style="font-size:11px;color:#475569;margin-top:6px;">Buildings/floors layout, systems and QC unit models. No progress or photos.</div></div>` : ''}
         <div id="pdMsg" style="min-height:16px;font-size:12px;color:#B91C1C;margin-bottom:8px;"></div>
         <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;">
-          ${isAdmin() ? `<button type="button" id="pdArchive" style="padding:8px 12px;border:1px solid ${archived(r) ? '#059669' : '#DC2626'};color:${archived(r) ? '#047857' : '#B91C1C'};background:#fff;border-radius:6px;cursor:pointer;font-weight:600;">${archived(r) ? 'Restore project' : 'Archive project'}</button>` : '<span></span>'}
+          ${isAdmin() ? `<span style="display:flex;gap:8px;flex-wrap:wrap;">${deleted(r) ? '' : `<button type="button" id="pdArchive" style="padding:8px 12px;border:1px solid ${archived(r) ? '#059669' : '#64748B'};color:${archived(r) ? '#047857' : '#334155'};background:#fff;border-radius:6px;cursor:pointer;font-weight:600;">${archived(r) ? 'Restore project' : 'Archive'}</button>`}${deleted(r) ? '<button type="button" id="pdUndelete" style="padding:8px 12px;border:1px solid #059669;color:#047857;background:#fff;border-radius:6px;cursor:pointer;font-weight:600;">Restore deleted project</button>' : (r.id === DEFAULT_PROJECT_ID ? '' : '<button type="button" id="pdDelete" style="padding:8px 12px;border:1px solid #DC2626;color:#B91C1C;background:#fff;border-radius:6px;cursor:pointer;font-weight:600;">Delete…</button>')}</span>` : '<span></span>'}
           <span style="display:flex;gap:8px;"><button type="button" id="pdCancel" style="padding:8px 14px;border:1px solid #CBD5E1;background:#fff;border-radius:6px;cursor:pointer;">Cancel</button><button type="submit" id="pdSave" style="padding:8px 14px;border:none;background:#1D4ED8;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">Save</button></span>
         </div></form>`, 560);
     const $ = id => ov.querySelector('#' + id);
@@ -172,6 +175,12 @@
         $('pdCopyBtn').disabled = false; $('pdCopyBtn').textContent = 'Copy';
       };
     }
+    if ($('pdDelete')) $('pdDelete').onclick = () => { close(); deleteProject(r); };
+    if ($('pdUndelete')) $('pdUndelete').onclick = async () => {
+      const { error } = await client().from('projects').update({ status: 'Active' }).eq('id', r.id);
+      if (error) { $('pdMsg').textContent = error.message; return; }
+      close(); if (typeof toast === 'function') toast('Project restored'); openProjectPicker();
+    };
     if ($('pdArchive')) $('pdArchive').onclick = async () => {
       const toArchive = !archived(r);
       if (toArchive && !confirm(`Archive “${r.name}”?\n\nIt leaves the project list, but all its data, photos and reports are kept. You can restore it any time from the Archived tab.`)) return;
@@ -244,9 +253,32 @@
       if (error) throw new Error(`QC models: ${error.message}`); report.push(`${rows.length} QC unit model(s) with checklists`);
     }
   }
+  // After creating: Open it, or Undo (deletes it again) during 2 minutes.
+  function showCreatedBar(project, done, warnings) {
+    document.getElementById('projectCreatedBar')?.remove();
+    const bar = document.createElement('div'); bar.id = 'projectCreatedBar';
+    bar.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:100090;background:#0F172A;color:#fff;border-radius:10px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.35);display:flex;gap:10px;align-items:center;flex-wrap:wrap;max-width:calc(100% - 24px);font-size:13px;';
+    bar.innerHTML = `<span style="flex:1;min-width:180px;">✅ Project <b>${e(project.name)}</b> created.${done.length ? ` Copied/added: ${e(done.join(', '))}.` : ''}${warnings.length ? `<br><span style="color:#FCA5A5;">Not completed: ${e(warnings.join(' · '))}</span>` : ''}</span>
+      <button type="button" id="pcbOpen" style="padding:6px 12px;border:none;border-radius:6px;background:#3B82F6;color:#fff;font-weight:600;cursor:pointer;">Open</button>
+      <button type="button" id="pcbUndo" style="padding:6px 12px;border:1px solid #fff;border-radius:6px;background:transparent;color:#fff;font-weight:600;cursor:pointer;">Undo</button>
+      <button type="button" id="pcbClose" style="border:none;background:none;color:#94A3B8;font-size:16px;cursor:pointer;">✕</button>`;
+    document.body.appendChild(bar);
+    const timer = setTimeout(() => bar.remove(), 120000);
+    bar.querySelector('#pcbClose').onclick = () => { clearTimeout(timer); bar.remove(); };
+    bar.querySelector('#pcbOpen').onclick = () => { clearTimeout(timer); bar.remove(); selectHeaderProject(project.id); };
+    bar.querySelector('#pcbUndo').onclick = async () => {
+      bar.querySelector('#pcbUndo').disabled = true; bar.querySelector('#pcbUndo').textContent = 'Undoing…';
+      try {
+        if (isLocal()) { let c = []; try { c = JSON.parse(localStorage.getItem('local_project_catalog') || '[]'); } catch (_) {} localStorage.setItem('local_project_catalog', JSON.stringify(c.filter(p => p.id !== project.id))); }
+        else await hardDeleteEmptyProject(project.id);
+        clearTimeout(timer); bar.remove(); if (typeof toast === 'function') toast(`“${project.name}” was removed`);
+        try { setupProjectCatalogRequest = null; await loadSetupProjectSelector(); } catch (_) {}
+      } catch (err) { bar.querySelector('#pcbUndo').textContent = 'Undo failed'; alert(err.message || err); }
+    };
+  }
   async function createNewProject(knownRows) {
     if (!isAdmin()) { alert('Only an admin can create projects.'); return; }
-    const sources = (knownRows || await loadSummary()).filter(r => !archived(r));
+    const sources = (knownRows || await loadSummary()).filter(r => tabOf(r) === 'active');
     let users = [];
     if (!isLocal()) { try { users = (await adminUsers('list', { projectId: PROJECT_ID })).users || []; } catch (_) {} }
     users = users.filter(u => !u.disabled && u.role !== 'admin').sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
@@ -298,16 +330,70 @@
           if (members.length) done.push(`${members.length} team member(s)`);
         }
         close();
-        const open = confirm(`Project “${name}” was created.${done.length ? `\n\nCopied/added: ${done.join(', ')}.` : ''}${warnings.length ? `\n\nNot completed:\n${warnings.join('\n')}` : ''}\n\nOpen it now?`);
         try { setupProjectCatalogRequest = null; await loadSetupProjectSelector(); } catch (_) {}
-        if (open) selectHeaderProject(id);
+        showCreatedBar({ id, name }, done, warnings);
       } catch (err) { $('npMsg').textContent = `Could not create the project: ${err.message || err}`; $('npSave').disabled = false; $('npSave').textContent = 'Create project'; }
+    };
+  }
+
+  // ---------- Delete ----------
+  // An empty project (no units yet, e.g. created by mistake) is removed right
+  // away. A project with data needs two checks — its exact name and the
+  // admin's password — and is only moved to "Deleted" (hidden, all data kept),
+  // so it can still be restored.
+  async function hardDeleteEmptyProject(id) {
+    for (const t of ['quantity_templates', 'quantity_floor_plans', 'project_setup_config', 'notification_settings', 'project_members', 'buildings']) {
+      try { await client().from(t).delete().eq('project_id', id); } catch (_) {}
+    }
+    const { error } = await client().from('projects').delete().eq('id', id);
+    if (error) throw error;
+  }
+  async function deleteProject(r) {
+    if (!isAdmin()) return;
+    const leaveIfCurrent = () => { if (r.id === PROJECT_ID) selectHeaderProject(DEFAULT_PROJECT_ID); else openProjectPicker(); };
+    if (isLocal()) {
+      if (!confirm(`Delete “${r.name}”?`)) return;
+      let catalog = []; try { catalog = JSON.parse(localStorage.getItem('local_project_catalog') || '[]'); } catch (_) {}
+      localStorage.setItem('local_project_catalog', JSON.stringify(catalog.filter(p => p.id !== r.id))); leaveIfCurrent(); return;
+    }
+    const hasData = Number(r.units || 0) > 0 || Number(r.inspections || 0) > 0 || Number(r.open_issues || 0) > 0;
+    if (!hasData) {
+      if (!confirm(`Delete the empty project “${r.name}”?\n\nIt has no units or records yet. This cannot be undone.`)) return;
+      try { await hardDeleteEmptyProject(r.id); if (typeof toast === 'function') toast('Project deleted'); leaveIfCurrent(); }
+      catch (err) { alert(`Could not delete the project: ${err.message || err}`); }
+      return;
+    }
+    const ov = overlay('projectDelete', `
+      <form style="padding:18px 20px;">
+        <b style="font-size:16px;color:#B91C1C;">Delete “${e(r.name)}”?</b>
+        <p style="font-size:13px;color:#334155;margin:8px 0;">This project has data: ${Number(r.units || 0)} units, ${Number(r.inspections || 0)} inspections, ${Number(r.open_issues || 0)} open issues. It will be removed from the project list for everyone. <b>All its data is kept</b> and an admin can restore it from the <b>Deleted</b> tab.</p>
+        ${field('pdConfirmName', `Type the project name to confirm: <b>${e(r.name)}</b>`, '', 'text')}
+        ${field('pdConfirmPw', 'Your password', '', 'password', 'autocomplete="current-password"')}
+        <div id="pdDelMsg" style="min-height:16px;font-size:12px;color:#B91C1C;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;"><button type="button" id="pdDelCancel" style="padding:8px 14px;border:1px solid #CBD5E1;background:#fff;border-radius:6px;cursor:pointer;">Cancel</button><button type="submit" id="pdDelGo" style="padding:8px 14px;border:none;background:#DC2626;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">Delete project</button></div>
+      </form>`, 460);
+    const $ = id => ov.querySelector('#' + id);
+    $('pdDelCancel').onclick = () => ov.remove();
+    setTimeout(() => $('pdConfirmName').focus(), 50);
+    ov.querySelector('form').onsubmit = async ev => {
+      ev.preventDefault();
+      if ($('pdConfirmName').value.trim() !== String(r.name).trim()) { $('pdDelMsg').textContent = 'The name does not match.'; return; }
+      $('pdDelGo').disabled = true; $('pdDelGo').textContent = 'Checking…';
+      try {
+        const { data: { user } } = await client().auth.getUser();
+        const { error: pwErr } = await client().auth.signInWithPassword({ email: user.email, password: $('pdConfirmPw').value });
+        if (pwErr) throw new Error('Wrong password.');
+        const { error } = await client().from('projects').update({ status: 'Deleted' }).eq('id', r.id);
+        if (error) throw error;
+        ov.remove(); if (typeof toast === 'function') toast('Project deleted (it can be restored from the Deleted tab)');
+        leaveIfCurrent();
+      } catch (err) { $('pdDelMsg').textContent = err.message || String(err); $('pdDelGo').disabled = false; $('pdDelGo').textContent = 'Delete project'; }
     };
   }
 
   // ---------- Portfolio ----------
   async function openPortfolio(knownRows) {
-    const rows = (knownRows && knownRows.length && knownRows[0].units !== undefined ? knownRows : await loadSummary()).filter(r => !archived(r));
+    const rows = (knownRows && knownRows.length && knownRows[0].units !== undefined ? knownRows : await loadSummary()).filter(r => tabOf(r) === 'active');
     const th = 'text-align:left;padding:8px 6px;border-bottom:2px solid #0B5394;position:sticky;top:0;background:#fff;font-size:12px;';
     const td = 'padding:8px 6px;border-bottom:1px solid #F1F5F9;font-size:12px;';
     const warn = (n, color) => Number(n) ? `<b style="color:${color};">${Number(n)}</b>` : '<span style="color:#94A3B8;">0</span>';
