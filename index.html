@@ -7412,7 +7412,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         location.reload();
         return;
       }
-      openProjectSetup();
+      // Live site: the project is chosen by the link (?project=<id>), so open
+      // the chosen project's own page. Each project keeps its own data.
+      const url = new URL(window.location.href);
+      if (projectId === DEFAULT_PROJECT_ID) url.searchParams.delete('project'); else url.searchParams.set('project', projectId);
+      window.location.href = url.toString();
     }
     // Asks for the new project's own name and address (the fields above belong
     // to the current project). The project ID is created automatically.
