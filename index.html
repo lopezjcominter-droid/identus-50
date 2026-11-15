@@ -33,12 +33,13 @@
       </div>
 
       <div style="margin: 0 0 20px; padding: 10px 12px; background: #F3F4F6; border-radius: 8px;">
-        <div style="display:flex;align-items:flex-start;gap:8px;min-width:0;">
+        <div style="display:flex;align-items:flex-start;gap:8px;min-width:0;cursor:pointer;" onclick="openProjectPicker()" title="Switch project">
           <div style="min-width:0;flex:1;">
             <div id="projectNameLabel" style="font-size: 14px; font-weight: 700; color: #111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
             <div id="projectAddressLabel" style="font-size: 11px; color: #6B7280; margin-top: 2px;"></div>
           </div>
-          <select id="projectSelector" aria-label="Select project" onchange="selectHeaderProject(this.value)" style="width:28px;min-width:28px;height:24px;padding:0 2px;border:1px solid #CBD5E1;border-radius:5px;background:#fff;color:#1E40AF;font-size:13px;cursor:pointer;margin-left:auto;" title="Select project">
+          <button type="button" aria-label="Switch project" onclick="event.stopPropagation();openProjectPicker()" style="width:28px;min-width:28px;height:24px;border:1px solid #CBD5E1;border-radius:5px;background:#fff;color:#1E40AF;font-size:13px;cursor:pointer;margin-left:auto;">▾</button>
+          <select id="projectSelector" aria-label="Select project" onchange="selectHeaderProject(this.value)" style="display:none;width:28px;min-width:28px;height:24px;padding:0 2px;border:1px solid #CBD5E1;border-radius:5px;background:#fff;color:#1E40AF;font-size:13px;cursor:pointer;margin-left:auto;" title="Select project">
             <option value="">▾</option>
           </select>
         </div>
@@ -1414,8 +1415,8 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     // Project name/address are shared through the Supabase `projects` table (same for every device)
     let sharedProject = null;
-    function getProjectName() { return (sharedProject && sharedProject.name) || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? localStorage.getItem('cfg_project_name') : '') || 'Ability Housing'; }
-    function getProjectAddress() { return (sharedProject && sharedProject.address) || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? (localStorage.getItem('cfg_project_address') ?? '') : '') || '5121 North Pine Hills Road'; }
+    function getProjectName() { return (sharedProject && sharedProject.name) || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? localStorage.getItem('cfg_project_name') : '') || (String(PROJECT_ID) === String(DEFAULT_PROJECT_ID) ? 'Ability Housing' : 'Project'); }
+    function getProjectAddress() { return (sharedProject && sharedProject.address) || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? (localStorage.getItem('cfg_project_address') ?? '') : '') || (String(PROJECT_ID) === String(DEFAULT_PROJECT_ID) ? '5121 North Pine Hills Road' : ''); }
     function applyProjectName() {
       const n = getProjectName();
       const el = document.getElementById('projectNameLabel');
@@ -7399,7 +7400,13 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         if (select) select.value = project.id;
       });
     }
-    function selectSetupProject(projectId) { selectProjectFromCatalog(projectId); }
+    // Live site: choosing another project here opens that project (its own
+    // setup and data) instead of loading its name into this one.
+    function selectSetupProject(projectId) {
+      if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:' && projectId && projectId !== PROJECT_ID) { selectHeaderProject(projectId); return; }
+      selectProjectFromCatalog(projectId);
+    }
+    // Project switcher, details, archive and portfolio live in js/projects.js.
     function selectHeaderProject(projectId) {
       if (!projectId) return;
       selectProjectFromCatalog(projectId);
@@ -7412,7 +7419,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         location.reload();
         return;
       }
-      openProjectSetup();
+      // Live site: the project is chosen by the link (?project=<id>), so open
+      // the chosen project's own page. Each project keeps its own data.
+      const url = new URL(window.location.href);
+      if (projectId === DEFAULT_PROJECT_ID) url.searchParams.delete('project'); else url.searchParams.set('project', projectId);
+      window.location.href = url.toString();
     }
     // Asks for the new project's own name and address (the fields above belong
     // to the current project). The project ID is created automatically.
@@ -8044,7 +8055,9 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       // Step 0: Apply Supabase connection settings if changed
       const newUrl = document.getElementById('setupSupabaseUrl').value.trim();
       const newKey = document.getElementById('setupSupabaseKey').value.trim();
-      const newPid = document.getElementById('setupProjectId').value.trim();
+      // Live site: Apply always saves into the project that is open (never into
+      // another project chosen in a field), so projects never mix.
+      const newPid = localPreview ? document.getElementById('setupProjectId').value.trim() : PROJECT_ID;
       // Connection settings are committed only after the user confirms the changes.
 
       const pn = (document.getElementById('setupProjectName').value || '').trim() || getProjectName();
@@ -9413,7 +9426,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         section{break-inside:avoid-page}@media print{body{padding:0}.noprint{display:none}}
         @page{margin:14mm}</style></head><body>
         <div class="noprint" style="text-align:right;margin-bottom:10px"><button onclick="print()" style="padding:8px 16px;background:#0B5394;color:#fff;border:0;border-radius:6px;font-weight:700">Save as PDF / Print</button></div>
-        <div class="cover"><div><div class="muted" style="font-weight:700;letter-spacing:1px">UNIT CLOSEOUT PACKAGE</div><h1>Unit ${e(unit.apt)}</h1><div>${e(unit.building)}${unit.floor ? ' · ' + e(unit.floor) : ''}</div><div class="muted">${e(project)}${address ? ' · ' + e(address) : ''}</div></div>
+        <div class="cover"><div>${window.currentProjectInfo?.logoUrl ? `<img src="${e(window.currentProjectInfo.logoUrl)}" alt="" style="max-height:50px;max-width:170px;object-fit:contain;margin-bottom:6px;">` : ''}<div class="muted" style="font-weight:700;letter-spacing:1px">UNIT CLOSEOUT PACKAGE</div><h1>Unit ${e(unit.apt)}</h1><div>${e(unit.building)}${unit.floor ? ' · ' + e(unit.floor) : ''}</div><div class="muted">${e(project)}${address ? ' · ' + e(address) : ''}</div>${(typeof window.projectReportLines === 'function' ? window.projectReportLines() : []).map(l => `<div class="muted">${e(l)}</div>`).join('')}</div>
         <div style="text-align:right"><div class="muted">Generated</div><b>${d(new Date().toISOString())}</b><div style="margin-top:8px">${missing.length ? pill('PENDING ITEMS', '#D97706') : pill('READY FOR CLOSEOUT', '#059669')}</div></div></div>
         <div class="kpis"><div class="kpi"><b>${Math.round(avg)}%</b>Overall progress</div><div class="kpi"><b>${records.filter(r => !(r.failedCount > 0)).length}/${records.length}</b>Inspections passed</div><div class="kpi"><b style="color:${resColor(off?.result)}">${e(off?.result || 'Not scheduled')}</b>Official Final</div><div class="kpi"><b>${issues.filter(i => i.status !== 'resolved').length + punches.filter(p => p.status !== 'Closed').length}</b>Open items</div></div>
         ${missing.length ? `<div style="background:#FEF3C7;border-radius:6px;padding:8px 10px;margin-top:6px"><b>Pending:</b> ${missing.map(m => e(m.label)).join(' · ')}</div>` : ''}
@@ -11385,13 +11398,13 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       try {
         if (window.authIsActive && window.authIsActive() && window.userRole !== 'admin') return;
         const today = new Date().toISOString().split('T')[0];
-        if (localStorage.getItem('cfg_last_auto_backup') === today) return;
+        if (localStorage.getItem(`cfg_last_auto_backup_${PROJECT_ID}`) === today) return;
         if (!sbClient || !data || data.length === 0) return;
         const strip = u => ({ ...u, systems: Object.fromEntries(Object.entries(u.systems).map(([k, s]) => [k, { ...s, events: (s.events || []).map(e => ({ ...e, images: (e.images || []).filter(i => !String(i).startsWith('data:')) })) }])) });
         const backup = { version: 2, exportedAt: new Date().toISOString(), units: data.map(strip), punchlist: (typeof punchlist !== 'undefined' ? punchlist : []), cloudTables: await backupCloudTables() };
         const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
         const { error } = await sbClient.storage.from(STORAGE_BUCKET).upload(`backups/${PROJECT_ID}/${today}.json`, blob, { contentType: 'application/json', upsert: true });
-        if (!error) { localStorage.setItem('cfg_last_auto_backup', today); console.log('✅ Daily backup saved'); }
+        if (!error) { localStorage.setItem(`cfg_last_auto_backup_${PROJECT_ID}`, today); console.log('✅ Daily backup saved'); }
         else console.warn('Daily backup skipped:', error.message);
       } catch (e) { console.warn('autoBackupDaily', e); }
     }
@@ -11438,6 +11451,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       // 1) Summary
       const sum = wb.addWorksheet('Summary', { views: [{ showGridLines: false }] });
       title(sum, 'QA/QC Progress Report', 4);
+      // Project details (client, GC, permit, schedule) when they are filled in.
+      (typeof window.projectReportLines === 'function' ? window.projectReportLines() : []).forEach(line => { const r = sum.addRow([line]); sum.mergeCells(r.number, 1, r.number, 4); r.getCell(1).font = { color: { argb: 'FF334155' } }; });
       let tp = 0, tn = 0; const units = { done: 0, prog: 0, none: 0 }; const byB = {}, bySys = {};
       data.forEach(u => {
         const vals = Object.values(u.systems || {}).map(x => Number(x.progress) || 0);
@@ -11539,7 +11554,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       .ph{display:flex;flex-wrap:wrap;gap:10px}.ph figure{margin:0;width:200px;font-size:11px;color:#4B5563}.ph img{width:200px;height:140px;object-fit:cover;border-radius:6px}
       button{padding:8px 16px;background:#1E40AF;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600}@media print{button{display:none}}</style></head><body>
       <button onclick="window.print()">Print / Save as PDF</button>
-      <h1>${esc(getProjectName())}</h1><div style="color:#4B5563">${esc(getProjectAddress())}</div>
+      ${window.currentProjectInfo?.logoUrl ? `<img src="${esc(window.currentProjectInfo.logoUrl)}" alt="" style="max-height:56px;max-width:180px;object-fit:contain;margin-bottom:6px;">` : ''}<h1>${esc(getProjectName())}</h1><div style="color:#4B5563">${esc(getProjectAddress())}</div>${(typeof window.projectReportLines === 'function' ? window.projectReportLines() : []).map(l => `<div style="color:#4B5563;font-size:13px;">${esc(l)}</div>`).join('')}
       <div style="color:#6B7280;font-size:12px">QA/QC Inspection Progress Report · ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
       <div class="kpi"><div><b>${pct(tp, tn)}%</b>Overall progress</div><div><b>${data.length}</b>Units</div><div><b>${counts.Completed}</b>Completed</div><div><b>${counts['In Progress']}</b>In Progress</div><div><b>${counts['At Risk']}</b>At Risk</div><div><b>${counts.Behind}</b>Behind</div></div>
       <h2>Progress by building</h2><table><tr><th>Building</th><th>Units</th><th>Progress</th></tr>${Object.entries(byB).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v.units}</td><td>${bar(pct(v.tp, v.tn))}</td></tr>`).join('')}</table>
@@ -13359,6 +13374,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
 <script src="js/inspections.js"></script>
 <script src="ai-knowledge.js" defer></script>
 <script src="field-issues.js" defer></script>
+<script src="js/projects.js" defer></script>
 <script>
 // Search and normal text boxes must never offer saved e-mails / passwords
 // (the browser treated them like a sign-in form). The sign-in form keeps it.
