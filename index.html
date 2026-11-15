@@ -7414,14 +7414,37 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       }
       openProjectSetup();
     }
+    // Asks for the new project's own name and address (the fields above belong
+    // to the current project). The project ID is created automatically.
+    function askNewProjectDetails() {
+      return new Promise(resolve => {
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;z-index:100080;background:rgba(15,23,42,.6);display:flex;align-items:center;justify-content:center;padding:16px;';
+        const input = 'width:100%;padding:10px;border:1px solid #CBD5E1;border-radius:6px;box-sizing:border-box;margin:4px 0 12px;font-size:14px;';
+        ov.innerHTML = `<form style="background:#fff;border-radius:12px;padding:22px;width:100%;max-width:420px;box-shadow:0 20px 50px rgba(0,0,0,.3);">
+          <h2 style="font-size:17px;margin:0 0 4px;">＋ New project</h2>
+          <p style="font-size:12px;color:#64748B;margin:0 0 14px;">The current project is not changed. The project ID is created automatically.</p>
+          <label style="font-size:13px;font-weight:600;">Project name</label><input id="npName" required minlength="2" autocomplete="off" data-lpignore="true" style="${input}" placeholder="e.g. Clarion Clubhouse">
+          <label style="font-size:13px;font-weight:600;">Address</label><input id="npAddress" autocomplete="off" data-lpignore="true" style="${input}" placeholder="Street, city">
+          <div id="npMsg" style="min-height:16px;font-size:12px;color:#B91C1C;margin-bottom:6px;"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;"><button type="button" id="npCancel" style="padding:8px 14px;border:1px solid #CBD5E1;background:#fff;border-radius:6px;cursor:pointer;">Cancel</button><button type="submit" style="padding:8px 14px;border:none;background:#1D4ED8;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">Create project</button></div></form>`;
+        document.body.appendChild(ov);
+        const done = value => { ov.remove(); resolve(value); };
+        ov.querySelector('#npCancel').onclick = () => done(null);
+        ov.querySelector('#npName').focus();
+        ov.querySelector('form').onsubmit = ev => {
+          ev.preventDefault();
+          const name = ov.querySelector('#npName').value.trim(), address = ov.querySelector('#npAddress').value.trim();
+          if (name.length < 2) { ov.querySelector('#npMsg').textContent = 'Enter the project name.'; return; }
+          if ((setupProjectCatalog || []).some(p => String(p.name || '').trim().toLowerCase() === name.toLowerCase())) { ov.querySelector('#npMsg').textContent = 'A project with this name already exists.'; return; }
+          done({ name, address });
+        };
+      });
+    }
     async function createNewProjectFromSetup() {
-      const name = (document.getElementById('setupProjectName')?.value || '').trim();
-      const address = (document.getElementById('setupProjectAddress')?.value || '').trim();
-      if (name.length < 2) { alert('Enter a project name first.'); document.getElementById('setupProjectName')?.focus(); return; }
-      const ok = confirm(`Create the new project “${name}”?
-
-The current project will not be changed. The new project will start with its own setup configuration.`);
-      if (!ok) return;
+      const details = await askNewProjectDetails();
+      if (!details) return;
+      const { name, address } = details;
       const id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'local-' + Date.now();
         const templateMode = document.getElementById('setupNewProjectTemplate')?.value || 'copy';
         const floorMode = document.getElementById('setupNewProjectMode')?.value || 'uniform';
