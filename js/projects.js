@@ -283,7 +283,8 @@
   }
   async function createNewProject(knownRows) {
     if (!isAdmin()) { alert('Only an admin can create projects.'); return; }
-    const sources = (knownRows || await loadSummary()).filter(r => tabOf(r) === 'active' && (r.units == null || Number(r.units) > 0)); // only projects that are set up can be copied
+    const allRows = knownRows || await loadSummary();
+    const sources = allRows.filter(r => tabOf(r) === 'active' && (r.units == null || Number(r.units) > 0)); // only projects that are set up can be copied
     let users = [];
     if (!isLocal()) { try { users = (await adminUsers('list', { projectId: PROJECT_ID })).users || []; } catch (_) {} }
     users = users.filter(u => !u.disabled && u.role !== 'admin').sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
@@ -315,7 +316,7 @@
       ev.preventDefault();
       const name = $('npName').value.trim();
       if (name.length < 2) { $('npMsg').textContent = 'Enter the project name.'; return; }
-      if (sources.concat(knownRows || []).some(p => String(p.name || '').trim().toLowerCase() === name.toLowerCase())) { $('npMsg').textContent = 'A project with this name already exists.'; return; }
+      if (allRows.some(p => String(p.name || '').trim().toLowerCase() === name.toLowerCase())) { $('npMsg').textContent = 'A project with this name already exists.'; return; }
       const id = crypto.randomUUID ? crypto.randomUUID() : 'local-' + Date.now();
       const project = { id, name, address: $('npAddress').value.trim() };
       const details = { client: $('npClient').value.trim() || null, contractor: $('npGc').value.trim() || null, permit_number: $('npPermit').value.trim() || null, start_date: $('npStart').value || null, end_date: $('npEnd').value || null, status: 'Active' };
