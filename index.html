@@ -7401,76 +7401,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       });
     }
     function selectSetupProject(projectId) { selectProjectFromCatalog(projectId); }
-    // Project switcher (Procore-style): every project the user can open, with
-    // address, role, units, progress and last activity. Choosing one opens it.
-    async function openProjectPicker() {
-      if (document.getElementById('projectPicker')) return;
-      const e = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-      const ov = document.createElement('div'); ov.id = 'projectPicker';
-      ov.style.cssText = 'position:fixed;inset:0;z-index:100075;background:rgba(15,23,42,.45);display:flex;align-items:flex-start;justify-content:center;padding:60px 12px 12px;';
-      ov.innerHTML = `<div style="background:#fff;border-radius:12px;width:min(720px,100%);max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3);">
-        <div style="padding:14px 16px;border-bottom:1px solid #E5E7EB;display:flex;gap:10px;align-items:center;">
-          <b style="font-size:16px;color:#0F172A;">Projects</b>
-          <input type="search" id="ppSearch" placeholder="Search project or address…" autocomplete="off" data-lpignore="true" data-1p-ignore="true" style="flex:1;padding:8px 10px;border:1px solid #CBD5E1;border-radius:6px;font-size:14px;">
-          <button type="button" id="ppClose" style="border:none;background:none;font-size:20px;cursor:pointer;color:#64748B;">✕</button></div>
-        <div id="ppList" style="overflow:auto;padding:6px 8px;"><p style="color:#64748B;padding:10px;">Loading…</p></div>
-        <div id="ppFoot" style="padding:10px 16px;border-top:1px solid #E5E7EB;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#64748B;"></div></div>`;
-      document.body.appendChild(ov);
-      let active = -1;
-      const onKey = ev => {
-        const items = [...ov.querySelectorAll('[data-pid]')];
-        if (ev.key === 'Escape') { close(); return; }
-        if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); active = Math.max(0, Math.min(items.length - 1, active + (ev.key === 'ArrowDown' ? 1 : -1))); items.forEach((b, i) => { b.style.boxShadow = i === active ? '0 0 0 2px #1D4ED8' : ''; }); items[active]?.scrollIntoView({ block: 'nearest' }); }
-        if (ev.key === 'Enter' && items[active >= 0 ? active : 0] && document.activeElement?.id === 'ppSearch') { ev.preventDefault(); items[active >= 0 ? active : 0].click(); }
-      };
-      const close = () => { document.removeEventListener('keydown', onKey); ov.remove(); };
-      ov.querySelector('#ppClose').onclick = close; ov.addEventListener('click', ev => { if (ev.target === ov) close(); });
-      document.addEventListener('keydown', onKey);
-      // Keyboard on computers only (on iPad it would cover the list).
-      if (!window.matchMedia('(pointer: coarse)').matches) setTimeout(() => ov.querySelector('#ppSearch')?.focus(), 50);
-      let rows = [];
-      if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:' && sbClient) {
-        const { data, error } = await sbClient.rpc('project_picker_summary');
-        if (!error && Array.isArray(data)) rows = data;
-      }
-      if (!rows.length) { try { await loadSetupProjectSelector(); } catch (_) {} rows = (setupProjectCatalog || []).map(p => ({ id: p.id, name: p.name, address: p.address })); }
-      if (!ov.isConnected) return;
-      // Current project first, then the ones opened most recently on this device, then by name.
-      let recent = []; try { recent = JSON.parse(localStorage.getItem('recent_projects') || '[]'); } catch (_) {}
-      const rankOf = r => r.id === PROJECT_ID ? -1 : (recent.indexOf(r.id) >= 0 ? recent.indexOf(r.id) : 999);
-      rows.sort((a, b) => rankOf(a) - rankOf(b) || String(a.name || '').localeCompare(String(b.name || '')));
-      const when = t => { if (!t) return 'No activity yet'; const d = Math.floor((Date.now() - Date.parse(t)) / 86400000); return d <= 0 ? 'Active today' : d === 1 ? 'Active yesterday' : `Active ${d} days ago`; };
-      const draw = q => {
-        const shown = rows.filter(r => !q || `${r.name} ${r.address}`.toLowerCase().includes(q));
-        ov.querySelector('#ppList').innerHTML = shown.length ? shown.map(r => {
-          const current = r.id === PROJECT_ID; const pct = Number(r.progress || 0);
-          return `<button type="button" data-pid="${e(r.id)}" style="display:flex;width:100%;text-align:left;gap:12px;align-items:center;padding:12px;border:1px solid ${current ? '#93C5FD' : 'transparent'};background:${current ? '#EFF6FF' : '#fff'};border-radius:8px;cursor:pointer;margin:2px 0;">
-            <div style="width:40px;height:40px;border-radius:8px;background:#1E40AF;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">${e(String(r.name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase())}</div>
-            <div style="flex:1;min-width:0;">
-              <div style="font-weight:700;color:#0F172A;font-size:14px;">${e(r.name)}${current ? ' <span style="font-size:11px;font-weight:600;color:#1D4ED8;background:#DBEAFE;padding:1px 7px;border-radius:9px;margin-left:4px;">Current</span>' : ''}</div>
-              <div style="font-size:12px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ${e(r.address || 'No address')}</div>
-              ${r.units != null && !Number(r.units) ? `<div style="font-size:11px;color:#B45309;margin-top:3px;">Not set up yet — open it and use Project Setup to add buildings and units${r.my_role ? ` · Your role: <b>${e(r.my_role)}</b>` : ''}</div>` : ''}
-              ${r.units != null && Number(r.units) ? `<div style="font-size:11px;color:#475569;margin-top:3px;">${Number(r.buildings || 0)} buildings · ${Number(r.units || 0)} units · ${Number(r.completed_units || 0)} completed · ${when(r.last_activity)}${r.my_role ? ` · Your role: <b>${e(r.my_role)}</b>` : ''}</div>` : ''}
-            </div>
-            ${r.units != null && Number(r.units) ? `<div style="width:90px;flex-shrink:0;text-align:right;"><div style="font-size:15px;font-weight:700;color:#0F172A;">${pct}%</div><div style="height:6px;background:#E2E8F0;border-radius:3px;margin-top:4px;"><div style="height:6px;width:${Math.min(100, pct)}%;background:${pct >= 100 ? '#059669' : '#2563EB'};border-radius:3px;"></div></div></div>` : ''}
-          </button>`;
-        }).join('') : '<p style="color:#64748B;padding:10px;">No projects found.</p>';
-        active = -1;
-        ov.querySelectorAll('[data-pid]').forEach(b => b.onclick = () => {
-          const pid = b.dataset.pid; if (pid === PROJECT_ID) { close(); return; }
-          try { const list = [pid, ...recent.filter(x => x !== pid)].slice(0, 8); localStorage.setItem('recent_projects', JSON.stringify(list)); } catch (_) {}
-          ov.querySelectorAll('[data-pid]').forEach(x => { x.disabled = true; x.style.opacity = x === b ? '1' : '.45'; });
-          b.insertAdjacentHTML('beforeend', '<span style="font-size:12px;color:#1D4ED8;font-weight:600;flex-shrink:0;">Opening…</span>');
-          selectHeaderProject(pid);
-        });
-      };
-      draw('');
-      const isAdmin = window.userRole === 'admin' || LOCAL_PROJECT_MODE || window.location.protocol === 'file:';
-      ov.querySelector('#ppFoot').innerHTML = `<span>${rows.length} project${rows.length === 1 ? '' : 's'}</span>${isAdmin ? '<button type="button" id="ppNew" style="padding:7px 12px;border:none;background:#1D4ED8;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">＋ New project</button>' : ''}`;
-      if (isAdmin) ov.querySelector('#ppNew').onclick = async () => { close(); await createNewProjectFromSetup(); };
-      const search = ov.querySelector('#ppSearch'); search.oninput = () => draw(search.value.trim().toLowerCase());
-    }
-    window.openProjectPicker = openProjectPicker;
+    // Project switcher, details, archive and portfolio live in js/projects.js.
     function selectHeaderProject(projectId) {
       if (!projectId) return;
       selectProjectFromCatalog(projectId);
@@ -9488,7 +9419,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         section{break-inside:avoid-page}@media print{body{padding:0}.noprint{display:none}}
         @page{margin:14mm}</style></head><body>
         <div class="noprint" style="text-align:right;margin-bottom:10px"><button onclick="print()" style="padding:8px 16px;background:#0B5394;color:#fff;border:0;border-radius:6px;font-weight:700">Save as PDF / Print</button></div>
-        <div class="cover"><div><div class="muted" style="font-weight:700;letter-spacing:1px">UNIT CLOSEOUT PACKAGE</div><h1>Unit ${e(unit.apt)}</h1><div>${e(unit.building)}${unit.floor ? ' · ' + e(unit.floor) : ''}</div><div class="muted">${e(project)}${address ? ' · ' + e(address) : ''}</div></div>
+        <div class="cover"><div>${window.currentProjectInfo?.logoUrl ? `<img src="${e(window.currentProjectInfo.logoUrl)}" alt="" style="max-height:50px;max-width:170px;object-fit:contain;margin-bottom:6px;">` : ''}<div class="muted" style="font-weight:700;letter-spacing:1px">UNIT CLOSEOUT PACKAGE</div><h1>Unit ${e(unit.apt)}</h1><div>${e(unit.building)}${unit.floor ? ' · ' + e(unit.floor) : ''}</div><div class="muted">${e(project)}${address ? ' · ' + e(address) : ''}</div>${(typeof window.projectReportLines === 'function' ? window.projectReportLines() : []).map(l => `<div class="muted">${e(l)}</div>`).join('')}</div>
         <div style="text-align:right"><div class="muted">Generated</div><b>${d(new Date().toISOString())}</b><div style="margin-top:8px">${missing.length ? pill('PENDING ITEMS', '#D97706') : pill('READY FOR CLOSEOUT', '#059669')}</div></div></div>
         <div class="kpis"><div class="kpi"><b>${Math.round(avg)}%</b>Overall progress</div><div class="kpi"><b>${records.filter(r => !(r.failedCount > 0)).length}/${records.length}</b>Inspections passed</div><div class="kpi"><b style="color:${resColor(off?.result)}">${e(off?.result || 'Not scheduled')}</b>Official Final</div><div class="kpi"><b>${issues.filter(i => i.status !== 'resolved').length + punches.filter(p => p.status !== 'Closed').length}</b>Open items</div></div>
         ${missing.length ? `<div style="background:#FEF3C7;border-radius:6px;padding:8px 10px;margin-top:6px"><b>Pending:</b> ${missing.map(m => e(m.label)).join(' · ')}</div>` : ''}
@@ -11513,6 +11444,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       // 1) Summary
       const sum = wb.addWorksheet('Summary', { views: [{ showGridLines: false }] });
       title(sum, 'QA/QC Progress Report', 4);
+      // Project details (client, GC, permit, schedule) when they are filled in.
+      (typeof window.projectReportLines === 'function' ? window.projectReportLines() : []).forEach(line => { const r = sum.addRow([line]); sum.mergeCells(r.number, 1, r.number, 4); r.getCell(1).font = { color: { argb: 'FF334155' } }; });
       let tp = 0, tn = 0; const units = { done: 0, prog: 0, none: 0 }; const byB = {}, bySys = {};
       data.forEach(u => {
         const vals = Object.values(u.systems || {}).map(x => Number(x.progress) || 0);
@@ -11614,7 +11547,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       .ph{display:flex;flex-wrap:wrap;gap:10px}.ph figure{margin:0;width:200px;font-size:11px;color:#4B5563}.ph img{width:200px;height:140px;object-fit:cover;border-radius:6px}
       button{padding:8px 16px;background:#1E40AF;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600}@media print{button{display:none}}</style></head><body>
       <button onclick="window.print()">Print / Save as PDF</button>
-      <h1>${esc(getProjectName())}</h1><div style="color:#4B5563">${esc(getProjectAddress())}</div>
+      ${window.currentProjectInfo?.logoUrl ? `<img src="${esc(window.currentProjectInfo.logoUrl)}" alt="" style="max-height:56px;max-width:180px;object-fit:contain;margin-bottom:6px;">` : ''}<h1>${esc(getProjectName())}</h1><div style="color:#4B5563">${esc(getProjectAddress())}</div>${(typeof window.projectReportLines === 'function' ? window.projectReportLines() : []).map(l => `<div style="color:#4B5563;font-size:13px;">${esc(l)}</div>`).join('')}
       <div style="color:#6B7280;font-size:12px">QA/QC Inspection Progress Report · ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
       <div class="kpi"><div><b>${pct(tp, tn)}%</b>Overall progress</div><div><b>${data.length}</b>Units</div><div><b>${counts.Completed}</b>Completed</div><div><b>${counts['In Progress']}</b>In Progress</div><div><b>${counts['At Risk']}</b>At Risk</div><div><b>${counts.Behind}</b>Behind</div></div>
       <h2>Progress by building</h2><table><tr><th>Building</th><th>Units</th><th>Progress</th></tr>${Object.entries(byB).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v.units}</td><td>${bar(pct(v.tp, v.tn))}</td></tr>`).join('')}</table>
@@ -13434,6 +13367,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
 <script src="js/inspections.js"></script>
 <script src="ai-knowledge.js" defer></script>
 <script src="field-issues.js" defer></script>
+<script src="js/projects.js" defer></script>
 <script>
 // Search and normal text boxes must never offer saved e-mails / passwords
 // (the browser treated them like a sign-in form). The sign-in form keeps it.
