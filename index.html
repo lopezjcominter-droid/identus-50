@@ -8318,7 +8318,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         alert('Each building and Special Unit must have a unique name.');
         return;
       }
-      if (residentialConfigs.some(cfg => cfg.floors < 1 || cfg.unitsPerFloor < 1 || !cfg.prefix)) {
+      if (residentialConfigs.some(cfg => cfg.floors < 1 || cfg.unitsPerFloor < 1)) {
         alert('Check each building name, floor count, unit count, and prefix.');
         return;
       }
