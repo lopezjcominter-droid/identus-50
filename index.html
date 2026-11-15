@@ -5891,22 +5891,16 @@ Object.assign(APP_TRANSLATIONS.en, {
           specialUnit.setupDrawing = cfg.plan ? { dataUrl: cfg.plan, name: cfg.planName || 'Setup drawing', type: cfg.planType || '', history: Array.isArray(cfg.planHistory) ? cfg.planHistory : [] } : null;
         }
         else if (Array.isArray(cfg.floorConfigs) && cfg.floorConfigs.length) {
-          cfg.floorConfigs.forEach(floorCfg => {
-            const floor = Math.max(1, parseInt(floorCfg.floor) || 1);
-            const count = Math.max(1, parseInt(floorCfg.unitsPerFloor) || 1);
-            const prefix = String(floorCfg.prefix || cfg.prefix || index + 1);
-        const floorSystems = systems.filter(sys => sys !== 'Underground' || floorCfg.underground === true || (floorCfg.underground === undefined && floor === 1));
-            for (let u = 1; u <= count; u++) {
-              const apt = `${prefix}${floor}${String(u).padStart(2, '0')}`;
-              addUnit(apt, `Floor ${floor}`, floorSystems);
-              units[units.length - 1].unit_type = String(floorCfg.model || '').trim();
-            }
+          setupUnitList({ ...cfg, prefix: cfg.prefix == null ? String(index + 1) : cfg.prefix }).forEach(unit => {
+            const floorSystems = systems.filter(sys => sys !== 'Underground' || unit.underground === true || (unit.underground === undefined && unit.floorNumber === 1));
+            addUnit(unit.apt, unit.floor, floorSystems);
+            units[units.length - 1].unit_type = unit.model;
           });
           // Underground is optional per residential building. Existing setups
           // default to enabled for backward compatibility.
           if (cfg.undergroundEnabled !== false) addUnit(`${cfg.prefix || index + 1}U`, 'Underground');
         } else {
-          for (let f = 1; f <= (cfg.floors || 3); f++) { const floorSystems = systems.filter(sys => sys !== 'Underground' || f === 1); for (let u = 1; u <= (cfg.unitsPerFloor || 10); u++) addUnit(`${cfg.prefix || index + 1}${f}${String(u).padStart(2, '0')}`, `Floor ${f}`, floorSystems); }
+          setupUnitList({ ...cfg, floors: cfg.floors || 3, unitsPerFloor: cfg.unitsPerFloor || 10, prefix: cfg.prefix == null || cfg.prefix === '' && cfg.startAt == null ? String(index + 1) : cfg.prefix }).forEach(unit => addUnit(unit.apt, unit.floor, systems.filter(sys => sys !== 'Underground' || unit.floorNumber === 1)));
           if (cfg.undergroundEnabled !== false) addUnit(`${cfg.prefix || index + 1}U`, 'Underground');
         }
       });
@@ -7299,7 +7293,11 @@ showAppModal('projectSetupModal');
             // Infer prefix from first unit number
             const firstUnit = [...bUnits].sort((a,b) => a.unit_number.localeCompare(b.unit_number))[0];
             const prefix = firstUnit ? firstUnit.unit_number.charAt(0) : String(buildings.indexOf(b) + 1);
-            addSetupBuilding({ ...(remoteResidential.get(String(b.name)) || {}), name: b.name, floors, unitsPerFloor, prefix, type: 'residential', activeSystems, specialAreas: remoteResidential.get(String(b.name))?.specialAreas || [] });
+            // The saved setup is the source of truth (e.g. an empty prefix with
+            // units 100, 101…); guessing from unit numbers is only for old data.
+            const savedCfg = remoteResidential.get(String(b.name));
+            const savedNumbers = savedCfg && savedCfg.prefix != null ? { floors: savedCfg.floors || floors, unitsPerFloor: savedCfg.unitsPerFloor || unitsPerFloor, prefix: savedCfg.prefix } : { floors, unitsPerFloor, prefix };
+            addSetupBuilding({ ...(savedCfg || {}), name: b.name, ...savedNumbers, type: 'residential', activeSystems, specialAreas: remoteResidential.get(String(b.name))?.specialAreas || [] });
           }
         });
 
@@ -7704,6 +7702,20 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     function setupFloorValue(value, fallback = '') {
       return String(value ?? fallback).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
     }
+    // One rule for unit numbers everywhere (preview, local and live Apply):
+    // <prefix><floor><2-digit number>, numbering each floor from 01 (default)
+    // or from 00. The prefix may be empty (e.g. 100, 101… on floor 1).
+    function setupUnitList(cfg) {
+      const startAt = Number(cfg.startAt) === 0 ? 0 : 1;
+      const basePrefix = cfg.prefix == null ? '' : String(cfg.prefix);
+      const floors = Array.isArray(cfg.floorConfigs) && cfg.floorConfigs.length
+        ? cfg.floorConfigs.map(f => ({ floor: Math.max(1, parseInt(f.floor) || 1), count: Math.max(1, parseInt(f.unitsPerFloor) || 1), prefix: f.prefix == null || f.prefix === '' ? basePrefix : String(f.prefix), model: String(f.model || '').trim(), underground: f.underground }))
+        : Array.from({ length: Math.max(1, parseInt(cfg.floors) || 1) }, (_, i) => ({ floor: i + 1, count: Math.max(1, parseInt(cfg.unitsPerFloor) || 1), prefix: basePrefix, model: '' }));
+      const list = [];
+      floors.forEach(f => { for (let u = 0; u < f.count; u++) list.push({ apt: `${f.prefix}${f.floor}${String(u + startAt).padStart(2, '0')}`, floor: `Floor ${f.floor}`, floorNumber: f.floor, model: f.model, underground: f.underground }); });
+      return list;
+    }
+    window.setupUnitList = setupUnitList;
     function setupFloorRows(floorConfigs, floors, unitsPerFloor, prefix) {
       const rows = Array.isArray(floorConfigs) && floorConfigs.length
         ? floorConfigs
@@ -7723,6 +7735,25 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       editor.hidden = !toggle.checked;
       if (toggle.checked) setupSyncFloorRows(id);
     }
+    // Shows the unit numbers this building will get, e.g. "Floor 1: 100 – 111".
+    function setupBuildingConfigFromRow(row) {
+      const custom = row.querySelector('.setup-custom-floor-toggle')?.checked;
+      const prefix = (row.querySelector('.setup-building-prefix')?.value || '').trim();
+      return {
+        prefix, startAt: Number(row.querySelector('.setup-start-at')?.value) === 0 ? 0 : 1,
+        floors: parseInt(row.querySelector('.setup-building-floors')?.value, 10) || 1,
+        unitsPerFloor: parseInt(row.querySelector('.setup-building-units')?.value, 10) || 1,
+        floorConfigs: custom ? Array.from(row.querySelectorAll('.setup-floor-row')).map(r => ({ floor: r.querySelector('.setup-floor-number')?.value, unitsPerFloor: r.querySelector('.setup-floor-units')?.value, prefix: (r.querySelector('.setup-floor-prefix')?.value || '').trim() || prefix, model: r.querySelector('.setup-floor-model')?.value })) : null
+      };
+    }
+    function setupUpdateNumberPreview(id) {
+      const row = document.getElementById(id); const box = row?.querySelector('.setup-number-preview');
+      if (!row || !box) return;
+      const list = setupUnitList(setupBuildingConfigFromRow(row));
+      const byFloor = new Map(); list.forEach(u => { if (!byFloor.has(u.floor)) byFloor.set(u.floor, []); byFloor.get(u.floor).push(u.apt); });
+      const parts = [...byFloor.entries()].map(([f, apts]) => `${f.replace('Floor ', 'F')}: <b>${apts[0]}</b>${apts.length > 1 ? `–<b>${apts[apts.length - 1]}</b>` : ''}`);
+      box.innerHTML = `Unit numbers (${list.length}): ${parts.slice(0, 6).join(' · ')}${parts.length > 6 ? ` · … ${parts.length - 6} more floors` : ''}`;
+    }
     // Keep one row per floor when FLOORS changes (values already typed are kept;
     // new floors start with the building's UNITS/FLOOR).
     function setupSyncFloorRows(id) {
@@ -7739,13 +7770,14 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         model: row.querySelector('.setup-floor-model')?.value,
         underground: !!row.querySelector('.setup-floor-underground')?.checked
       }));
-      if (existing.length === count) return;
+      if (existing.length === count) { setupUpdateNumberPreview(id); return; }
       const prefix = existing[0]?.prefix || '';
       const next = Array.from({ length: count }, (_, i) => existing.find(r => String(r.floor) === String(i + 1)) || { floor: i + 1, unitsPerFloor: units, prefix, model: '' });
       rows.forEach(row => row.remove());
       editor.insertAdjacentHTML('beforeend', setupFloorRows(next, count, units, prefix));
       const source = editor.querySelector('.setup-floor-source');
       if (source) source.innerHTML = next.map(cfg => `<option value="${cfg.floor}">Floor ${cfg.floor}</option>`).join('');
+      setupUpdateNumberPreview(id);
     }
     function setupFloorGroupCopy(id) {
       const editor = document.getElementById(`${id}_floorEditor`);
@@ -7769,7 +7801,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         check.checked = false;
       });
     }
-    function addSetupBuilding({ name = '', floors = 3, unitsPerFloor = 10, prefix = '', type = 'residential', enabled = true, undergroundEnabled = true, activeSystems = null, floorConfigs = null, specialAreas = [], plan = '', planName = '', planType = '', planHistory = [] } = {}) {
+    function addSetupBuilding({ name = '', floors = 3, unitsPerFloor = 10, prefix = null, startAt = 1, type = 'residential', enabled = true, undergroundEnabled = true, activeSystems = null, floorConfigs = null, specialAreas = [], plan = '', planName = '', planType = '', planHistory = [] } = {}) {
       setupBuildingCount++;
       const id = `setupBuilding_${setupBuildingCount}`;
       const isSpecial = type === 'special';
@@ -7809,7 +7841,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           ${systemsHtml}`;
         setupSpecialAreaPlanControls(div);
       } else {
-        const autoPrefix = prefix || String(document.querySelectorAll('#setupBuildingsList > div[data-type="residential"]').length + 1);
+        const autoPrefix = prefix != null ? String(prefix) : String(document.querySelectorAll('#setupBuildingsList > div[data-type="residential"]').length + 1);
         div.innerHTML = `
           <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
             <div style="flex:1;min-width:130px;">
@@ -7826,7 +7858,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             </div>
             <div style="width:55px;">
               <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">PREFIX</label>
-              <input type="text" value="${autoPrefix}" maxlength="3" placeholder="1" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
+              <input type="text" class="setup-building-prefix" value="${autoPrefix}" maxlength="3" placeholder="none" oninput="setupUpdateNumberPreview('${id}')" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
+            </div>
+            <div style="width:80px;">
+              <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;" title="Number of the first unit on each floor">FIRST #</label>
+              <select class="setup-start-at" onchange="setupUpdateNumberPreview('${id}')" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;"><option value="1" ${Number(startAt) === 0 ? '' : 'selected'}>01</option><option value="0" ${Number(startAt) === 0 ? 'selected' : ''}>00</option></select>
             </div>
             <button type="button" onclick="addBuildingInspectionColumn('${id}')" style="padding:6px 12px;background:#1E40AF;color:white;border:none;border-radius:5px;cursor:pointer;font-size:12px;">Add</button>
             <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#1E3A8A;white-space:nowrap;" title="Include one Underground area for this building"><input class="setup-underground-enabled" type="checkbox" ${undergroundEnabled !== false ? 'checked' : ''}> Underground included</label>
@@ -7841,6 +7877,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             </div>
             ${setupFloorRows(floorConfigs, floors, unitsPerFloor, autoPrefix)}
           </div>
+          <div class="setup-number-preview" style="font-size:11px;color:#1E3A8A;background:#EFF6FF;border-radius:6px;padding:5px 8px;margin:6px 0;"></div>
           ${systemsHtml}
           <div style="border-top:1px solid #E5E7EB;padding-top:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;"><label style="font-size:11px;font-weight:600;color:#1E3A8A;">SPECIAL AREAS</label><button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="addSetupSpecialAreaRow('${id}')">+ Add Special Area</button></div>
@@ -7852,6 +7889,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         div.dataset.planName = planName;
       }
       document.getElementById('setupBuildingsList').appendChild(div);
+      if (!isSpecial) {
+        div.querySelector(`#${id}_floorEditor`)?.addEventListener('input', () => setupUpdateNumberPreview(id));
+        div.querySelector('.setup-building-units')?.addEventListener('input', () => { setupSyncFloorRows(id); setupUpdateNumberPreview(id); });
+        setupUpdateNumberPreview(id);
+      }
       (Array.isArray(specialAreas) ? specialAreas : []).forEach(area => addSetupSpecialAreaRow(id, area));
       // Keep Inspection Types by Area synchronized when a building or special unit is removed.
       // Capture the click before the inline handler so deletion always requires confirmation.
@@ -8114,6 +8156,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           const floors = parseInt(numInputs[0]?.value) || 3;
           const unitsPerFloor = parseInt(numInputs[1]?.value) || 10;
           const prefix = textInputs[1] ? textInputs[1].value.trim() : String(residentialConfigs.length + 1);
+          const startAt = Number(row.querySelector('.setup-start-at')?.value) === 0 ? 0 : 1;
           const customToggle = row.querySelector('.setup-custom-floor-toggle');
           const floorConfigs = customToggle?.checked ? Array.from(row.querySelectorAll('.setup-floor-row')).map(floorRow => ({
             floor: parseInt(floorRow.querySelector('.setup-floor-number')?.value) || 1,
@@ -8124,10 +8167,21 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           })) : null;
            const specialAreas = collectSetupSpecialAreas(row);
            const undergroundEnabled = row.querySelector('.setup-underground-enabled')?.checked !== false;
-           if (name) residentialConfigs.push({ name, type: 'residential', floors, unitsPerFloor, prefix, systems: selectedSystems, undergroundEnabled, ...(floorConfigs ? { floorConfigs } : {}), specialAreas, specialAreasConfigured: true });
+           if (name) residentialConfigs.push({ name, type: 'residential', floors, unitsPerFloor, prefix, startAt, systems: selectedSystems, undergroundEnabled, ...(floorConfigs ? { floorConfigs } : {}), specialAreas, specialAreasConfigured: true });
         }
       });
 
+      // Two buildings must never produce the same unit number (e.g. both with
+      // an empty prefix): units are found by their number.
+      {
+        const seenApt = new Map(); const dup = [];
+        residentialConfigs.forEach(cfg => setupUnitList(cfg).forEach(u => { if (seenApt.has(u.apt) && seenApt.get(u.apt) !== cfg.name) dup.push(`${u.apt} (${seenApt.get(u.apt)} / ${cfg.name})`); else seenApt.set(u.apt, cfg.name); }));
+        if (dup.length) {
+          if (setupButton) { setupButton.disabled = false; setupButton.textContent = setupOriginalText; }
+          window.__identusSetupSaving = false;
+          alert(`These unit numbers would repeat in two buildings:\n${dup.slice(0, 8).join('\n')}${dup.length > 8 ? '\n…' : ''}\n\nGive each building a different PREFIX.`); return;
+        }
+      }
       if (residentialConfigs.length === 0 && specialConfigs.length === 0) {
         alert('Enter at least one building or special unit.'); return;
       }
@@ -8226,7 +8280,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         existingBuildings.forEach(b => { bIdToName[b.id] = b.name; });
         const desired = new Set();
         residentialConfigs.forEach(cfg => {
-          for (let f = 1; f <= cfg.floors; f++) for (let u = 1; u <= cfg.unitsPerFloor; u++) desired.add(`${cfg.prefix}${f}${String(u).padStart(2, '0')}`);
+          setupUnitList(cfg).forEach(unit => desired.add(unit.apt));
           desired.add(`${cfg.prefix}U`);
         });
         specialConfigs.forEach(cfg => desired.add(cfg.name));
@@ -8336,11 +8390,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         // Step 4: Build new units array
         const newUnits = [];
         residentialConfigs.forEach(cfg => {
-          for (let f = 1; f <= cfg.floors; f++) {
-            for (let u = 1; u <= cfg.unitsPerFloor; u++) {
-              newUnits.push({ unit_number: `${cfg.prefix}${f}${String(u).padStart(2, '0')}`, floor: `Floor ${f}`, building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
-            }
-          }
+          setupUnitList(cfg).forEach(unit => newUnits.push({ unit_number: unit.apt, floor: unit.floor, building_id: buildingMap[cfg.name], project_id: PROJECT_ID }));
           newUnits.push({ unit_number: `${cfg.prefix}U`, floor: 'Underground', building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
         });
         specialConfigs.forEach(cfg => {
