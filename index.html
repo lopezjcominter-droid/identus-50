@@ -33,12 +33,13 @@
       </div>
 
       <div style="margin: 0 0 20px; padding: 10px 12px; background: #F3F4F6; border-radius: 8px;">
-        <div style="display:flex;align-items:flex-start;gap:8px;min-width:0;">
+        <div style="display:flex;align-items:flex-start;gap:8px;min-width:0;cursor:pointer;" onclick="openProjectPicker()" title="Switch project">
           <div style="min-width:0;flex:1;">
             <div id="projectNameLabel" style="font-size: 14px; font-weight: 700; color: #111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
             <div id="projectAddressLabel" style="font-size: 11px; color: #6B7280; margin-top: 2px;"></div>
           </div>
-          <select id="projectSelector" aria-label="Select project" onchange="selectHeaderProject(this.value)" style="width:28px;min-width:28px;height:24px;padding:0 2px;border:1px solid #CBD5E1;border-radius:5px;background:#fff;color:#1E40AF;font-size:13px;cursor:pointer;margin-left:auto;" title="Select project">
+          <button type="button" aria-label="Switch project" onclick="event.stopPropagation();openProjectPicker()" style="width:28px;min-width:28px;height:24px;border:1px solid #CBD5E1;border-radius:5px;background:#fff;color:#1E40AF;font-size:13px;cursor:pointer;margin-left:auto;">▾</button>
+          <select id="projectSelector" aria-label="Select project" onchange="selectHeaderProject(this.value)" style="display:none;width:28px;min-width:28px;height:24px;padding:0 2px;border:1px solid #CBD5E1;border-radius:5px;background:#fff;color:#1E40AF;font-size:13px;cursor:pointer;margin-left:auto;" title="Select project">
             <option value="">▾</option>
           </select>
         </div>
@@ -7400,6 +7401,54 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       });
     }
     function selectSetupProject(projectId) { selectProjectFromCatalog(projectId); }
+    // Project switcher (Procore-style): every project the user can open, with
+    // address, role, units, progress and last activity. Choosing one opens it.
+    async function openProjectPicker() {
+      if (document.getElementById('projectPicker')) return;
+      const e = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      const ov = document.createElement('div'); ov.id = 'projectPicker';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100075;background:rgba(15,23,42,.45);display:flex;align-items:flex-start;justify-content:center;padding:60px 12px 12px;';
+      ov.innerHTML = `<div style="background:#fff;border-radius:12px;width:min(720px,100%);max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3);">
+        <div style="padding:14px 16px;border-bottom:1px solid #E5E7EB;display:flex;gap:10px;align-items:center;">
+          <b style="font-size:16px;color:#0F172A;">Projects</b>
+          <input type="search" id="ppSearch" placeholder="Search project or address…" autocomplete="off" data-lpignore="true" data-1p-ignore="true" style="flex:1;padding:8px 10px;border:1px solid #CBD5E1;border-radius:6px;font-size:14px;">
+          <button type="button" id="ppClose" style="border:none;background:none;font-size:20px;cursor:pointer;color:#64748B;">✕</button></div>
+        <div id="ppList" style="overflow:auto;padding:6px 8px;"><p style="color:#64748B;padding:10px;">Loading…</p></div>
+        <div id="ppFoot" style="padding:10px 16px;border-top:1px solid #E5E7EB;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#64748B;"></div></div>`;
+      document.body.appendChild(ov);
+      const close = () => ov.remove();
+      ov.querySelector('#ppClose').onclick = close; ov.addEventListener('click', ev => { if (ev.target === ov) close(); });
+      document.addEventListener('keydown', function esc(ev) { if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+      let rows = [];
+      if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:' && sbClient) {
+        const { data, error } = await sbClient.rpc('project_picker_summary');
+        if (!error && Array.isArray(data)) rows = data;
+      }
+      if (!rows.length) { await loadSetupProjectSelector(); rows = (setupProjectCatalog || []).map(p => ({ id: p.id, name: p.name, address: p.address })); }
+      const when = t => { if (!t) return 'No activity yet'; const d = Math.floor((Date.now() - Date.parse(t)) / 86400000); return d <= 0 ? 'Active today' : d === 1 ? 'Active yesterday' : `Active ${d} days ago`; };
+      const draw = q => {
+        const shown = rows.filter(r => !q || `${r.name} ${r.address}`.toLowerCase().includes(q));
+        ov.querySelector('#ppList').innerHTML = shown.length ? shown.map(r => {
+          const current = r.id === PROJECT_ID; const pct = Number(r.progress || 0);
+          return `<button type="button" data-pid="${e(r.id)}" style="display:flex;width:100%;text-align:left;gap:12px;align-items:center;padding:12px;border:1px solid ${current ? '#93C5FD' : 'transparent'};background:${current ? '#EFF6FF' : '#fff'};border-radius:8px;cursor:pointer;margin:2px 0;">
+            <div style="width:40px;height:40px;border-radius:8px;background:#1E40AF;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">${e(String(r.name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase())}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;color:#0F172A;font-size:14px;">${e(r.name)}${current ? ' <span style="font-size:11px;font-weight:600;color:#1D4ED8;background:#DBEAFE;padding:1px 7px;border-radius:9px;margin-left:4px;">Current</span>' : ''}</div>
+              <div style="font-size:12px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ${e(r.address || 'No address')}</div>
+              ${r.units != null ? `<div style="font-size:11px;color:#475569;margin-top:3px;">${Number(r.buildings || 0)} buildings · ${Number(r.units || 0)} units · ${Number(r.completed_units || 0)} completed · ${when(r.last_activity)}${r.my_role ? ` · Your role: <b>${e(r.my_role)}</b>` : ''}</div>` : ''}
+            </div>
+            ${r.units != null ? `<div style="width:90px;flex-shrink:0;text-align:right;"><div style="font-size:15px;font-weight:700;color:#0F172A;">${pct}%</div><div style="height:6px;background:#E2E8F0;border-radius:3px;margin-top:4px;"><div style="height:6px;width:${Math.min(100, pct)}%;background:${pct >= 100 ? '#059669' : '#2563EB'};border-radius:3px;"></div></div></div>` : ''}
+          </button>`;
+        }).join('') : '<p style="color:#64748B;padding:10px;">No projects found.</p>';
+        ov.querySelectorAll('[data-pid]').forEach(b => b.onclick = () => { const pid = b.dataset.pid; if (pid === PROJECT_ID) { close(); return; } b.style.opacity = '.6'; selectHeaderProject(pid); });
+      };
+      draw('');
+      const isAdmin = window.userRole === 'admin' || LOCAL_PROJECT_MODE || window.location.protocol === 'file:';
+      ov.querySelector('#ppFoot').innerHTML = `<span>${rows.length} project${rows.length === 1 ? '' : 's'}</span>${isAdmin ? '<button type="button" id="ppNew" style="padding:7px 12px;border:none;background:#1D4ED8;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">＋ New project</button>' : ''}`;
+      if (isAdmin) ov.querySelector('#ppNew').onclick = async () => { close(); await createNewProjectFromSetup(); };
+      const search = ov.querySelector('#ppSearch'); search.oninput = () => draw(search.value.trim().toLowerCase());
+    }
+    window.openProjectPicker = openProjectPicker;
     function selectHeaderProject(projectId) {
       if (!projectId) return;
       selectProjectFromCatalog(projectId);
