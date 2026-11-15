@@ -7416,15 +7416,29 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         <div id="ppList" style="overflow:auto;padding:6px 8px;"><p style="color:#64748B;padding:10px;">Loading…</p></div>
         <div id="ppFoot" style="padding:10px 16px;border-top:1px solid #E5E7EB;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#64748B;"></div></div>`;
       document.body.appendChild(ov);
-      const close = () => ov.remove();
+      let active = -1;
+      const onKey = ev => {
+        const items = [...ov.querySelectorAll('[data-pid]')];
+        if (ev.key === 'Escape') { close(); return; }
+        if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); active = Math.max(0, Math.min(items.length - 1, active + (ev.key === 'ArrowDown' ? 1 : -1))); items.forEach((b, i) => { b.style.boxShadow = i === active ? '0 0 0 2px #1D4ED8' : ''; }); items[active]?.scrollIntoView({ block: 'nearest' }); }
+        if (ev.key === 'Enter' && items[active >= 0 ? active : 0] && document.activeElement?.id === 'ppSearch') { ev.preventDefault(); items[active >= 0 ? active : 0].click(); }
+      };
+      const close = () => { document.removeEventListener('keydown', onKey); ov.remove(); };
       ov.querySelector('#ppClose').onclick = close; ov.addEventListener('click', ev => { if (ev.target === ov) close(); });
-      document.addEventListener('keydown', function esc(ev) { if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+      document.addEventListener('keydown', onKey);
+      // Keyboard on computers only (on iPad it would cover the list).
+      if (!window.matchMedia('(pointer: coarse)').matches) setTimeout(() => ov.querySelector('#ppSearch')?.focus(), 50);
       let rows = [];
       if (!LOCAL_PROJECT_MODE && window.location.protocol !== 'file:' && sbClient) {
         const { data, error } = await sbClient.rpc('project_picker_summary');
         if (!error && Array.isArray(data)) rows = data;
       }
-      if (!rows.length) { await loadSetupProjectSelector(); rows = (setupProjectCatalog || []).map(p => ({ id: p.id, name: p.name, address: p.address })); }
+      if (!rows.length) { try { await loadSetupProjectSelector(); } catch (_) {} rows = (setupProjectCatalog || []).map(p => ({ id: p.id, name: p.name, address: p.address })); }
+      if (!ov.isConnected) return;
+      // Current project first, then the ones opened most recently on this device, then by name.
+      let recent = []; try { recent = JSON.parse(localStorage.getItem('recent_projects') || '[]'); } catch (_) {}
+      const rankOf = r => r.id === PROJECT_ID ? -1 : (recent.indexOf(r.id) >= 0 ? recent.indexOf(r.id) : 999);
+      rows.sort((a, b) => rankOf(a) - rankOf(b) || String(a.name || '').localeCompare(String(b.name || '')));
       const when = t => { if (!t) return 'No activity yet'; const d = Math.floor((Date.now() - Date.parse(t)) / 86400000); return d <= 0 ? 'Active today' : d === 1 ? 'Active yesterday' : `Active ${d} days ago`; };
       const draw = q => {
         const shown = rows.filter(r => !q || `${r.name} ${r.address}`.toLowerCase().includes(q));
@@ -7435,12 +7449,20 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             <div style="flex:1;min-width:0;">
               <div style="font-weight:700;color:#0F172A;font-size:14px;">${e(r.name)}${current ? ' <span style="font-size:11px;font-weight:600;color:#1D4ED8;background:#DBEAFE;padding:1px 7px;border-radius:9px;margin-left:4px;">Current</span>' : ''}</div>
               <div style="font-size:12px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ${e(r.address || 'No address')}</div>
-              ${r.units != null ? `<div style="font-size:11px;color:#475569;margin-top:3px;">${Number(r.buildings || 0)} buildings · ${Number(r.units || 0)} units · ${Number(r.completed_units || 0)} completed · ${when(r.last_activity)}${r.my_role ? ` · Your role: <b>${e(r.my_role)}</b>` : ''}</div>` : ''}
+              ${r.units != null && !Number(r.units) ? `<div style="font-size:11px;color:#B45309;margin-top:3px;">Not set up yet — open it and use Project Setup to add buildings and units${r.my_role ? ` · Your role: <b>${e(r.my_role)}</b>` : ''}</div>` : ''}
+              ${r.units != null && Number(r.units) ? `<div style="font-size:11px;color:#475569;margin-top:3px;">${Number(r.buildings || 0)} buildings · ${Number(r.units || 0)} units · ${Number(r.completed_units || 0)} completed · ${when(r.last_activity)}${r.my_role ? ` · Your role: <b>${e(r.my_role)}</b>` : ''}</div>` : ''}
             </div>
-            ${r.units != null ? `<div style="width:90px;flex-shrink:0;text-align:right;"><div style="font-size:15px;font-weight:700;color:#0F172A;">${pct}%</div><div style="height:6px;background:#E2E8F0;border-radius:3px;margin-top:4px;"><div style="height:6px;width:${Math.min(100, pct)}%;background:${pct >= 100 ? '#059669' : '#2563EB'};border-radius:3px;"></div></div></div>` : ''}
+            ${r.units != null && Number(r.units) ? `<div style="width:90px;flex-shrink:0;text-align:right;"><div style="font-size:15px;font-weight:700;color:#0F172A;">${pct}%</div><div style="height:6px;background:#E2E8F0;border-radius:3px;margin-top:4px;"><div style="height:6px;width:${Math.min(100, pct)}%;background:${pct >= 100 ? '#059669' : '#2563EB'};border-radius:3px;"></div></div></div>` : ''}
           </button>`;
         }).join('') : '<p style="color:#64748B;padding:10px;">No projects found.</p>';
-        ov.querySelectorAll('[data-pid]').forEach(b => b.onclick = () => { const pid = b.dataset.pid; if (pid === PROJECT_ID) { close(); return; } b.style.opacity = '.6'; selectHeaderProject(pid); });
+        active = -1;
+        ov.querySelectorAll('[data-pid]').forEach(b => b.onclick = () => {
+          const pid = b.dataset.pid; if (pid === PROJECT_ID) { close(); return; }
+          try { const list = [pid, ...recent.filter(x => x !== pid)].slice(0, 8); localStorage.setItem('recent_projects', JSON.stringify(list)); } catch (_) {}
+          ov.querySelectorAll('[data-pid]').forEach(x => { x.disabled = true; x.style.opacity = x === b ? '1' : '.45'; });
+          b.insertAdjacentHTML('beforeend', '<span style="font-size:12px;color:#1D4ED8;font-weight:600;flex-shrink:0;">Opening…</span>');
+          selectHeaderProject(pid);
+        });
       };
       draw('');
       const isAdmin = window.userRole === 'admin' || LOCAL_PROJECT_MODE || window.location.protocol === 'file:';
