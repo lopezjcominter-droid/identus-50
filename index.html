@@ -7721,6 +7721,31 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       const toggle = document.getElementById(`${id}_customFloors`);
       if (!editor || !toggle) return;
       editor.hidden = !toggle.checked;
+      if (toggle.checked) setupSyncFloorRows(id);
+    }
+    // Keep one row per floor when FLOORS changes (values already typed are kept;
+    // new floors start with the building's UNITS/FLOOR).
+    function setupSyncFloorRows(id) {
+      const building = document.getElementById(id);
+      const editor = document.getElementById(`${id}_floorEditor`);
+      if (!building || !editor) return;
+      const count = Math.max(1, Math.min(50, parseInt(building.querySelector('.setup-building-floors')?.value, 10) || 1));
+      const units = parseInt(building.querySelector('.setup-building-units')?.value, 10) || 1;
+      const rows = Array.from(editor.querySelectorAll('.setup-floor-row'));
+      const existing = rows.map(row => ({
+        floor: row.querySelector('.setup-floor-number')?.value,
+        unitsPerFloor: row.querySelector('.setup-floor-units')?.value,
+        prefix: row.querySelector('.setup-floor-prefix')?.value,
+        model: row.querySelector('.setup-floor-model')?.value,
+        underground: !!row.querySelector('.setup-floor-underground')?.checked
+      }));
+      if (existing.length === count) return;
+      const prefix = existing[0]?.prefix || '';
+      const next = Array.from({ length: count }, (_, i) => existing.find(r => String(r.floor) === String(i + 1)) || { floor: i + 1, unitsPerFloor: units, prefix, model: '' });
+      rows.forEach(row => row.remove());
+      editor.insertAdjacentHTML('beforeend', setupFloorRows(next, count, units, prefix));
+      const source = editor.querySelector('.setup-floor-source');
+      if (source) source.innerHTML = next.map(cfg => `<option value="${cfg.floor}">Floor ${cfg.floor}</option>`).join('');
     }
     function setupFloorGroupCopy(id) {
       const editor = document.getElementById(`${id}_floorEditor`);
@@ -7793,11 +7818,11 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             </div>
             <div style="width:65px;">
               <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">FLOORS</label>
-              <input type="number" value="${floors}" min="1" max="50" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
+              <input type="number" class="setup-building-floors" value="${floors}" min="1" max="50" oninput="setupSyncFloorRows('${id}')" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
             </div>
             <div style="width:85px;">
               <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">UNITS/FLOOR</label>
-              <input type="number" value="${unitsPerFloor}" min="1" max="99" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
+              <input type="number" class="setup-building-units" value="${unitsPerFloor}" min="1" max="99" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;">
             </div>
             <div style="width:55px;">
               <label style="font-size:11px;font-weight:600;color:#6B7280;display:block;margin-bottom:3px;">PREFIX</label>
