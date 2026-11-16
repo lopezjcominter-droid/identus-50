@@ -5127,6 +5127,19 @@ Object.assign(APP_TRANSLATIONS.en, {
     const BUILDINGS = ['Building 1', 'Building 2', 'Building 3', 'Clubhouse', 'Parking'];
     // Note: Clubhouse and Parking are standalone buildings (not sub-units of Building 2)
     const FLOORS = ['Floor 1', 'Floor 2', 'Floor 3', 'Underground'];
+    // Buildings and floors of THIS project. The Ability defaults above are only
+    // a fallback before any project data exists (local preview / empty shell).
+    function projectBuildingNames() {
+      const real = [...new Set([
+        ...(Array.isArray(sbBuildings) ? sbBuildings.map(b => b.name) : []),
+        ...(Array.isArray(data) ? data.map(u => u.building) : [])
+      ].filter(Boolean))];
+      return real.length ? real : BUILDINGS.slice();
+    }
+    function projectFloorNames() {
+      const real = [...new Set((Array.isArray(data) ? data.map(u => u.floor) : []).filter(Boolean))];
+      return real.length ? real : FLOORS.slice();
+    }
     function normalizeFloorName(floor) { return floor === 'Ground' ? 'Underground' : floor; }
     // Dashboard status groups are intentionally broader than the internal
     // system statuses used by inspection workflows.
@@ -6325,7 +6338,9 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (readError) throw readError;
 
         const existingNames = new Set((existingBuildings || []).map(b => b.name));
-        const buildingsToCreate = BUILDINGS.filter(name => !existingNames.has(name));
+        // Only buildings that this project's units use (never the Ability defaults).
+        const needed = [...new Set((Array.isArray(data) ? data : []).map(u => u.building).filter(name => name && name !== 'Unknown'))];
+        const buildingsToCreate = needed.filter(name => !existingNames.has(name));
 
         if (buildingsToCreate.length > 0) {
           const buildingRows = buildingsToCreate.map(name => ({
@@ -7636,7 +7651,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         .map(row => row.querySelector('input[type="text"]:not([data-special-floor])')?.value.trim())
         .filter(Boolean);
       const buildingNames = [...new Set([
-        ...BUILDINGS,
+        ...(Array.isArray(sbBuildings) && sbBuildings.length ? [] : BUILDINGS),
         ...(Array.isArray(sbBuildings) ? sbBuildings.map(b => b.name).filter(Boolean) : []),
         ...setupNames
       ])];
@@ -8629,8 +8644,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         </label>`;
       };
 
-      const buildingNames = [...new Set([...BUILDINGS, ...(Array.isArray(sbBuildings) ? sbBuildings.map(b => b.name) : [])])];
-      const floorNames = [...new Set([...FLOORS, ...(Array.isArray(data) ? data.map(unit => unit.floor).filter(Boolean) : [])])];
+      const buildingNames = projectBuildingNames();
+      const floorNames = projectFloorNames();
       document.getElementById('buildingFilters').innerHTML = buildingNames.map(b => makeOption('buildings', b, filters.buildings)).join('');
       floorNames.forEach(f => filters.floors.add(f));
       document.getElementById('floorFilters').innerHTML = floorNames.map(f => makeOption('floors', f, filters.floors)).join('');
@@ -8642,7 +8657,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
 
     function setupBuildingButtons() {
       const container = document.getElementById('buildingButtonsContainer');
-      const buildingNames = [...new Set([...BUILDINGS, ...(Array.isArray(sbBuildings) ? sbBuildings.map(b => b.name) : [])])];
+      const buildingNames = projectBuildingNames();
       container.innerHTML = buildingNames.map(building => {
         // Count only units que coinciden con TODOS los filtros activos
         const count = data.filter(u => {
@@ -8685,7 +8700,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     }
 
     function selectAllBuildings() {
-      const buildingNames = [...new Set([...BUILDINGS, ...(Array.isArray(sbBuildings) ? sbBuildings.map(b => b.name) : [])])];
+      const buildingNames = projectBuildingNames();
       buildingNames.forEach(b => filters.buildings.add(b));
       document.querySelectorAll('#buildingFilters .filter-option').forEach(l => {
         l.classList.add('active');
@@ -12849,7 +12864,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       const output = document.getElementById('reportOutput');
       const buildingStats = {};
 
-      BUILDINGS.forEach(building => {
+      projectBuildingNames().forEach(building => {
         const units = data.filter(u => u.building === building);
         const completedUnits = units.filter(u => Object.values(u.systems).every(s => s.status === 'Completed')).length;
         buildingStats[building] = {
