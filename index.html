@@ -5767,7 +5767,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         let projectDataLoaded = false;
         for (let attempt = 0; attempt < 3 && !projectDataLoaded; attempt++) {
           try {
-            await withTimeout(loadData(), 12000, 'Project data');
+            await withTimeout(loadData(), 30000, 'Project data');
             projectDataLoaded = Array.isArray(data) && data.length > 0;
             if (!projectDataLoaded && attempt < 2) await new Promise(resolve => setTimeout(resolve, 700));
           } catch (error) {
@@ -5988,6 +5988,17 @@ Object.assign(APP_TRANSLATIONS.en, {
       unit._eventsLoaded = true;
     }
 
+    async function fetchAllProjectRows(table, columns, orderBy) {
+      const pageSize = 1000, rows = [];
+      for (let from = 0; ; from += pageSize) {
+        let q = sbClient.from(table).select(columns).eq('project_id', PROJECT_ID);
+        orderBy.split(',').forEach(col => { q = q.order(col, { ascending: true }); });
+        const { data: page, error } = await q.range(from, from + pageSize - 1);
+        if (error) return { data: rows, error };
+        rows.push(...(page || []));
+        if (!page || page.length < pageSize) return { data: rows, error: null };
+      }
+    }
     async function loadData() {
       try {
         if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
@@ -6102,14 +6113,14 @@ Object.assign(APP_TRANSLATIONS.en, {
         let systemsStatus = [];
         let statusError = null;
         if (unitIds.length) {
-          const current = await sbClient.from('unit_systems_status')
-            .select('unit_id, system_id, progress, status, photos')
-            .in('unit_id', unitIds);
-          systemsStatus = current.data || [];
+          // Supabase returns at most 1000 rows per request: read every page
+          // (a 357-unit project has 3,570 status rows).
+          const current = await fetchAllProjectRows('unit_systems_status', 'unit_id, system_id, progress, status, photos', 'unit_id,system_id');
+          const unitIdSet = new Set(unitIds);
+          systemsStatus = (current.data || []).filter(row => unitIdSet.has(row.unit_id));
           statusError = current.error;
           if (!statusError) {
-            const recent = await sbClient.from('unit_systems_status_recent_events')
-              .select('unit_id, system_id, events').eq('project_id', PROJECT_ID);
+            const recent = await fetchAllProjectRows('unit_systems_status_recent_events', 'unit_id, system_id, events', 'unit_id,system_id');
             if (!recent.error) {
               statusEventsProjectionAvailable = true;
               const recentByKey = new Map((recent.data || []).map(row => [
