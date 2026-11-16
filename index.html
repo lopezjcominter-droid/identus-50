@@ -5988,16 +5988,26 @@ Object.assign(APP_TRANSLATIONS.en, {
       unit._eventsLoaded = true;
     }
 
+    // Supabase returns at most 1000 rows per request: count first, then read
+    // every page at the same time.
     async function fetchAllProjectRows(table, columns, orderBy) {
-      const pageSize = 1000, rows = [];
-      for (let from = 0; ; from += pageSize) {
-        let q = sbClient.from(table).select(columns).eq('project_id', PROJECT_ID);
+      const pageSize = 1000;
+      const page = from => {
+        let q = sbClient.from(table).select(columns, from === 0 ? { count: 'exact' } : undefined).eq('project_id', PROJECT_ID);
         orderBy.split(',').forEach(col => { q = q.order(col, { ascending: true }); });
-        const { data: page, error } = await q.range(from, from + pageSize - 1);
-        if (error) return { data: rows, error };
-        rows.push(...(page || []));
-        if (!page || page.length < pageSize) return { data: rows, error: null };
+        return q.range(from, from + pageSize - 1);
+      };
+      const first = await page(0);
+      if (first.error) return { data: [], error: first.error };
+      const rows = [...(first.data || [])];
+      const total = Number.isFinite(first.count) ? first.count : rows.length;
+      const rest = [];
+      for (let from = pageSize; from < total; from += pageSize) rest.push(page(from));
+      for (const r of await Promise.all(rest)) {
+        if (r.error) return { data: rows, error: r.error };
+        rows.push(...(r.data || []));
       }
+      return { data: rows, error: null };
     }
     async function loadData() {
       try {
@@ -6115,12 +6125,15 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (unitIds.length) {
           // Supabase returns at most 1000 rows per request: read every page
           // (a 357-unit project has 3,570 status rows).
-          const current = await fetchAllProjectRows('unit_systems_status', 'unit_id, system_id, progress, status, photos', 'unit_id,system_id');
+          const [current, recentAll] = await Promise.all([
+            fetchAllProjectRows('unit_systems_status', 'unit_id, system_id, progress, status, photos', 'unit_id,system_id'),
+            fetchAllProjectRows('unit_systems_status_recent_events', 'unit_id, system_id, events', 'unit_id,system_id')
+          ]);
           const unitIdSet = new Set(unitIds);
           systemsStatus = (current.data || []).filter(row => unitIdSet.has(row.unit_id));
           statusError = current.error;
           if (!statusError) {
-            const recent = await fetchAllProjectRows('unit_systems_status_recent_events', 'unit_id, system_id, events', 'unit_id,system_id');
+            const recent = recentAll;
             if (!recent.error) {
               statusEventsProjectionAvailable = true;
               const recentByKey = new Map((recent.data || []).map(row => [
