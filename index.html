@@ -5767,7 +5767,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         let projectDataLoaded = false;
         for (let attempt = 0; attempt < 3 && !projectDataLoaded; attempt++) {
           try {
-            await withTimeout(loadData(), 12000, 'Project data');
+            await withTimeout(loadData(), 30000, 'Project data');
             projectDataLoaded = Array.isArray(data) && data.length > 0;
             if (!projectDataLoaded && attempt < 2) await new Promise(resolve => setTimeout(resolve, 700));
           } catch (error) {
@@ -5988,6 +5988,27 @@ Object.assign(APP_TRANSLATIONS.en, {
       unit._eventsLoaded = true;
     }
 
+    // Supabase returns at most 1000 rows per request: count first, then read
+    // every page at the same time.
+    async function fetchAllProjectRows(table, columns, orderBy) {
+      const pageSize = 1000;
+      const page = from => {
+        let q = sbClient.from(table).select(columns, from === 0 ? { count: 'exact' } : undefined).eq('project_id', PROJECT_ID);
+        orderBy.split(',').forEach(col => { q = q.order(col, { ascending: true }); });
+        return q.range(from, from + pageSize - 1);
+      };
+      const first = await page(0);
+      if (first.error) return { data: [], error: first.error };
+      const rows = [...(first.data || [])];
+      const total = Number.isFinite(first.count) ? first.count : rows.length;
+      const rest = [];
+      for (let from = pageSize; from < total; from += pageSize) rest.push(page(from));
+      for (const r of await Promise.all(rest)) {
+        if (r.error) return { data: rows, error: r.error };
+        rows.push(...(r.data || []));
+      }
+      return { data: rows, error: null };
+    }
     async function loadData() {
       try {
         if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
@@ -6102,14 +6123,17 @@ Object.assign(APP_TRANSLATIONS.en, {
         let systemsStatus = [];
         let statusError = null;
         if (unitIds.length) {
-          const current = await sbClient.from('unit_systems_status')
-            .select('unit_id, system_id, progress, status, photos')
-            .in('unit_id', unitIds);
-          systemsStatus = current.data || [];
+          // Supabase returns at most 1000 rows per request: read every page
+          // (a 357-unit project has 3,570 status rows).
+          const [current, recentAll] = await Promise.all([
+            fetchAllProjectRows('unit_systems_status', 'unit_id, system_id, progress, status, photos', 'unit_id,system_id'),
+            fetchAllProjectRows('unit_systems_status_recent_events', 'unit_id, system_id, events', 'unit_id,system_id')
+          ]);
+          const unitIdSet = new Set(unitIds);
+          systemsStatus = (current.data || []).filter(row => unitIdSet.has(row.unit_id));
           statusError = current.error;
           if (!statusError) {
-            const recent = await sbClient.from('unit_systems_status_recent_events')
-              .select('unit_id, system_id, events').eq('project_id', PROJECT_ID);
+            const recent = recentAll;
             if (!recent.error) {
               statusEventsProjectionAvailable = true;
               const recentByKey = new Map((recent.data || []).map(row => [
@@ -8318,7 +8342,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         alert('Each building and Special Unit must have a unique name.');
         return;
       }
-      if (residentialConfigs.some(cfg => cfg.floors < 1 || cfg.unitsPerFloor < 1 || !cfg.prefix)) {
+      if (residentialConfigs.some(cfg => cfg.floors < 1 || cfg.unitsPerFloor < 1)) {
         alert('Check each building name, floor count, unit count, and prefix.');
         return;
       }
