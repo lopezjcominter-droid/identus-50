@@ -7822,7 +7822,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
             const b = location.key;
             const isAreaColumn = Array.isArray(location.areaInspections) && location.inspectionConfigured;
             const isScopedColumn = location.scopeFloor === 'Underground';
-            const hasScopedConfig = Array.isArray(cfg?.[type.id]) && cfg[type.id].some(value => String(value).includes('::Underground'));
+            const hasScopedConfig = !!cfg?.__undergroundScoped || (Array.isArray(cfg?.[type.id]) && cfg[type.id].some(value => String(value).includes('::Underground')));
             const isChecked = isAreaColumn ? location.areaInspections.includes(String(type.id)) : (cfg === null || !cfg[type.id] ? true : cfg[type.id].includes(b) || (isScopedColumn && !hasScopedConfig && cfg[type.id].includes(b.replace('::Underground',''))));
             return `<td style="text-align:center;padding:5px;border:1px solid #E5E7EB;">
               <input type="checkbox" ${isChecked ? 'checked' : ''} data-typeid="${type.id}" data-building="${officialFinalEscape(b)}" title="${officialFinalEscape(location.label)}" style="cursor:pointer;width:15px;height:15px;">
@@ -7854,7 +7854,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         await saveInspBuildingConfig(cfg);
         // Re-read immediately so the next Setup open and the inspection
         // selector use exactly the saved Underground scope.
-        inspRemoteConfig = cfg;
+        inspRemoteConfig = { ...cfg, __undergroundScoped: true };
         inspRemoteReady = true;
         btn.textContent = '✅ Saved';
         btn.style.background = '#15803d';
