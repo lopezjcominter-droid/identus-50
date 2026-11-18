@@ -7,16 +7,18 @@
 <style>
   :root { --bar: #0F172A; --bg: #334155; }
   html, body { margin: 0; background: var(--bg); font-family: -apple-system, Segoe UI, Arial, sans-serif; }
-  #bar { position: fixed; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bar); color: #fff; flex-wrap: wrap; }
+  #bar { position: fixed; top: 0; left: 0; right: 0; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bar); color: #fff; flex-wrap: wrap; }
   #bar b { flex: 1; min-width: 120px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #bar button, #bar a { padding: 6px 11px; border: none; border-radius: 6px; background: #fff; color: #0F172A; font-weight: 600; font-size: 13px; cursor: pointer; text-decoration: none; }
+  #bar button { padding: 6px 11px; border: none; border-radius: 6px; background: #fff; color: #0F172A; font-weight: 600; font-size: 13px; cursor: pointer; }
   #bar input { width: 52px; padding: 5px; border-radius: 6px; border: none; text-align: center; font-size: 13px; }
+  #zoomLabel { font-size: 12px; min-width: 42px; text-align: center; }
   #pages { padding: 70px 8px 40px; touch-action: pan-x pan-y; transform-origin: 0 0; }
-  .pg { margin: 0 auto 12px; background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.35); position: relative; }
-  .pg canvas { display: block; width: 100%; height: 100%; }
-  .pg .n { position: absolute; top: 6px; right: 8px; font-size: 11px; color: #64748B; background: rgba(255,255,255,.85); padding: 1px 6px; border-radius: 8px; }
+  .pg { margin: 0 auto 12px; background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.35); position: relative; overflow: hidden; }
+  .pg canvas.base { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .pg canvas.detail { position: absolute; pointer-events: none; }
+  .pg .n { position: absolute; z-index: 1; top: 6px; right: 8px; font-size: 11px; color: #64748B; background: rgba(255,255,255,.85); padding: 1px 6px; border-radius: 8px; }
   .pg.cited { outline: 4px solid #F59E0B; }
-  #msg { color: #E2E8F0; text-align: center; padding: 30px; }
+  #msg { color: #E2E8F0; text-align: center; padding: 30px; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -26,77 +28,148 @@
   <span><input id="pageInput" type="number" min="1" value="1"> / <span id="total">…</span></span>
   <button type="button" id="next">›</button>
   <button type="button" id="zoomOut">−</button>
+  <span id="zoomLabel">100%</span>
   <button type="button" id="zoomIn">+</button>
-  <a id="download" target="_blank" rel="noopener">Download</a>
+  <button type="button" id="fit">Fit</button>
+  <button type="button" id="download">Download</button>
 </div>
 <div id="pages"><div id="msg">Loading document…</div></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
-// Opens a PDF from the AI chat at the cited page. Parameters come in the hash
-// (#u=<signed url>&p=<page>&t=<title>) so the temporary link is not sent to
-// any server log. Every page can be scrolled; pages render as they come into view.
+// Opens a PDF from the AI chat at the cited page.
+// Hash: #b=<bucket>&f=<storage path>&p=<page>&t=<title>. The viewer asks for a
+// fresh temporary link every time it opens (with the user's own session), so a
+// tab kept open or reopened days later still works. Old links (#u=...) still open.
+// Sharpness: each page has a light base drawing; when zoomed in, only the part
+// on screen is drawn again at full screen resolution (sharp at any zoom, little memory).
 (async () => {
+  const SUPABASE_URL = 'https://kihsukzcbohmxovbyisi.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHN1a3pjYm9obXhvdmJ5aXNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjEzMjEsImV4cCI6MjEwNTkzNzMyMX0.91APDO6eQ25ZkdOsBXMj_Uhv0EtkfWULn2N5jEfAGZA';
   const params = new URLSearchParams(location.hash.slice(1));
-  const url = params.get('u'); const startPage = Math.max(1, Number(params.get('p')) || 1);
+  const bucket = params.get('b') || 'ai-docs'; const path = params.get('f'); const legacyUrl = params.get('u');
+  const startPage = Math.max(1, Number(params.get('p')) || 1);
   const title = params.get('t') || 'Document';
   const $ = id => document.getElementById(id);
   $('title').textContent = title; document.title = `${title} · p.${startPage}`;
-  if (!url || !/^https:\/\/[a-z0-9-]+\.supabase\.co\//i.test(url)) { $('msg').textContent = 'Document link is missing or expired. Open it again from the chat.'; return; }
-  $('download').href = url;
+  const fail = text => { $('pages').innerHTML = `<div id="msg">${text}</div>`; };
+
+  // Uses the sign-in saved by Identus 50 in this browser (read only: this tab
+  // never refreshes the session, so the main app tab is not affected).
+  async function freshUrl() {
+    if (!path) return legacyUrl;
+    let session = null;
+    try { session = JSON.parse(localStorage.getItem('sb-kihsukzcbohmxovbyisi-auth-token') || 'null'); } catch (_) {}
+    if (!session?.access_token || (session.expires_at && session.expires_at * 1000 < Date.now() + 30000)) throw new Error('signin');
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${encodeURIComponent(bucket)}/${path.split('/').map(encodeURIComponent).join('/')}`, {
+      method: 'POST', headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ expiresIn: 3600 })
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) throw new Error('signin');
+    if (!res.ok || !body.signedURL) throw new Error('link');
+    return `${SUPABASE_URL}/storage/v1${body.signedURL}`;
+  }
+  let url;
+  try { url = await freshUrl(); }
+  catch (e) { return fail(e.message === 'signin' ? 'Your sign-in needs a refresh: open Identus 50 in another tab (it renews it), then reload this tab.' : 'Could not open the document. Reload this tab or open it again from the chat.'); }
+  if (!url || !/^https:\/\/[a-z0-9-]+\.supabase\.co\//i.test(url)) return fail('Document link is missing. Open it again from the chat.');
+  $('download').onclick = async () => { try { window.open(await freshUrl(), '_blank'); } catch (_) { alert('Sign in again to download.'); } };
+
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   let pdf;
   try { pdf = await pdfjsLib.getDocument({ url }).promise; }
-  catch (e) { $('msg').textContent = 'Could not open the document (the link expires after 10 minutes). Open it again from the chat.'; return; }
+  catch (e) { return fail('Could not open the document. Reload this tab to try again.'); }
+
   const total = pdf.numPages; $('total').textContent = total; $('pageInput').max = total;
   const first = await pdf.getPage(1); const base = first.getViewport({ scale: 1 });
+  const DPR = Math.min(window.devicePixelRatio || 1, 3);
   let zoom = 1; const holder = $('pages'); holder.innerHTML = '';
-  const fitWidth = () => Math.min(window.innerWidth - 24, 1400) * zoom;
-  const boxes = [];
+  const fitWidth = () => Math.min(window.innerWidth - 24, 1400);
+  const pageWidth = () => fitWidth() * zoom;
+  const boxes = []; const sizes = [];
   for (let n = 1; n <= total; n++) {
     const box = document.createElement('div'); box.className = 'pg' + (n === startPage ? ' cited' : ''); box.dataset.n = n;
     box.innerHTML = `<span class="n">${n}</span>`;
-    holder.appendChild(box); boxes.push(box);
+    holder.appendChild(box); boxes.push(box); sizes.push(base.height / base.width);
   }
-  const sizeBoxes = () => boxes.forEach(box => { const w = fitWidth(); box.style.width = `${w}px`; box.style.height = `${w * base.height / base.width}px`; });
+  const sizeBoxes = () => { const w = pageWidth(); boxes.forEach((box, i) => { box.style.width = `${w}px`; box.style.height = `${w * sizes[i]}px`; }); $('zoomLabel').textContent = `${Math.round(zoom * 100)}%`; };
   sizeBoxes();
-  const rendering = new Map();
-  async function render(box) {
-    const n = Number(box.dataset.n); const key = `${n}@${zoom}`;
-    if (box.dataset.done === key || rendering.get(n) === key) return;
-    rendering.set(n, key);
-    const page = await pdf.getPage(n);
-    const v1 = page.getViewport({ scale: 1 });
-    box.style.height = `${fitWidth() * v1.height / v1.width}px`;
-    const scale = fitWidth() / v1.width; const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    // Cap the canvas size so big zooms do not run out of memory.
-    const safe = Math.sqrt(16000000 / Math.max(1, (v1.width * scale) * (v1.height * scale)));
-    const viewport = page.getViewport({ scale: scale * Math.min(ratio, safe) });
-    const canvas = document.createElement('canvas'); canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
-    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-    if (rendering.get(n) !== key) return;
-    box.querySelector('canvas')?.remove(); box.prepend(canvas); box.dataset.done = key;
+
+  // Base drawing: fit width at screen resolution, drawn once per page and
+  // reused at every zoom. Pages far from the screen drop it to save memory.
+  const baseTasks = new Map();
+  async function renderBase(box) {
+    const n = Number(box.dataset.n);
+    if (box.querySelector('canvas.base') || baseTasks.has(n)) return;
+    baseTasks.set(n, true);
+    try {
+      const page = await pdf.getPage(n); const v1 = page.getViewport({ scale: 1 });
+      if (Math.abs(sizes[n - 1] - v1.height / v1.width) > 0.001) { sizes[n - 1] = v1.height / v1.width; box.style.height = `${pageWidth() * sizes[n - 1]}px`; }
+      const scale = Math.min((fitWidth() * Math.min(DPR, 2)) / v1.width, Math.sqrt(8000000 / (v1.width * v1.height)));
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas'); canvas.className = 'base';
+      canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
+      await page.render({ canvasContext: canvas.getContext('2d', { alpha: false }), viewport }).promise;
+      if (box.dataset.near === '1') box.prepend(canvas);
+    } catch (_) {} finally { baseTasks.delete(n); }
   }
-  const io = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) render(e.target); }), { rootMargin: '600px 0px' });
+  const io = new IntersectionObserver(entries => entries.forEach(e => {
+    const box = e.target;
+    if (e.isIntersecting) { box.dataset.near = '1'; renderBase(box); }
+    else { box.dataset.near = '0'; box.querySelector('canvas.base')?.remove(); box.querySelector('canvas.detail')?.remove(); }
+  }), { rootMargin: '1200px 0px' });
   boxes.forEach(b => io.observe(b));
-  // Current page indicator
+
+  // Detail drawing: only the visible part of each visible page, at full screen
+  // resolution for the current zoom. Redrawn when scrolling or zooming stops.
+  let detailTasks = []; let detailTimer = null;
+  function scheduleDetail() { clearTimeout(detailTimer); detailTimer = setTimeout(renderDetail, 160); }
+  async function renderDetail() {
+    detailTasks.forEach(t => { try { t.cancel(); } catch (_) {} }); detailTasks = [];
+    const vw = window.innerWidth, vh = window.innerHeight;
+    for (const box of boxes) {
+      const r = box.getBoundingClientRect();
+      const old = box.querySelector('canvas.detail');
+      if (zoom <= 1.05 || r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) { old?.remove(); continue; }
+      const x0 = Math.max(0, -r.left), y0 = Math.max(0, -r.top);
+      const w = Math.min(r.width, vw - r.left) - x0, h = Math.min(r.height, vh - r.top) - y0;
+      if (w < 2 || h < 2) { old?.remove(); continue; }
+      const n = Number(box.dataset.n);
+      try {
+        const page = await pdf.getPage(n); const v1 = page.getViewport({ scale: 1 });
+        const scale = (r.width / v1.width) * DPR;
+        const viewport = page.getViewport({ scale, offsetX: -x0 * DPR, offsetY: -y0 * DPR });
+        const canvas = document.createElement('canvas'); canvas.className = 'detail';
+        canvas.width = Math.ceil(w * DPR); canvas.height = Math.ceil(h * DPR);
+        canvas.style.left = `${x0}px`; canvas.style.top = `${y0}px`; canvas.style.width = `${w}px`; canvas.style.height = `${h}px`;
+        const task = page.render({ canvasContext: canvas.getContext('2d', { alpha: false }), viewport }); detailTasks.push(task);
+        await task.promise;
+        box.querySelector('canvas.detail')?.remove(); box.appendChild(canvas);
+      } catch (_) { /* cancelled by a newer scroll/zoom */ }
+    }
+  }
+
   const current = () => { const mid = window.innerHeight / 2; let best = 1; boxes.forEach(b => { const r = b.getBoundingClientRect(); if (r.top <= mid) best = Number(b.dataset.n); }); return best; };
-  window.addEventListener('scroll', () => { $('pageInput').value = current(); }, { passive: true });
+  window.addEventListener('scroll', () => { $('pageInput').value = current(); scheduleDetail(); }, { passive: true });
+  window.addEventListener('resize', () => { boxes.forEach(b => b.querySelector('canvas.base')?.remove()); sizeBoxes(); boxes.forEach(b => { io.unobserve(b); io.observe(b); }); scheduleDetail(); });
   const go = n => { n = Math.min(total, Math.max(1, n)); const top = boxes[n - 1].offsetTop - $('bar').offsetHeight - 8; window.scrollTo({ top }); $('pageInput').value = n; };
   $('prev').onclick = () => go(current() - 1);
   $('next').onclick = () => go(current() + 1);
   $('pageInput').onchange = e => go(Number(e.target.value) || 1);
+
   // Zoom keeping the point under the fingers (or the screen center) in place.
+  const MAX_ZOOM = 12, MIN_ZOOM = 0.4;
   const rezoomAt = (f, cx = window.innerWidth / 2, cy = window.innerHeight / 2) => {
-    const next = Math.min(6, Math.max(0.4, zoom * f)); f = next / zoom; if (Math.abs(f - 1) < 0.01) return;
+    const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * f)); f = next / zoom; if (Math.abs(f - 1) < 0.01) return;
     const px = window.scrollX + cx, py = window.scrollY + cy - 70;
-    zoom = next; boxes.forEach(b => { delete b.dataset.done; }); sizeBoxes();
+    zoom = next; boxes.forEach(b => b.querySelector('canvas.detail')?.remove()); sizeBoxes();
     window.scrollTo(px * f - cx, py * f - cy + 70);
-    boxes.forEach(b => { io.unobserve(b); io.observe(b); });
+    scheduleDetail();
   };
-  const rezoom = f => rezoomAt(f);
-  $('zoomIn').onclick = () => rezoom(1.3); $('zoomOut').onclick = () => rezoom(1 / 1.3);
-  // Two fingers: pinch to zoom (the view stretches while pinching, then the
-  // pages are drawn again sharp). One finger: move around (normal scroll).
+  $('zoomIn').onclick = () => rezoomAt(1.4); $('zoomOut').onclick = () => rezoomAt(1 / 1.4);
+  $('fit').onclick = () => { const n = current(); rezoomAt(1 / zoom); go(n); };
+
+  // Two fingers: pinch (the view stretches while pinching, then the visible
+  // part is drawn again sharp). One finger: move around (normal scroll).
   let pinch = null;
   const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   holder.addEventListener('touchstart', e => {
@@ -104,25 +177,25 @@
   }, { passive: false });
   holder.addEventListener('touchmove', e => {
     if (!pinch || e.touches.length !== 2) return; e.preventDefault();
-    pinch.s = Math.min(6 / zoom, Math.max(0.4 / zoom, dist(e.touches) / pinch.d0));
-    const ox = window.scrollX + pinch.cx, oy = window.scrollY + pinch.cy;
-    holder.style.transformOrigin = `${ox}px ${oy}px`; holder.style.transform = `scale(${pinch.s})`;
+    pinch.s = Math.min(MAX_ZOOM / zoom, Math.max(MIN_ZOOM / zoom, dist(e.touches) / pinch.d0));
+    holder.style.transformOrigin = `${window.scrollX + pinch.cx}px ${window.scrollY + pinch.cy}px`; holder.style.transform = `scale(${pinch.s})`;
   }, { passive: false });
   const endPinch = () => { if (!pinch) return; const p = pinch; pinch = null; holder.style.transform = ''; holder.style.transformOrigin = '0 0'; rezoomAt(p.s, p.cx, p.cy); };
   holder.addEventListener('touchend', e => { if (e.touches.length < 2) endPinch(); });
   holder.addEventListener('touchcancel', endPinch);
-  // Safari gesture events (iPad): block the page zoom, the pinch above handles it.
   ['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
   // Computer: trackpad pinch (or Ctrl + wheel) zooms at the pointer.
   let wheelTimer = null, wheelF = 1, wheelAt = null;
   window.addEventListener('wheel', e => {
     if (!e.ctrlKey) return; e.preventDefault();
     wheelF *= Math.exp(-e.deltaY * 0.01); wheelAt = [e.clientX, e.clientY];
-    holder.style.transformOrigin = `${window.scrollX + e.clientX}px ${window.scrollY + e.clientY}px`; holder.style.transform = `scale(${Math.min(6 / zoom, Math.max(0.4 / zoom, wheelF))})`;
+    holder.style.transformOrigin = `${window.scrollX + e.clientX}px ${window.scrollY + e.clientY}px`; holder.style.transform = `scale(${Math.min(MAX_ZOOM / zoom, Math.max(MIN_ZOOM / zoom, wheelF))})`;
     clearTimeout(wheelTimer);
-    wheelTimer = setTimeout(() => { const f = Math.min(6 / zoom, Math.max(0.4 / zoom, wheelF)); wheelF = 1; holder.style.transform = ''; holder.style.transformOrigin = '0 0'; rezoomAt(f, wheelAt[0], wheelAt[1]); }, 180);
+    wheelTimer = setTimeout(() => { const f = Math.min(MAX_ZOOM / zoom, Math.max(MIN_ZOOM / zoom, wheelF)); wheelF = 1; holder.style.transform = ''; holder.style.transformOrigin = '0 0'; rezoomAt(f, wheelAt[0], wheelAt[1]); }, 180);
   }, { passive: false });
-  await render(boxes[startPage - 1]);
+
+  boxes[startPage - 1].dataset.near = '1';
+  await renderBase(boxes[startPage - 1]);
   go(startPage);
 })();
 </script>

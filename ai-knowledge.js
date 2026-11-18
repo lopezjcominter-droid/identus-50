@@ -436,7 +436,7 @@ body.aic-open{overflow:hidden;position:fixed;width:100%;height:100%}
     // zoom and one finger to move (iPad browsers ignore "#page=N").
     void isIOS;
     const target = !/\.pdf$/i.test(path) ? data.signedUrl
-      : `pdf-viewer.html#${new URLSearchParams({ u: data.signedUrl, p: page, t: title }).toString()}`;
+      : `pdf-viewer.html#${new URLSearchParams({ b: BUCKET, f: path, p: page, t: title }).toString()}`;
     if (tab) tab.location.href = target; else window.open(target, '_blank');
   }
   // Takeoff: count symbols on the chosen sheet, one quarter per call in parallel.
