@@ -7686,6 +7686,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     async function saveInspBuildingConfig(cfg) {
       if (window.location.protocol !== 'file:' && !LOCAL_PROJECT_MODE && sbClient) {
         await inspPersistRemoteBuildingConfig(cfg);
+        // Keep this tab in step with what was just saved (Setup reopen, field list).
+        inspRemoteConfig = cfg; inspRemoteReady = true;
         return true;
       }
       try { localStorage.setItem('insp_building_config', JSON.stringify(cfg)); return true; } catch(e) { throw e; }
@@ -7743,6 +7745,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       inspRemoteReady = true;
     }
 
+    // Compares two inspection configurations by their real choices only.
+    function inspConfigKey(cfg) { const out = {}; Object.keys(cfg || {}).filter(k => k !== '__undergroundScoped').sort().forEach(k => { out[k] = [...(cfg[k] || [])].sort(); }); return JSON.stringify(out); }
     function collectInspectionTypeConfigFromUI() {
       const cfg = {};
       document.querySelectorAll('#insp-building-config-table input[type="checkbox"]').forEach(cb => {
@@ -7751,6 +7755,9 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         if (!cfg[typeId]) cfg[typeId] = [];
         if (cb.checked) cfg[typeId].push(building);
       });
+      // The table always lists the Underground column explicitly: an unchecked
+      // Underground box means OFF, not "same as the building".
+      if (Object.keys(cfg).length) cfg.__undergroundScoped = true;
       return cfg;
     }
 
@@ -7844,6 +7851,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
     }
 
     async function saveInspBuildingConfigFromUI(btn) {
+      // The table always saves the Underground column explicitly.
       const cfg = collectInspectionTypeConfigFromUI();
       btn = btn || document.querySelector('#insp-building-config-table button[onclick*="saveInspBuildingConfigFromUI"]');
       if (!btn) return;
@@ -7854,7 +7862,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         await saveInspBuildingConfig(cfg);
         // Re-read immediately so the next Setup open and the inspection
         // selector use exactly the saved Underground scope.
-        inspRemoteConfig = { ...cfg, __undergroundScoped: true };
+        inspRemoteConfig = cfg;
         inspRemoteReady = true;
         btn.textContent = '✅ Saved';
         btn.style.background = '#15803d';
@@ -8445,8 +8453,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const inputs = row.querySelectorAll('input[type="text"], input[type="number"]');
         const checkboxes = row.querySelectorAll('input[type="checkbox"]');
         // Systems checkboxes are the last N checkboxes (one per system)
-         const systemCheckboxes = Array.from(checkboxes).filter(cb => SYSTEMS.includes(cb.value) || SYSTEMS.includes(cb.dataset.system));
-        const selectedSystems = systemCheckboxes.filter(cb => cb.checked).map(cb => cb.dataset.system || cb.value).filter(sys => SYSTEMS.includes(sys));
+         // Only the building's own system boxes (not the boxes of its special areas,
+         // which would switch a system back on for every unit).
+         const systemCheckboxes = Array.from(checkboxes).filter(cb => !cb.closest('.setup-special-area-row') && SYSTEMS.includes(cb.dataset.system));
+        const selectedSystems = [...new Set(systemCheckboxes.filter(cb => cb.checked).map(cb => cb.dataset.system || cb.value).filter(sys => SYSTEMS.includes(sys)))];
 
         if (type === 'special') {
           const enabledCb = checkboxes[0]; // first checkbox is the enabled toggle
@@ -8504,7 +8514,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
       // Inspection-only changes use a fast save and skip the expensive project sync.
       const setupInspectionCfg = collectInspectionTypeConfigFromUI();
       const savedInspectionCfg = getInspBuildingConfig() || {};
-      const inspectionConfigChanged = JSON.stringify(setupInspectionCfg) !== JSON.stringify(savedInspectionCfg);
+      const inspectionConfigChanged = inspConfigKey(setupInspectionCfg) !== inspConfigKey(savedInspectionCfg);
       const structureChanged = window.__identusSetupInitialStructure && getSetupStructureSnapshot() !== window.__identusSetupInitialStructure;
       const matrixChanged = inspectionConfigChanged || window.__identusSetupInspectionChanged === true;
       if (!structureChanged && matrixChanged) {
@@ -8588,7 +8598,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const desired = new Set();
         residentialConfigs.forEach(cfg => {
           setupUnitList(cfg).forEach(unit => desired.add(unit.apt));
-          desired.add(`${cfg.prefix}U`);
+          if (cfg.undergroundEnabled !== false) desired.add(`${cfg.prefix}U`);
         });
         specialConfigs.forEach(cfg => desired.add(cfg.name));
         const exUnits = await (await proxyFetch(`${SUPABASE_URL}/rest/v1/units?project_id=eq.${PROJECT_ID}&select=id,unit_number,building_id`, { headers: hdrs })).json();
@@ -8629,7 +8639,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         });
         const addCount = [...desired].filter(n => !existingNums.has(n)).length;        const setupInspectionCfg = collectInspectionTypeConfigFromUI();
         const savedInspectionCfg = getInspBuildingConfig() || {};
-        const inspectionConfigChanged = JSON.stringify(setupInspectionCfg) !== JSON.stringify(savedInspectionCfg);
+        const inspectionConfigChanged = inspConfigKey(setupInspectionCfg) !== inspConfigKey(savedInspectionCfg);
         if (addCount === 0 && removeUnits.length === 0 && removeBuildings.length === 0 && sysToRemove.length === 0 && sysToAdd.length === 0) {
           await withTimeout(saveRemoteSetupConfig(residentialConfigs, specialConfigs), 15000, 'Project setup configuration save');
           if (inspectionConfigChanged) {
@@ -8698,7 +8708,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         const newUnits = [];
         residentialConfigs.forEach(cfg => {
           setupUnitList(cfg).forEach(unit => newUnits.push({ unit_number: unit.apt, floor: unit.floor, building_id: buildingMap[cfg.name], project_id: PROJECT_ID }));
-          newUnits.push({ unit_number: `${cfg.prefix}U`, floor: 'Underground', building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
+          if (cfg.undergroundEnabled !== false) newUnits.push({ unit_number: `${cfg.prefix}U`, floor: 'Underground', building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
         });
         specialConfigs.forEach(cfg => {
           newUnits.push({ unit_number: cfg.name, floor: 'Underground', building_id: buildingMap[cfg.name], project_id: PROJECT_ID });
