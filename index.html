@@ -2809,7 +2809,8 @@ Object.assign(APP_TRANSLATIONS.en, {
       try {
         if (!window.ExcelJS) await new Promise((resolve, reject) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'; sc.onload = resolve; sc.onerror = () => reject(new Error('Excel reader failed to load')); document.head.appendChild(sc); });
         const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await file.arrayBuffer());
-        const ws = wb.worksheets.find(w => /checklist/i.test(w.name)) || wb.worksheets[0];
+        const sysName = (quantityChecklistTemplateSystem || 'Rough-In').toLowerCase();
+        const ws = wb.worksheets.find(w => w.name.trim().toLowerCase() === sysName) || wb.worksheets.find(w => /checklist/i.test(w.name)) || wb.worksheets[0];
         const text = v => { if (v == null) return ''; if (typeof v === 'object') return String(v.result ?? v.text ?? (v.richText ? v.richText.map(r => r.text).join('') : '')).trim(); return String(v).trim(); };
         let headerRow = 0; const col = {};
         ws.eachRow((row, n) => {
