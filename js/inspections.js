@@ -399,7 +399,9 @@ async function inspLoadRemoteModuleData() {
       else typeRows = refreshed.data || [];
     }
   }
-  let assignmentQuery = sbClient.from('building_inspection_types').select('building_id,inspection_type_id,floor,is_enabled').eq('project_id', PROJECT_ID).eq('is_enabled', true);
+  // All rows (enabled or not): a saved Underground row that is OFF must stay off
+  // instead of falling back to the building's own setting.
+  let assignmentQuery = sbClient.from('building_inspection_types').select('building_id,inspection_type_id,floor,is_enabled').eq('project_id', PROJECT_ID);
   let assignmentResult = await assignmentQuery;
   if (assignmentResult.error && /floor.*schema cache|column.*floor/i.test(assignmentResult.error.message || '')) {
     assignmentResult = await sbClient.from('building_inspection_types').select('building_id,inspection_type_id,is_enabled').eq('project_id', PROJECT_ID).eq('is_enabled', true);
@@ -415,11 +417,14 @@ async function inspLoadRemoteModuleData() {
   const typesById = new Map((typeRows || []).map(row => [row.id, row]));
   const buildingNames = new Map((Array.isArray(data) ? data : []).map(unit => [unit.building_id, unit.building]));
   const config = {};
+  if ((assignmentRows || []).some(row => row.floor === 'Underground')) config.__undergroundScoped = true;
   (assignmentRows || []).forEach(row => {
     const type = typesById.get(row.inspection_type_id);
     const building = buildingNames.get(row.building_id);
     if (!type || !building) return;
+    // A type saved as OFF everywhere keeps an empty list (not "applies everywhere").
     if (!config[type.code]) config[type.code] = [];
+    if (row.is_enabled === false) return;
     config[type.code].push(row.floor ? building + '::' + row.floor : building);
   });
   inspRemoteConfig = config;
@@ -1243,7 +1248,7 @@ function inspGetApplicableTypes() {
   return INSP_INSPECTION_TYPES.filter(t => {
     // If no config for this type, default to applicable (all buildings)
     if (!cfg[t.id]) return true;
-    return cfg[t.id].includes(scopeKey) || (scopeKey.endsWith('::Underground') && !cfg[t.id].some(value => String(value).includes('::Underground')) && cfg[t.id].includes(building));
+    return cfg[t.id].includes(scopeKey) || (scopeKey.endsWith('::Underground') && !cfg.__undergroundScoped && !cfg[t.id].some(value => String(value).includes('::Underground')) && cfg[t.id].includes(building));
   });
 }
 
@@ -1270,7 +1275,7 @@ function inspGetApplicableTypes() {
       const building = unit.building;
       const scopeKey = normalizeFloorName(unit.floor) === 'Underground' ? building + '::Underground' : building;
       const entries = cfg[type.id];
-      return entries.includes(scopeKey) || (scopeKey.endsWith('::Underground') && !entries.some(value => String(value).includes('::Underground')) && entries.includes(building));
+      return entries.includes(scopeKey) || (scopeKey.endsWith('::Underground') && !cfg.__undergroundScoped && !entries.some(value => String(value).includes('::Underground')) && entries.includes(building));
 }
 
 function inspRenderTypeGrid() {
