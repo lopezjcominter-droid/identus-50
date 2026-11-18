@@ -2685,7 +2685,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       content.prepend(systemPicker);
       const excelBar = document.createElement('div');
       excelBar.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:#475569;';
-      excelBar.innerHTML = `<label class="btn btn-secondary" style="font-size:11px;padding:5px 9px;cursor:pointer;">⬆ Upload Excel (${officialFinalEscape(tplSystem)})<input type="file" accept=".xlsx" style="display:none" onchange="quantityImportChecklistExcel(this)"></label><a class="btn btn-secondary" style="font-size:11px;padding:5px 9px;text-decoration:none;" href="templates/QC-Checklist-Template.xlsx" download>⬇ Excel template</a><button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 9px;" onclick="quantityExportChecklistsExcel()">⬇ Export all checklists</button><span>Lines with quantity 0 or empty are not added. Review, then press Save checklist.</span>`;
+      excelBar.innerHTML = `<label class="btn btn-primary" style="font-size:11px;padding:5px 9px;cursor:pointer;">⬆ Upload Excel (all systems)<input type="file" accept=".xlsx" style="display:none" onchange="quantityImportAllChecklistsExcel(this)"></label><label class="btn btn-secondary" style="font-size:11px;padding:5px 9px;cursor:pointer;">⬆ Upload Excel (${officialFinalEscape(tplSystem)})<input type="file" accept=".xlsx" style="display:none" onchange="quantityImportChecklistExcel(this)"></label><a class="btn btn-secondary" style="font-size:11px;padding:5px 9px;text-decoration:none;" href="templates/QC-Checklist-Template.xlsx" download>⬇ Excel template</a><button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 9px;" onclick="quantityExportChecklistsExcel()">⬇ Export all checklists</button><span>Quantity 0 or empty is not added. Systems that are off for this model are skipped.</span>`;
       content.prepend(excelBar);
       modal.style.display = 'flex';
     }
@@ -2777,68 +2777,110 @@ Object.assign(APP_TRANSLATIONS.en, {
       const modal = document.getElementById('quantityChecklistTemplateModal'); if (modal) modal.style.display = 'none';
       quantityChecklistTemplateType = ''; quantityChecklistTemplateMode = 'template';
     }
-    // Fills the checklist lines of the open model/system from an Excel file
-    // (columns: Item, Quantity; optional Model, System, Unit, Notes). Nothing is
-    // saved until the user presses "Save checklist" (same confirmation as typing).
-    // Every model checklist of this project, in the same format as the template
-    // (so it can be edited and uploaded back, system by system).
-    async function quantityExportChecklistsExcel() {
-      try {
-        if (!window.ExcelJS) await new Promise((resolve, reject) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'; sc.onload = resolve; sc.onerror = () => reject(new Error('Excel library failed to load')); document.head.appendChild(sc); });
-        const store = quantityStore(); const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Checklist');
-        ws.columns = [{ header: 'Model / Area', key: 'model', width: 16 }, { header: 'System', key: 'system', width: 13 }, { header: 'Item', key: 'item', width: 50 }, { header: 'Quantity', key: 'qty', width: 11 }, { header: 'Unit', key: 'unit', width: 8 }, { header: 'Notes', key: 'notes', width: 30 }];
-        ws.getRow(1).eachCell(c => { c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F3A5F' } }; });
-        let n = 0;
-        Object.keys(store.templates || {}).sort().forEach(type => {
-          const t = store.templates[type];
-          QUANTITY_SYSTEMS.forEach(system => {
-            const list = system === 'Rough-In' ? t.checklist : t.systemDrawings?.[system]?.checklist;
-            (Array.isArray(list) ? list : []).forEach(item => { ws.addRow({ model: type, system, item: item.description || '', qty: Number(item.takeoff || 0), unit: 'EA', notes: '' }); n++; });
-          });
-        });
-        ws.views = [{ state: 'frozen', ySplit: 1 }];
-        const blob = new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-        a.download = `QC-Checklists-${String(document.title || 'project').replace(/^Identus 50 – /, '').replace(/[^A-Za-z0-9-]+/g, '_')}.xlsx`;
-        document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-        quantitySuccessToast(`✅ ${n} checklist line(s) exported`);
-      } catch (error) { alert('Could not export: ' + (error.message || error)); }
+    async function quantityLoadExcelJs() {
+      if (!window.ExcelJS) await new Promise((resolve, reject) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'; sc.onload = resolve; sc.onerror = () => reject(new Error('Excel reader failed to load')); document.head.appendChild(sc); });
+      return window.ExcelJS;
     }
+    // Reads the checklist lines of one sheet (columns Item + Quantity; optional
+    // Model / Area and System). Quantity 0 or empty lines are skipped.
+    function quantityReadChecklistSheet(ws, model, system) {
+      const text = v => { if (v == null) return ''; if (typeof v === 'object') return String(v.result ?? v.text ?? (v.richText ? v.richText.map(r => r.text).join('') : '')).trim(); return String(v).trim(); };
+      let headerRow = 0; const col = {};
+      ws.eachRow((row, n) => {
+        if (headerRow) return;
+        const cells = row.values.map(text).map(v => v.toLowerCase());
+        const find = re => cells.findIndex(v => re.test(v));
+        if (find(/^(item|description|descripci)/) > 0 && find(/^(qty|quantity|cantidad|takeoff)/) > 0) {
+          headerRow = n; col.item = find(/^(item|description|descripci)/); col.qty = find(/^(qty|quantity|cantidad|takeoff)/);
+          col.model = find(/^(model|modelo|area|área|unit type)/); col.system = find(/^(system|sistema)/);
+        }
+      });
+      const result = { found: !!headerRow, lines: [], zero: 0, otherModel: 0, otherSystem: 0 };
+      if (!headerRow) return result;
+      ws.eachRow((row, n) => {
+        if (n <= headerRow) return;
+        const v = row.values; const item = text(v[col.item]); if (!item) return;
+        if (col.model > 0 && text(v[col.model]) && text(v[col.model]).toUpperCase() !== model) { result.otherModel++; return; }
+        if (col.system > 0 && text(v[col.system]) && text(v[col.system]).toLowerCase() !== system.toLowerCase()) { result.otherSystem++; return; }
+        const qty = Number(String(text(v[col.qty])).replace(/[^0-9.\-]/g, ''));
+        if (!Number.isFinite(qty) || qty <= 0) { result.zero++; return; }
+        result.lines.push({ description: item, takeoff: Math.round(qty) });
+      });
+      return result;
+    }
+    // One system: fills the lines on screen; nothing is saved until "Save checklist".
     async function quantityImportChecklistExcel(input) {
       const file = input?.files?.[0]; if (input) input.value = ''; if (!file) return;
       try {
-        if (!window.ExcelJS) await new Promise((resolve, reject) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'; sc.onload = resolve; sc.onerror = () => reject(new Error('Excel reader failed to load')); document.head.appendChild(sc); });
-        const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await file.arrayBuffer());
-        const sysName = (quantityChecklistTemplateSystem || 'Rough-In').toLowerCase();
-        const ws = wb.worksheets.find(w => w.name.trim().toLowerCase() === sysName) || wb.worksheets.find(w => /checklist/i.test(w.name)) || wb.worksheets[0];
-        const text = v => { if (v == null) return ''; if (typeof v === 'object') return String(v.result ?? v.text ?? (v.richText ? v.richText.map(r => r.text).join('') : '')).trim(); return String(v).trim(); };
-        let headerRow = 0; const col = {};
-        ws.eachRow((row, n) => {
-          if (headerRow) return;
-          const cells = row.values.map(text).map(v => v.toLowerCase());
-          const find = re => cells.findIndex(v => re.test(v));
-          if (find(/^(item|description|descripci)/) > 0 && find(/^(qty|quantity|cantidad|takeoff)/) > 0) {
-            headerRow = n; col.item = find(/^(item|description|descripci)/); col.qty = find(/^(qty|quantity|cantidad|takeoff)/);
-            col.model = find(/^(model|modelo|area|área|unit type)/); col.system = find(/^(system|sistema)/);
-          }
-        });
-        if (!headerRow) { alert('Could not find the header row. The sheet needs at least the columns "Item" and "Quantity" (use the Excel template).'); return; }
+        const wb = new (await quantityLoadExcelJs()).Workbook(); await wb.xlsx.load(await file.arrayBuffer());
         const model = quantityChecklistTemplateType; const system = quantityChecklistTemplateSystem || 'Rough-In';
-        const lines = []; let zero = 0, otherModel = 0, otherSystem = 0;
-        ws.eachRow((row, n) => {
-          if (n <= headerRow) return;
-          const v = row.values; const item = text(v[col.item]); if (!item) return;
-          if (col.model > 0 && text(v[col.model]) && text(v[col.model]).toUpperCase() !== model) { otherModel++; return; }
-          if (col.system > 0 && text(v[col.system]) && text(v[col.system]).toLowerCase() !== system.toLowerCase()) { otherSystem++; return; }
-          const qty = Number(String(text(v[col.qty])).replace(/[^0-9.\-]/g, ''));
-          if (!Number.isFinite(qty) || qty <= 0) { zero++; return; }
-          lines.push({ description: item, takeoff: Math.round(qty) });
-        });
-        if (!lines.length) { alert(`No lines with quantity for ${model} / ${system} in this file.${zero ? `\n${zero} line(s) had quantity 0.` : ''}${otherModel ? `\n${otherModel} line(s) belong to other models.` : ''}${otherSystem ? `\n${otherSystem} line(s) belong to other systems.` : ''}`); return; }
-        if (!confirm(`${model} / ${system}: replace the lines on screen with ${lines.length} line(s) from the Excel file?\n\nSkipped: ${zero} with quantity 0${otherModel ? `, ${otherModel} of other models` : ''}${otherSystem ? `, ${otherSystem} of other systems` : ''}.\n\nNothing is saved until you press "Save checklist".`)) return;
-        quantityRenderChecklistTemplateRows(lines);
-        quantitySuccessToast(`✅ ${lines.length} line(s) loaded from Excel · review and press Save checklist`);
+        const ws = wb.worksheets.find(w => w.name.trim().toLowerCase() === system.toLowerCase()) || wb.worksheets.find(w => /checklist/i.test(w.name)) || wb.worksheets[0];
+        const r = quantityReadChecklistSheet(ws, model, system);
+        if (!r.found) { alert('Could not find the header row. The sheet needs at least the columns "Item" and "Quantity" (use the Excel template).'); return; }
+        if (!r.lines.length) { alert(`No lines with quantity for ${model} / ${system} in this file.${r.zero ? `\n${r.zero} line(s) had quantity 0.` : ''}${r.otherModel ? `\n${r.otherModel} line(s) belong to other models.` : ''}${r.otherSystem ? `\n${r.otherSystem} line(s) belong to other systems.` : ''}`); return; }
+        if (!confirm(`${model} / ${system}: replace the lines on screen with ${r.lines.length} line(s) from the Excel file?\n\nSkipped: ${r.zero} with quantity 0${r.otherModel ? `, ${r.otherModel} of other models` : ''}${r.otherSystem ? `, ${r.otherSystem} of other systems` : ''}.\n\nNothing is saved until you press "Save checklist".`)) return;
+        quantityRenderChecklistTemplateRows(r.lines);
+        quantitySuccessToast(`✅ ${r.lines.length} line(s) loaded from Excel · review and press Save checklist`);
       } catch (error) { alert('Could not read this Excel file: ' + (error.message || error)); }
+    }
+    // All systems of the model at once: each sheet named like a system fills that
+    // system. Systems not turned on for the model are skipped (never loaded by
+    // mistake); empty sheets leave the checklist as it is.
+    async function quantityImportAllChecklistsExcel(input) {
+      const file = input?.files?.[0]; if (input) input.value = ''; if (!file || !quantityIsAdmin()) return;
+      const model = quantityChecklistTemplateType; const store = quantityStore(); const template = store.templates?.[model];
+      if (!template) { alert('Save the model first.'); return; }
+      try {
+        const wb = new (await quantityLoadExcelJs()).Workbook(); await wb.xlsx.load(await file.arrayBuffer());
+        const chosen = quantityModelQcChoice(template);
+        const active = QUANTITY_SYSTEMS.filter(sys => QUANTITY_FIXED_SYSTEMS.includes(sys) || (chosen ? chosen.includes(sys) : QUANTITY_LEGACY_SYSTEMS.includes(sys)));
+        const plan = []; const summary = [];
+        QUANTITY_SYSTEMS.forEach(system => {
+          const ws = wb.worksheets.find(w => w.name.trim().toLowerCase() === system.toLowerCase());
+          if (!ws) { summary.push(`• ${system}: no sheet, unchanged`); return; }
+          const r = quantityReadChecklistSheet(ws, model, system);
+          if (!r.lines.length) { summary.push(`• ${system}: empty, unchanged`); return; }
+          if (!active.includes(system)) { summary.push(`⚠️ ${system}: ${r.lines.length} line(s) with quantity, but ${system} is not on for this model. NOT loaded.`); return; }
+          plan.push({ system, lines: r.lines });
+          summary.push(`✓ ${system}: ${r.lines.length} line(s)${r.zero ? ` (${r.zero} with 0 skipped)` : ''}`);
+        });
+        if (!plan.length) { alert(`Nothing to load for ${model}.\n\n${summary.join('\n')}`); return; }
+        const assigned = quantityModelAssignedUnits(model).filter(unit => !(store.units?.[quantityUnitKey(unit)]?.checklistMode === 'custom'));
+        if (!confirm(`${model}: load these checklists from Excel?\n\n${summary.join('\n')}${assigned.length ? `\n\nThey will be applied to ${assigned.length} assigned unit(s)/area(s); installed marks of the loaded systems restart. Custom unit checklists stay as they are.` : ''}`)) return;
+        plan.forEach(({ system, lines }) => quantityApplyModelChecklist(store, model, system, lines, template, assigned));
+        quantitySave(store); const saved = await quantityFlushRemoteSave(); if (!saved) return;
+        quantityCloseChecklistTemplate(); renderSetupDrawingModels();
+        if (quantityCurrentUnit && quantityUnitType(quantityCurrentUnit) === model) quantityRenderUnit();
+        quantitySuccessToast(`✅ ${model}: ${plan.map(p => p.system).join(', ')} checklists saved from Excel`);
+      } catch (error) { alert('Could not read this Excel file: ' + (error.message || error)); }
+    }
+    // Saves one system checklist of a model and applies it to the assigned units
+    // (custom unit checklists are kept). Used by typing and by the Excel uploads.
+    function quantityApplyModelChecklist(store, type, system, checklist, template, assigned) {
+      quantityCaptureTemplateUpdate(type, store);
+      const tplSystem = system;
+      if (tplSystem === 'Rough-In') { template.checklist = quantityClone(checklist); }
+      else { template.systemDrawings = { ...(template.systemDrawings || {}) }; template.systemDrawings[tplSystem] = { ...(template.systemDrawings[tplSystem] || {}), checklist: quantityClone(checklist) }; }
+      template.checklistUpdatedAt = new Date().toISOString();
+      store.templates[type] = template;
+      store.units = store.units || {};
+      assigned.forEach(unit => quantityWithSystem(tplSystem, () => {
+        const state = quantityUnitState(unit);
+        const revisionNumbers = state.revisions.map(revision => Number(revision.revisionNumber)).filter(Number.isFinite);
+        const nextRevisionNumber = revisionNumbers.length ? Math.max(...revisionNumbers) + 1 : 0;
+        const hadWork = tplSystem === 'Rough-In' ? (state.items?.length && (state.items.some(item => Number(item.takeoff || 0) > 0) || state.markers?.length || state.drawing)) : (state.markers?.length || state.revisions?.length);
+        if (hadWork) {
+          state.revisions.unshift(quantityRevisionSnapshot(state, 'Previous revision before model update', nextRevisionNumber));
+        }
+        const systemDrawing = quantityModelSystemDrawing(template, tplSystem);
+        state.items = quantityClone(checklist); state.markers = []; state.installedCounts = {}; state._marksLoaded = true;
+        if (systemDrawing) { const copy = quantityClone(systemDrawing); delete copy.checklist; delete copy.systemDrawings; state.drawing = { ...copy, source: 'template', revision: tplSystem === 'Rough-In' ? (template.version || 1) : (systemDrawing.version || 1) }; }
+        state.checklistMode = 'template';
+        quantityAddHistory(state, 'Checklist model updated', `${type} standard checklist applied; installed marks reset`);
+        const updatedRevision = quantityRevisionSnapshot(state, 'New model revision', nextRevisionNumber + 1);
+        state.revisions.unshift(updatedRevision); state.lastSavedRevisionId = updatedRevision.id;
+        quantityStoreUnitState(store, unit, state);
+      }));
     }
     async function quantitySaveChecklistTemplate() {
       if (!quantityIsAdmin() || !quantityChecklistTemplateType) return;
@@ -2854,30 +2896,8 @@ Object.assign(APP_TRANSLATIONS.en, {
       const template = store.templates?.[quantityChecklistTemplateType]; if (!template) return;
       const assigned = (Array.isArray(data) ? data : []).filter(unit => quantityUnitType(unit) === quantityChecklistTemplateType && !(store.units?.[quantityUnitKey(unit)]?.checklistMode === 'custom'));
       if (assigned.length && !confirm(`Apply this checklist to ${assigned.length} assigned unit${assigned.length === 1 ? '' : 's'}? Custom unit checklists will remain unchanged.`)) return;
-      quantityCaptureTemplateUpdate(quantityChecklistTemplateType, store);
+      quantityApplyModelChecklist(store, quantityChecklistTemplateType, quantityChecklistTemplateSystem || 'Rough-In', checklist, template, assigned);
       const tplSystem = quantityChecklistTemplateSystem || 'Rough-In';
-      if (tplSystem === 'Rough-In') { template.checklist = quantityClone(checklist); }
-      else { template.systemDrawings = { ...(template.systemDrawings || {}) }; template.systemDrawings[tplSystem] = { ...(template.systemDrawings[tplSystem] || {}), checklist: quantityClone(checklist) }; }
-      template.checklistUpdatedAt = new Date().toISOString();
-      store.templates[quantityChecklistTemplateType] = template;
-      store.units = store.units || {};
-      assigned.forEach(unit => quantityWithSystem(tplSystem, () => {
-        const state = quantityUnitState(unit);
-        const revisionNumbers = state.revisions.map(revision => Number(revision.revisionNumber)).filter(Number.isFinite);
-        const nextRevisionNumber = revisionNumbers.length ? Math.max(...revisionNumbers) + 1 : 0;
-        const hadWork = tplSystem === 'Rough-In' ? (state.items?.length && (state.items.some(item => Number(item.takeoff || 0) > 0) || state.markers?.length || state.drawing)) : (state.markers?.length || state.revisions?.length);
-        if (hadWork) {
-          state.revisions.unshift(quantityRevisionSnapshot(state, 'Previous revision before model update', nextRevisionNumber));
-        }
-        const systemDrawing = quantityModelSystemDrawing(template, tplSystem);
-        state.items = quantityClone(checklist); state.markers = []; state.installedCounts = {}; state._marksLoaded = true;
-        if (systemDrawing) { const copy = quantityClone(systemDrawing); delete copy.checklist; delete copy.systemDrawings; state.drawing = { ...copy, source: 'template', revision: tplSystem === 'Rough-In' ? (template.version || 1) : (systemDrawing.version || 1) }; }
-        state.checklistMode = 'template';
-        quantityAddHistory(state, 'Checklist model updated', `${quantityChecklistTemplateType} standard checklist applied; installed marks reset`);
-        const updatedRevision = quantityRevisionSnapshot(state, 'New model revision', nextRevisionNumber + 1);
-        state.revisions.unshift(updatedRevision); state.lastSavedRevisionId = updatedRevision.id;
-        quantityStoreUnitState(store, unit, state);
-      }));
       quantitySave(store); const saved = await quantityFlushRemoteSave(); if (!saved) return; quantityCloseChecklistTemplate(); renderSetupDrawingModels();
       if (quantityCurrentUnit && quantityUnitType(quantityCurrentUnit) === quantityChecklistTemplateType) quantityRenderUnit();
       quantitySuccessToast(`✅ ${quantityChecklistTemplateType} / ${tplSystem} checklist saved${assigned.length ? ` · applied to ${assigned.length} units` : ''}`);
