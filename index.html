@@ -8115,7 +8115,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         const id = row.closest('[id^="setupBuilding_"]')?.id; if (id) setupUpdateNumberPreview(id);
       };
     }
-    function addSetupBuilding({ name = '', floors = 3, unitsPerFloor = 10, prefix = null, startAt = 1, type = 'residential', enabled = true, undergroundEnabled = true, activeSystems = null, floorConfigs = null, specialAreas = [], plan = '', planName = '', planType = '', planHistory = [] } = {}) {
+    function addSetupBuilding({ name = '', floors = 3, unitsPerFloor = 10, prefix = null, startAt = 1, type = 'residential', enabled = true, undergroundEnabled = true, undergroundSystems = null, activeSystems = null, floorConfigs = null, specialAreas = [], plan = '', planName = '', planType = '', planHistory = [] } = {}) {
       setupBuildingCount++;
       const id = `setupBuilding_${setupBuildingCount}`;
       const isSpecial = type === 'special';
@@ -8179,7 +8179,7 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
               <select class="setup-start-at" onchange="setupUpdateNumberPreview('${id}')" style="width:100%;padding:6px;border:1px solid #D1D5DB;border-radius:5px;font-size:13px;"><option value="1" ${Number(startAt) === 0 ? '' : 'selected'}>01</option><option value="0" ${Number(startAt) === 0 ? 'selected' : ''}>00</option></select>
             </div>
             <button type="button" onclick="addBuildingInspectionColumn('${id}')" style="padding:6px 12px;background:#1E40AF;color:white;border:none;border-radius:5px;cursor:pointer;font-size:12px;">Add</button>
-            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#1E3A8A;white-space:nowrap;" title="Include one Underground area for this building"><input class="setup-underground-enabled" type="checkbox" ${undergroundEnabled !== false ? 'checked' : ''}> Underground included</label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#1E3A8A;white-space:nowrap;" title="Include one Underground area for this building"><input class="setup-underground-enabled" type="checkbox" onchange="const box=this.closest('[data-type]').querySelector('.setup-underground-systems-box'); if (box) box.style.display=this.checked?'':'none';" ${undergroundEnabled !== false ? 'checked' : ''}> Underground included</label>
             <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#1E3A8A;white-space:nowrap;"><input id="${id}_customFloors" type="checkbox" class="setup-custom-floor-toggle" ${Array.isArray(floorConfigs) && floorConfigs.length ? 'checked' : ''} onchange="toggleSetupFloorEditor('${id}')"> Custom floor groups</label>
             <button type="button" onclick="document.getElementById('${id}').remove()" style="padding:6px 10px;background:#FEE2E2;color:#DC2626;border:none;border-radius:5px;cursor:pointer;font-size:13px;">✕</button>
           </div>
@@ -8193,6 +8193,10 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           </div>
           <div class="setup-number-preview" style="font-size:11px;color:#1E3A8A;background:#EFF6FF;border-radius:6px;padding:5px 8px;margin:6px 0;"></div>
           ${systemsHtml}
+          <div class="setup-underground-systems-box" style="border-top:1px solid #E5E7EB;padding:7px 0;${undergroundEnabled === false ? 'display:none;' : ''}">
+            <div style="font-size:11px;font-weight:600;color:#92400E;margin-bottom:4px;">UNDERGROUND SYSTEMS <span style="font-weight:400;color:#64748B;">(only what applies to the Underground area of this building)</span></div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px 14px;">${SYSTEMS.map(sys => { const on = Array.isArray(undergroundSystems) ? undergroundSystems.map(canonicalSystemName).includes(canonicalSystemName(sys)) : (activeSystems === null || (activeSystems || []).map(canonicalSystemName).includes(canonicalSystemName(sys))); return `<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;"><input type="checkbox" class="setup-underground-system" data-ug-system="${sys}" ${on ? 'checked' : ''}> ${systemDisplayName(sys)}</label>`; }).join('')}</div>
+          </div>
           <div style="border-top:1px solid #E5E7EB;padding-top:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;"><label style="font-size:11px;font-weight:600;color:#1E3A8A;">SPECIAL AREAS</label><button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="addSetupSpecialAreaRow('${id}')">+ Add Special Area</button></div>
             <div id="${id}_specialAreas" style="display:flex;flex-direction:column;gap:6px;"></div>
@@ -8484,7 +8488,8 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
           })) : null;
            const specialAreas = collectSetupSpecialAreas(row);
            const undergroundEnabled = row.querySelector('.setup-underground-enabled')?.checked !== false;
-           if (name) residentialConfigs.push({ name, type: 'residential', floors, unitsPerFloor, prefix, startAt, systems: selectedSystems, undergroundEnabled, ...(floorConfigs ? { floorConfigs } : {}), specialAreas, specialAreasConfigured: true });
+           const undergroundSystems = [...new Set(Array.from(row.querySelectorAll('.setup-underground-system:checked')).map(cb => cb.dataset.ugSystem).filter(sys => SYSTEMS.includes(sys)))];
+           if (name) residentialConfigs.push({ name, type: 'residential', floors, unitsPerFloor, prefix, startAt, systems: selectedSystems, undergroundEnabled, undergroundSystems, ...(floorConfigs ? { floorConfigs } : {}), specialAreas, specialAreasConfigured: true });
         }
       });
 
@@ -8616,9 +8621,13 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         }
         // Systems per building: compare checked systems vs existing status rows of the units that stay
         const sysByBuilding = {};
+        const ugSysByBuilding = {}; // Underground area (<prefix>U) of a residential building
        allSetupConfigs.forEach(cfg => {
           sysByBuilding[cfg.name] = new Set(cfg.systems && cfg.systems.length > 0 ? cfg.systems : SYSTEMS);
+          if (cfg.type === 'residential' && Array.isArray(cfg.undergroundSystems)) ugSysByBuilding[cfg.name] = { unit: `${cfg.prefix}U`, systems: new Set(cfg.undergroundSystems) };
         });
+        const unitNumberById = {}; exList.forEach(u => { unitNumberById[u.id] = String(u.unit_number); });
+        const systemsForUnit = id => { const b = unitBuilding[id]; const ug = ugSysByBuilding[b]; return ug && unitNumberById[id] === ug.unit ? ug.systems : sysByBuilding[b]; };
         const removeIdSet = new Set(removeIds);
         const keepUnits = exList.filter(u => !removeIdSet.has(u.id));
         const keepIds = keepUnits.map(u => u.id);
@@ -8629,12 +8638,12 @@ animateModalClose('projectSetupModal', () => { document.getElementById('projectS
         }
         const unitBuilding = {};
         keepUnits.forEach(u => { unitBuilding[u.id] = bIdToName[u.building_id]; });
-        const sysToRemove = statusRows.filter(r => { const s = sysByBuilding[unitBuilding[r.unit_id]]; return s && !s.has(r.system_id); });
+        const sysToRemove = statusRows.filter(r => { const s = systemsForUnit(r.unit_id); return s && !s.has(r.system_id); });
         const sysToRemoveWithData = sysToRemove.filter(r => (r.progress || 0) > 0 || (r.photos || 0) > 0).length;
         const haveKey = new Set(statusRows.map(r => r.unit_id + '|' + r.system_id));
         const sysToAdd = [];
         keepUnits.forEach(u => {
-          const s = sysByBuilding[unitBuilding[u.id]]; if (!s) return;
+          const s = systemsForUnit(u.id); if (!s) return;
           s.forEach(sys => { if (!haveKey.has(u.id + '|' + sys)) sysToAdd.push({ unit_id: u.id, system_id: sys, progress: 0, status: 'Behind' }); });
         });
         const addCount = [...desired].filter(n => !existingNums.has(n)).length;        const setupInspectionCfg = collectInspectionTypeConfigFromUI();
@@ -8738,10 +8747,12 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
 
         // For each building, create system status rows for selected systems
         const ussRows = [];
+        const insertedNumber = {}; inserted.forEach(u => { insertedNumber[u.id] = String(u.unit_number); });
         allConfigs.forEach(cfg => {
-          const systems = cfg.systems && cfg.systems.length > 0 ? cfg.systems : SYSTEMS;
+          const buildingSystems = cfg.systems && cfg.systems.length > 0 ? cfg.systems : SYSTEMS;
           (unitsByBuildingName[cfg.name] || []).forEach(unitId => {
-            systems.forEach(sys => {
+            const isUnderground = cfg.type === 'residential' && Array.isArray(cfg.undergroundSystems) && insertedNumber[unitId] === `${cfg.prefix}U`;
+            (isUnderground ? cfg.undergroundSystems : buildingSystems).forEach(sys => {
               ussRows.push({ unit_id: unitId, system_id: sys, progress: 0, status: 'Behind' });
             });
           });
