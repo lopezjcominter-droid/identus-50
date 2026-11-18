@@ -11636,6 +11636,8 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       return failed;
     }
 
+    // Backups hold the whole project: they go to a PRIVATE bucket (admins only).
+    const BACKUP_BUCKET = 'identus-backups';
     async function autoBackupDaily() {
       try {
         if (window.authIsActive && window.authIsActive() && window.userRole !== 'admin') return;
@@ -11645,7 +11647,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         const strip = u => ({ ...u, systems: Object.fromEntries(Object.entries(u.systems).map(([k, s]) => [k, { ...s, events: (s.events || []).map(e => ({ ...e, images: (e.images || []).filter(i => !String(i).startsWith('data:')) })) }])) });
         const backup = { version: 2, exportedAt: new Date().toISOString(), units: data.map(strip), punchlist: (typeof punchlist !== 'undefined' ? punchlist : []), cloudTables: await backupCloudTables() };
         const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
-        const { error } = await sbClient.storage.from(STORAGE_BUCKET).upload(`backups/${PROJECT_ID}/${today}.json`, blob, { contentType: 'application/json', upsert: true });
+        const { error } = await sbClient.storage.from(BACKUP_BUCKET).upload(`${PROJECT_ID}/${today}.json`, blob, { contentType: 'application/json', upsert: true });
         if (!error) { localStorage.setItem(`cfg_last_auto_backup_${PROJECT_ID}`, today); console.log('✅ Daily backup saved'); }
         else console.warn('Daily backup skipped:', error.message);
       } catch (e) { console.warn('autoBackupDaily', e); }

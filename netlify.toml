@@ -4,3 +4,12 @@
 
 [functions]
   directory = "netlify/functions"
+
+# Browser protections: no framing by other sites, no MIME sniffing, no full URL leak.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
