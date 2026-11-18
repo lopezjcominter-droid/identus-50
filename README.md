@@ -3,7 +3,7 @@
 Web app for electrical QA/QC on the Identus 50 residential project. It covers progress by unit and system, quality inspections, Punch List, Field Issues, Quantity Control, Official Final, reports, and an AI assistant for the project drawings.
 
 ## Where the data lives
-- **Supabase** (`kihsukzcbohmxovbyisi`). The database holds units, systems, inspections, punch list, issues, quantity control, official final, profiles and project members. Storage bucket `identus-files` holds photos, drawings, reports and daily backups (`backups/<project>/<date>.json`).
+- **Supabase** (`kihsukzcbohmxovbyisi`). The database holds units, systems, inspections, punch list, issues, quantity control, official final, profiles and project members. Storage bucket `identus-files` holds photos, drawings, reports and reports; daily backups go to the private bucket `identus-backups` (`<project>/<date>.json`, admins only).
 - **Browser localStorage** holds screen preferences and drafts only. Project data lives in Supabase. The only exception is local preview mode (`file://`).
 - Access is controlled by Supabase Auth plus Row Level Security, checked per project through `project_members`.
 
