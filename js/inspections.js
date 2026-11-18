@@ -416,6 +416,12 @@ async function inspLoadRemoteModuleData() {
 
   const typesById = new Map((typeRows || []).map(row => [row.id, row]));
   const buildingNames = new Map((Array.isArray(data) ? data : []).map(unit => [unit.building_id, unit.building]));
+  // This can run before the units are loaded: read the building names directly
+  // so the saved choices are never lost (an empty map made every type "on").
+  if ((assignmentRows || []).some(row => !buildingNames.has(row.building_id))) {
+    const { data: buildingRows } = await sbClient.from('buildings').select('id,name').eq('project_id', PROJECT_ID);
+    (buildingRows || []).forEach(row => { if (!buildingNames.has(row.id)) buildingNames.set(row.id, row.name); });
+  }
   const config = {};
   if ((assignmentRows || []).some(row => row.floor === 'Underground')) config.__undergroundScoped = true;
   (assignmentRows || []).forEach(row => {
