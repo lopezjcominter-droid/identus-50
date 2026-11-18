@@ -905,7 +905,7 @@
             <div style="font-size:12px;color:#475569;">Create a fixed model such as C1, A1, or B1. Inspectors will see the assigned model read-only. PMs and administrators can later add a unit-specific RFI drawing.</div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <input id="setupDrawingModelType" type="text" placeholder="Model: C1" style="width:105px;padding:7px 9px;border:1px solid #BFDBFE;border-radius:6px;text-transform:uppercase;">
-              <select id="setupDrawingModelSystem" onchange="quantityRenderExtraSystems()" style="padding:7px;border:1px solid #BFDBFE;border-radius:6px;min-width:125px;" aria-label="System for this drawing"><option value="Rough-In">Rough-In</option><option value="Trim-Out">Trim-Out</option><option value="Fire Alarm">Fire Alarm</option><option value="Data">Data</option><option value="Wiring">Wiring</option></select>
+              <select id="setupDrawingModelSystem" onchange="quantityRenderExtraSystems()" style="padding:7px;border:1px solid #BFDBFE;border-radius:6px;min-width:125px;" aria-label="System for this drawing"><option value="Rough-In">Rough-In</option><option value="Trim-Out">Trim-Out</option><option value="Fire Alarm">Fire Alarm</option><option value="Data">Data</option><option value="Wiring">Wiring</option><option value="Lighting">Lighting</option></select>
               <span id="setupDrawingExtraSystems" style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;color:#475569;"></span>
               <label class="btn btn-secondary" style="font-size:11px;padding:6px 9px;cursor:pointer;">📎 Upload model<input id="setupDrawingModelInput" type="file" accept="image/*,.pdf" onchange="saveSetupDrawingModel(this)" style="display:none"></label>
               <label class="btn btn-secondary" style="font-size:11px;padding:6px 9px;cursor:pointer;" title="Select every drawing of the chosen system at once; models are matched by file name">📎 Upload several<input id="setupDrawingBulkInput" type="file" multiple accept="image/*,.pdf" onchange="quantityBulkUploadPick(this)" style="display:none"></label>
@@ -920,7 +920,7 @@
                 <select id="setupDrawingAssignModel" style="padding:7px;border:1px solid #CBD5E1;border-radius:6px;min-width:110px;"></select>
                 <select id="setupDrawingAssignBuilding" onchange="renderSetupDrawingModelFloors()" style="padding:7px;border:1px solid #CBD5E1;border-radius:6px;min-width:125px;"></select>
                 <select id="setupDrawingAssignFloor" style="padding:7px;border:1px solid #CBD5E1;border-radius:6px;min-width:110px;"></select>
-                <input id="setupDrawingAssignUnits" type="text" placeholder="Units: 1101, 1102 or ALL" style="flex:1;min-width:180px;padding:7px 9px;border:1px solid #CBD5E1;border-radius:6px;">
+                <input id="setupDrawingAssignUnits" type="text" placeholder="Units: 1101, 1102, Corridor A or ALL" style="flex:1;min-width:180px;padding:7px 9px;border:1px solid #CBD5E1;border-radius:6px;">
                 <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#475569;white-space:nowrap;"><input id="setupDrawingAssignAcrossFloors" type="checkbox"> Same unit on all floors</label>
                 <button type="button" class="insp-btn insp-btn-success" style="font-size:11px;padding:7px 10px;" onclick="assignSetupDrawingModel()">Save assignment</button>
               </div>
@@ -1605,7 +1605,30 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
 
     // ===== Quantity Control =====
-    const QUANTITY_SYSTEMS = ['Rough-In', 'Trim-Out', 'Fire Alarm', 'Data', 'Wiring'];
+    // All Quantity Control systems. Rough-In, Trim-Out and Wiring always apply.
+    // Fire Alarm, Data and Lighting are chosen per model ("QC systems" on the
+    // model card, saved in system_drawings._qc). A model never edited there, or a
+    // unit without a model, keeps the original five systems, so existing
+    // projects (Ability) behave exactly as before.
+    const QUANTITY_SYSTEMS = ['Rough-In', 'Trim-Out', 'Fire Alarm', 'Data', 'Wiring', 'Lighting'];
+    const QUANTITY_FIXED_SYSTEMS = ['Rough-In', 'Trim-Out', 'Wiring'];
+    const QUANTITY_LEGACY_SYSTEMS = ['Rough-In', 'Trim-Out', 'Fire Alarm', 'Data', 'Wiring'];
+    function quantitySystemsFor(unit) {
+      if (!unit) return QUANTITY_LEGACY_SYSTEMS.slice();
+      const store = quantityStore();
+      const template = quantityTemplateByType(quantityUnitType(unit), store);
+      if (!template) return QUANTITY_LEGACY_SYSTEMS.slice();
+      const chosen = quantityModelQcChoice(template);
+      if (!chosen) return QUANTITY_LEGACY_SYSTEMS.slice();
+      return QUANTITY_SYSTEMS.filter(system => QUANTITY_FIXED_SYSTEMS.includes(system) || chosen.includes(system));
+    }
+    function quantityModelQcChoice(template) { const q = template?.systemDrawings?._qc; return Array.isArray(q?.systems) ? q.systems : null; }
+    function quantityManages(unit, system) { return QUANTITY_SYSTEMS.includes(system) && quantitySystemsFor(unit).includes(system); }
+    function quantityQuickUnit() {
+      const apt = String(document.getElementById('quickUnit')?.value || '').trim();
+      const building = document.getElementById('quickBuilding')?.value || '';
+      return (Array.isArray(data) ? data : []).find(u => String(u.apt) === apt && (!building || u.building === building || String(u.building_id) === String(building))) || null;
+    }
     let quantityCurrentUnit = null;
     let quantityCurrentSystem = 'Rough-In';
     let quantityRenderToken = 0;
@@ -2444,7 +2467,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         const historyCount = Array.isArray(store.templateHistory?.[type]) ? store.templateHistory[type].length : 0;
         const updateHistoryCount = Array.isArray(store.templateUpdateHistory?.[type]) ? store.templateUpdateHistory[type].length : 0;
         const undoButton = updateHistoryCount ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityUndoTemplateUpdate(${JSON.stringify(type)})'>Undo</button>` : '';
-        return `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(460px,44%);align-items:center;gap:14px;padding:9px 11px;border:1px solid #E2E8F0;border-radius:7px;background:#F8FAFC;font-size:12px;"><div style="display:grid;grid-template-columns:72px minmax(0,1fr) 145px 100px 58px;align-items:center;gap:8px;min-width:0;line-height:1.3;"><strong style="color:#1E3A8A;min-width:0;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(type)}</strong><span style="min-width:0;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(model.name || 'Drawing')}</span><span style="min-width:0;color:#64748B;white-space:normal;overflow-wrap:anywhere;">Rev ${model.version || 1} · ${assigned} assigned${historyCount ? ` · ${historyCount} previous` : ''}</span>${scope ? `<span style="display:block;min-width:0;max-width:100px;font-size:10px;color:#64748B;line-height:1.25;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(scope)}${assignedUnits.length > 3 ? '…' : ''}</span>` : '<span></span>'}<span style="color:#15803D;font-weight:600;white-space:normal;overflow-wrap:anywhere;">Active</span><div style="grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px;">${quantitySetupSystems().map(sys => { const d = quantityModelSystemDrawing(model, sys); const rev = d ? (sys === 'Rough-In' ? (model.version || 1) : (d.version || 1)) : 0; const ownList = sys !== 'Rough-In' && Array.isArray(model.systemDrawings?.[sys]?.checklist) && model.systemDrawings[sys].checklist.length; const state = d ? 'done' : ownList ? 'checklist' : 'none'; const border = state === 'done' ? '#86EFAC' : state === 'checklist' ? '#FCD34D' : '#E2E8F0'; const bg = state === 'done' ? '#F0FDF4' : state === 'checklist' ? '#FFFBEB' : '#fff'; const fg = state === 'done' ? '#166534' : state === 'checklist' ? '#92400E' : '#94A3B8'; const label = state === 'done' ? `Rev ${rev} ✓` : state === 'checklist' ? 'checklist ✓ · no drawing' : '—'; return `<button type="button" onclick='quantityOpenChecklistTemplate(${JSON.stringify(type)},${JSON.stringify(sys)})' title="${state === 'checklist' ? 'Checklist saved; upload the drawing to finish' : 'Open the ' + officialFinalEscape(sys) + ' checklist'}" style="font-size:10px;padding:2px 7px;border-radius:999px;cursor:pointer;border:1px solid ${border};background:${bg};color:${fg};">${officialFinalEscape(sys)} ${label}</button>`; }).join('')}</div></div><div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;min-width:0;"><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenModelAssignments(${JSON.stringify(type)})'>Assigned units</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityPreviewDrawing(${JSON.stringify(type)},quantityStore().templates[${JSON.stringify(type)}])'>View</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityCopyTemplate(${JSON.stringify(type)})'>Copy</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenTemplateRfi(${JSON.stringify(type)})'>RFI / Update</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenChecklistTemplate(${JSON.stringify(type)})'>Checklist / RFI</button>${undoButton}<button type="button" class="btn btn-danger" style="font-size:11px;padding:4px 8px;" onclick='quantityDeleteTemplate(${JSON.stringify(type)})'>Remove</button></div></div>`;
+        return `<div style="display:flex;flex-direction:column;gap:2px;"><div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(460px,44%);align-items:center;gap:14px;padding:9px 11px;border:1px solid #E2E8F0;border-radius:7px;background:#F8FAFC;font-size:12px;"><div style="display:grid;grid-template-columns:72px minmax(0,1fr) 145px 100px 58px;align-items:center;gap:8px;min-width:0;line-height:1.3;"><strong style="color:#1E3A8A;min-width:0;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(type)}</strong><span style="min-width:0;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(model.name || 'Drawing')}</span><span style="min-width:0;color:#64748B;white-space:normal;overflow-wrap:anywhere;">Rev ${model.version || 1} · ${assigned} assigned${historyCount ? ` · ${historyCount} previous` : ''}</span>${scope ? `<span style="display:block;min-width:0;max-width:100px;font-size:10px;color:#64748B;line-height:1.25;white-space:normal;overflow-wrap:anywhere;">${officialFinalEscape(scope)}${assignedUnits.length > 3 ? '…' : ''}</span>` : '<span></span>'}<span style="color:#15803D;font-weight:600;white-space:normal;overflow-wrap:anywhere;">Active</span><div style="grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px;">${quantitySetupSystems().map(sys => { const d = quantityModelSystemDrawing(model, sys); const rev = d ? (sys === 'Rough-In' ? (model.version || 1) : (d.version || 1)) : 0; const ownList = sys !== 'Rough-In' && Array.isArray(model.systemDrawings?.[sys]?.checklist) && model.systemDrawings[sys].checklist.length; const state = d ? 'done' : ownList ? 'checklist' : 'none'; const border = state === 'done' ? '#86EFAC' : state === 'checklist' ? '#FCD34D' : '#E2E8F0'; const bg = state === 'done' ? '#F0FDF4' : state === 'checklist' ? '#FFFBEB' : '#fff'; const fg = state === 'done' ? '#166534' : state === 'checklist' ? '#92400E' : '#94A3B8'; const label = state === 'done' ? `Rev ${rev} ✓` : state === 'checklist' ? 'checklist ✓ · no drawing' : '—'; return `<button type="button" onclick='quantityOpenChecklistTemplate(${JSON.stringify(type)},${JSON.stringify(sys)})' title="${state === 'checklist' ? 'Checklist saved; upload the drawing to finish' : 'Open the ' + officialFinalEscape(sys) + ' checklist'}" style="font-size:10px;padding:2px 7px;border-radius:999px;cursor:pointer;border:1px solid ${border};background:${bg};color:${fg};">${officialFinalEscape(sys)} ${label}</button>`; }).join('')}</div></div><div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;min-width:0;"><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenModelAssignments(${JSON.stringify(type)})'>Assigned units</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityPreviewDrawing(${JSON.stringify(type)},quantityStore().templates[${JSON.stringify(type)}])'>View</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityCopyTemplate(${JSON.stringify(type)})'>Copy</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenTemplateRfi(${JSON.stringify(type)})'>RFI / Update</button><button type="button" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" onclick='quantityOpenChecklistTemplate(${JSON.stringify(type)})'>Checklist / RFI</button>${undoButton}<button type="button" class="btn btn-danger" style="font-size:11px;padding:4px 8px;" onclick='quantityDeleteTemplate(${JSON.stringify(type)})'>Remove</button></div></div>${quantityModelSystemsRow(type, model)}</div>`;
       }).join('') : '<div style="font-size:12px;color:#94A3B8;padding:6px 0;">No drawing models saved yet.</div>';
     }
     function quantityOpenTemplateRfi(type) {
@@ -2660,6 +2683,10 @@ Object.assign(APP_TRANSLATIONS.en, {
         content.prepend(note);
       }
       content.prepend(systemPicker);
+      const excelBar = document.createElement('div');
+      excelBar.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:#475569;';
+      excelBar.innerHTML = `<label class="btn btn-secondary" style="font-size:11px;padding:5px 9px;cursor:pointer;">⬆ Upload Excel (${officialFinalEscape(tplSystem)})<input type="file" accept=".xlsx" style="display:none" onchange="quantityImportChecklistExcel(this)"></label><a class="btn btn-secondary" style="font-size:11px;padding:5px 9px;text-decoration:none;" href="templates/QC-Checklist-Template.xlsx" download>⬇ Excel template</a><button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 9px;" onclick="quantityExportChecklistsExcel()">⬇ Export all checklists</button><span>Lines with quantity 0 or empty are not added. Review, then press Save checklist.</span>`;
+      content.prepend(excelBar);
       modal.style.display = 'flex';
     }
     async function quantityChecklistUploadDrawing(input) {
@@ -2749,6 +2776,68 @@ Object.assign(APP_TRANSLATIONS.en, {
     function quantityCloseChecklistTemplate() {
       const modal = document.getElementById('quantityChecklistTemplateModal'); if (modal) modal.style.display = 'none';
       quantityChecklistTemplateType = ''; quantityChecklistTemplateMode = 'template';
+    }
+    // Fills the checklist lines of the open model/system from an Excel file
+    // (columns: Item, Quantity; optional Model, System, Unit, Notes). Nothing is
+    // saved until the user presses "Save checklist" (same confirmation as typing).
+    // Every model checklist of this project, in the same format as the template
+    // (so it can be edited and uploaded back, system by system).
+    async function quantityExportChecklistsExcel() {
+      try {
+        if (!window.ExcelJS) await new Promise((resolve, reject) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'; sc.onload = resolve; sc.onerror = () => reject(new Error('Excel library failed to load')); document.head.appendChild(sc); });
+        const store = quantityStore(); const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Checklist');
+        ws.columns = [{ header: 'Model / Area', key: 'model', width: 16 }, { header: 'System', key: 'system', width: 13 }, { header: 'Item', key: 'item', width: 50 }, { header: 'Quantity', key: 'qty', width: 11 }, { header: 'Unit', key: 'unit', width: 8 }, { header: 'Notes', key: 'notes', width: 30 }];
+        ws.getRow(1).eachCell(c => { c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F3A5F' } }; });
+        let n = 0;
+        Object.keys(store.templates || {}).sort().forEach(type => {
+          const t = store.templates[type];
+          QUANTITY_SYSTEMS.forEach(system => {
+            const list = system === 'Rough-In' ? t.checklist : t.systemDrawings?.[system]?.checklist;
+            (Array.isArray(list) ? list : []).forEach(item => { ws.addRow({ model: type, system, item: item.description || '', qty: Number(item.takeoff || 0), unit: 'EA', notes: '' }); n++; });
+          });
+        });
+        ws.views = [{ state: 'frozen', ySplit: 1 }];
+        const blob = new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `QC-Checklists-${String(document.title || 'project').replace(/^Identus 50 – /, '').replace(/[^A-Za-z0-9-]+/g, '_')}.xlsx`;
+        document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        quantitySuccessToast(`✅ ${n} checklist line(s) exported`);
+      } catch (error) { alert('Could not export: ' + (error.message || error)); }
+    }
+    async function quantityImportChecklistExcel(input) {
+      const file = input?.files?.[0]; if (input) input.value = ''; if (!file) return;
+      try {
+        if (!window.ExcelJS) await new Promise((resolve, reject) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'; sc.onload = resolve; sc.onerror = () => reject(new Error('Excel reader failed to load')); document.head.appendChild(sc); });
+        const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await file.arrayBuffer());
+        const ws = wb.worksheets.find(w => /checklist/i.test(w.name)) || wb.worksheets[0];
+        const text = v => { if (v == null) return ''; if (typeof v === 'object') return String(v.result ?? v.text ?? (v.richText ? v.richText.map(r => r.text).join('') : '')).trim(); return String(v).trim(); };
+        let headerRow = 0; const col = {};
+        ws.eachRow((row, n) => {
+          if (headerRow) return;
+          const cells = row.values.map(text).map(v => v.toLowerCase());
+          const find = re => cells.findIndex(v => re.test(v));
+          if (find(/^(item|description|descripci)/) > 0 && find(/^(qty|quantity|cantidad|takeoff)/) > 0) {
+            headerRow = n; col.item = find(/^(item|description|descripci)/); col.qty = find(/^(qty|quantity|cantidad|takeoff)/);
+            col.model = find(/^(model|modelo|area|área|unit type)/); col.system = find(/^(system|sistema)/);
+          }
+        });
+        if (!headerRow) { alert('Could not find the header row. The sheet needs at least the columns "Item" and "Quantity" (use the Excel template).'); return; }
+        const model = quantityChecklistTemplateType; const system = quantityChecklistTemplateSystem || 'Rough-In';
+        const lines = []; let zero = 0, otherModel = 0, otherSystem = 0;
+        ws.eachRow((row, n) => {
+          if (n <= headerRow) return;
+          const v = row.values; const item = text(v[col.item]); if (!item) return;
+          if (col.model > 0 && text(v[col.model]) && text(v[col.model]).toUpperCase() !== model) { otherModel++; return; }
+          if (col.system > 0 && text(v[col.system]) && text(v[col.system]).toLowerCase() !== system.toLowerCase()) { otherSystem++; return; }
+          const qty = Number(String(text(v[col.qty])).replace(/[^0-9.\-]/g, ''));
+          if (!Number.isFinite(qty) || qty <= 0) { zero++; return; }
+          lines.push({ description: item, takeoff: Math.round(qty) });
+        });
+        if (!lines.length) { alert(`No lines with quantity for ${model} / ${system} in this file.${zero ? `\n${zero} line(s) had quantity 0.` : ''}${otherModel ? `\n${otherModel} line(s) belong to other models.` : ''}${otherSystem ? `\n${otherSystem} line(s) belong to other systems.` : ''}`); return; }
+        if (!confirm(`${model} / ${system}: replace the lines on screen with ${lines.length} line(s) from the Excel file?\n\nSkipped: ${zero} with quantity 0${otherModel ? `, ${otherModel} of other models` : ''}${otherSystem ? `, ${otherSystem} of other systems` : ''}.\n\nNothing is saved until you press "Save checklist".`)) return;
+        quantityRenderChecklistTemplateRows(lines);
+        quantitySuccessToast(`✅ ${lines.length} line(s) loaded from Excel · review and press Save checklist`);
+      } catch (error) { alert('Could not read this Excel file: ' + (error.message || error)); }
     }
     async function quantitySaveChecklistTemplate() {
       if (!quantityIsAdmin() || !quantityChecklistTemplateType) return;
@@ -2883,6 +2972,35 @@ Object.assign(APP_TRANSLATIONS.en, {
       template.systemDrawings[system] = Array.isArray(d.checklist) && d.checklist.length ? { checklist: d.checklist } : undefined;
       if (!template.systemDrawings[system]) delete template.systemDrawings[system];
       return true;
+    }
+    // Model card "QC systems": Fire Alarm, Data and Lighting can be turned on
+    // (reusing the Rough-In drawing until its own one is uploaded) or off.
+    // Turning off keeps every drawing, checklist and mark saved.
+    async function quantityToggleModelSystem(type, system, on, checkbox) {
+      if (!quantityIsAdmin() || QUANTITY_FIXED_SYSTEMS.includes(system)) return;
+      const store = quantityStore(); const template = store.templates?.[type]; if (!template) return;
+      const current = quantityModelQcChoice(template) || QUANTITY_LEGACY_SYSTEMS.filter(sys => !QUANTITY_FIXED_SYSTEMS.includes(sys));
+      if (!on) {
+        const units = quantityModelAssignedUnits(type).length;
+        if (!confirm(`Turn off ${system} in Quantity Control for model ${type}${units ? ` (${units} unit${units === 1 ? '' : 's'})` : ''}?\n\nIts drawing, checklist and marks stay saved; turn it on again to get them back. ${system} progress is then entered manually.`)) { if (checkbox) checkbox.checked = true; return; }
+      }
+      const next = on ? [...new Set([...current, system])] : current.filter(sys => sys !== system);
+      template.systemDrawings = { ...(template.systemDrawings || {}), _qc: { systems: next } };
+      if (on) quantityReuseRoughDrawing(store, type, system); // starts with the Rough-In drawing; upload its own one any time
+      template.updatedAt = new Date().toISOString();
+      quantitySave(store); const synced = await quantityFlushRemoteSave();
+      if (synced === false) { if (checkbox) checkbox.checked = !on; return; }
+      renderSetupDrawingModels();
+      quantitySuccessToast(`✅ ${type}: ${system} ${on ? 'on' : 'off'} in Quantity Control`);
+    }
+    function quantityModelSystemsRow(type, model) {
+      const fixed = QUANTITY_FIXED_SYSTEMS.map(sys => `<span style="padding:2px 7px;border-radius:10px;background:#DBEAFE;color:#1E3A8A;">${sys}</span>`).join(' ');
+      const optional = QUANTITY_SYSTEMS.filter(sys => !QUANTITY_FIXED_SYSTEMS.includes(sys)).map(sys => {
+        const chosen = quantityModelQcChoice(model); const on = chosen ? chosen.includes(sys) : QUANTITY_LEGACY_SYSTEMS.includes(sys);
+        const drawing = on && quantityModelSystemDrawing(model, sys); const own = drawing && model.systemDrawings?.[sys]?.sharedFrom !== 'Rough-In';
+        return `<label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;"><input type="checkbox" ${on ? 'checked' : ''} ${quantityIsAdmin() ? '' : 'disabled'} onchange='quantityToggleModelSystem(${JSON.stringify(type)}, ${JSON.stringify(sys)}, this.checked, this)'>${sys}${on ? `<span style="color:#64748B;">(${own ? 'own drawing' : drawing ? 'Rough-In drawing' : 'no drawing yet'})</span>` : ''}</label>`;
+      }).join(' ');
+      return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:4px 11px 0;font-size:11px;color:#334155;"><strong style="color:#1E3A8A;">QC systems:</strong> ${fixed} ${optional}</div>`;
     }
     function quantitySystemMarksCount(type, system) {
       return quantityModelAssignedUnits(type).reduce((sum, unit) => sum + quantityWithSystem(system, () => (quantityUnitState(unit).markers || []).length), 0);
@@ -3043,7 +3161,8 @@ Object.assign(APP_TRANSLATIONS.en, {
       // correct building/floor first. This prevents 2106 from being ignored
       // while the selectors still show Building 1 / Floor 1.
       const selected = wanted
-        ? allUnits.filter(unit => wanted.some(token => String(unit.apt).toUpperCase() === String(token).toUpperCase() || (acrossFloors && unitPosition(unit.apt) === unitPosition(token))))
+        // Special areas (Corridor A, Electrical Room…) are assigned by name, on every floor where they exist.
+        ? quantityAllUnits().filter(unit => wanted.some(token => String(unit.apt).toUpperCase() === String(token).toUpperCase() || (!unit.isSpecialArea && acrossFloors && unitPosition(unit.apt) === unitPosition(token))))
         : (acrossFloors ? buildingUnits : units);
       if (!selected.length) { if (typeof toast === 'function') toast('No matching units found'); return; }
       if (wanted && selected.length === 1) {
@@ -3168,7 +3287,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       return (state?.markers || []).filter(marker => Number(marker.itemIndex) === Number(index)).length;
     }
     function quantityComputedProgress(unit, system) {
-      if (!unit || !QUANTITY_SYSTEMS.includes(system)) return null;
+      if (!unit || !quantityManages(unit, system)) return null;
       const previous = quantityCurrentSystem;
       try {
         quantityCurrentSystem = system;
@@ -3190,7 +3309,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     function quantityApplyComputedProgress(unit) {
       if (!unit?.systems) return;
-      QUANTITY_SYSTEMS.forEach(system => {
+      quantitySystemsFor(unit).forEach(system => {
         if (!unit.systems[system]) return;
         const progress = quantityComputedProgress(unit, system);
         if (progress == null) return;
@@ -4389,7 +4508,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     function quantityOpenUnit(index, systemOverride = null) {
       const unit = quantityVisibleUnits()[index]; if (!unit) return;
-      quantityCurrentSystem = systemOverride && QUANTITY_SYSTEMS.includes(systemOverride) ? systemOverride : 'Rough-In';
+      quantityCurrentSystem = systemOverride && quantityManages(unit, systemOverride) ? systemOverride : 'Rough-In';
       quantityCurrentUnit = unit; quantityActiveItem = -1;
       const savedState = quantityUnitState(unit);
       // Opening a unit always starts on the editable current working revision. Historical revisions are entered only with the arrows.
@@ -4918,7 +5037,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const revisionNavLabel = activeRevisionDate;
       const revisionNav = `<div class="quantity-revision-nav" style="position:relative;display:flex;align-items:center;justify-content:center;gap:8px;width:max-content;margin:8px auto 0;padding:4px 7px;background:rgba(255,255,255,.94);border:1px solid #CBD5E1;border-radius:7px;z-index:5;"><button type="button" class="btn btn-secondary" aria-label="Older plan revision" title="Older plan revision" ${olderDisabled ? 'disabled' : ''} onclick="quantityNavigateRevision(-1)" style="font-size:18px;line-height:1;padding:2px 9px;">‹</button><strong style="min-width:54px;text-align:center;font-size:11px;">${officialFinalEscape(revisionNavLabel)}</strong><button type="button" class="btn btn-secondary" aria-label="Newer plan revision" title="Newer plan revision" ${newerDisabled ? 'disabled' : ''} onclick="quantityNavigateRevision(1)" style="font-size:18px;line-height:1;padding:2px 9px;">›</button></div>`;
       const revisionStamp = `<div class="quantity-plan-revision-stamp" style="position:absolute;right:10px;top:10px;z-index:4;background:rgba(255,255,255,.92);border:1px solid #CBD5E1;border-radius:5px;padding:4px 7px;font-size:11px;color:#334155;pointer-events:none;">${officialFinalEscape(activeRevisionDate)}</div>`;
-      const systemTabs = QUANTITY_SYSTEMS.map(system => `<button type="button" class="btn ${quantityCurrentSystem === system ? 'btn-primary' : 'btn-secondary'}" style="font-size:11px;padding:6px 9px;" onclick="quantitySwitchSystem('${system}')">${system}</button>`).join('');
+      const systemTabs = quantitySystemsFor(quantityCurrentUnit).map(system => `<button type="button" class="btn ${quantityCurrentSystem === system ? 'btn-primary' : 'btn-secondary'}" style="font-size:11px;padding:6px 9px;" onclick="quantitySwitchSystem('${system}')">${system}</button>`).join('');
       document.getElementById('quantityUnitContent').innerHTML = `<div style="grid-column:1/-1;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;border:1px solid #BFDBFE;border-radius:8px;background:#EFF6FF;"><strong style="font-size:12px;color:#1E3A8A;margin-right:4px;">System / QC:</strong>${systemTabs}<span style="font-size:11px;color:#64748B;margin-left:auto;">${quantityCurrentSystem} quantities, drawing and RFI history</span></div><div class="quantity-checklist"><div class="quantity-card-header"><strong>${quantityCurrentSystem} Takeoff Checklist</strong><span>Click Select, then click the drawing</span></div><table><thead><tr><th>#</th><th>Description</th><th>Takeoff</th><th>Installed</th><th>Remaining</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div><div class="quantity-card-header" style="border:1px solid #E2E8F0;border-bottom:0;border-radius:8px 8px 0 0;"><strong>${quantityCurrentSystem} Drawing</strong><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${typeControl}${templateButton}${quantityIsAdmin() ? `<label class="btn btn-secondary" style="font-size:11px;padding:5px 8px;cursor:pointer;">Upload Drawing / RFI<input type="file" accept="image/*,.pdf" onchange="quantityHandleUnitPlan(this)" style="display:none"></label>` : ''}${quantityIsAdmin() ? `<button type="button" class="insp-btn insp-btn-success" style="font-size:11px;padding:5px 8px;" onclick="quantitySaveRevision()">Save Revision</button>` : ``}${undoRevisionButton}${quantityIsAdmin() ? `<button class="btn btn-danger" style="font-size:11px;padding:5px 8px;" onclick="quantityClearMarkers()">Clear All Marks</button>` : ''}${quantityIsAdmin() ? `<button type="button" class="btn btn-secondary" style="font-size:11px;padding:5px 8px;" onclick="quantityResetRevisionHistory()">Reset test history</button>` : ''}</span></div><div class="quantity-drawing-board">${drawingHtml}${drawingHitArea}${drawingUpdateStamp}${revisionStamp}${markers}</div>${revisionNav}<div class="quantity-help"><strong>${drawingSource}</strong><br>${quantityActiveItem >= 0 ? `Active item: <strong>${String(quantityActiveItem + 1).padStart(2, '0')} — ${officialFinalEscape(state.items[quantityActiveItem]?.description || '')}</strong>. Click the corresponding symbol location to add an installed mark. Click a numbered green mark to remove it.` : 'Select an item to start marking its corresponding symbol on the drawing.'}</div></div>`;
       const nextDrawingMedia = document.querySelector('#quantityUnitContent .quantity-pdf-canvas, #quantityUnitContent .quantity-drawing-board > img');
       if (nextDrawingMedia) {
@@ -8956,6 +9075,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       document.getElementById('unitBuilding').value = unit.building_id || unit.building;
       document.getElementById('unitFloor').value = unit.floor;
 
+      setupSystemsFormUnit = unit;
       setupSystemsForm();
 
       // Populate with existing values
@@ -8989,7 +9109,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     function openQuantityFromUnit(apt, building, floor, system) {
       const unit = quantityAllUnits().find(item => String(item.apt) === String(apt) && String(item.building) === String(building) && String(item.floor) === String(floor));
       if (!unit) return;
-      quantityCurrentSystem = QUANTITY_SYSTEMS.includes(system) ? system : 'Rough-In';
+      quantityCurrentSystem = quantityManages(unit, system) ? system : 'Rough-In';
       closeDetailsModal();
       switchMainTab('quantity', null);
       requestAnimationFrame(() => {
@@ -9758,7 +9878,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
                 <span>Events:</span>
                 <span>${sysData.events ? sysData.events.length : 0}</span>
               </div>
-              ${QUANTITY_SYSTEMS.includes(sysName) ? `<button type="button" class="btn btn-secondary" style="margin-top:8px;font-size:11px;padding:6px 9px;" onclick="openQuantityFromUnit('${officialFinalEscape(unit.apt)}','${officialFinalEscape(unit.building)}','${officialFinalEscape(unit.floor)}','${sysName}')">Open ${sysName} Quantity Control</button>` : ''}
+              ${quantityManages(unit, sysName) ? `<button type="button" class="btn btn-secondary" style="margin-top:8px;font-size:11px;padding:6px 9px;" onclick="openQuantityFromUnit('${officialFinalEscape(unit.apt)}','${officialFinalEscape(unit.building)}','${officialFinalEscape(unit.floor)}','${sysName}')">Open ${sysName} Quantity Control</button>` : ''}
             </div>
           `;
         });
@@ -10099,7 +10219,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
 
     // Quantity systems are updated in Quantity Control, not with a manual %.
     function updateEventEntryMode(system) {
-      const quantityMode = typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(system);
+      const quantityMode = typeof QUANTITY_SYSTEMS !== 'undefined' && quantityManages(currentEventUnit, system);
       const hint = document.getElementById('eventQuantityHint');
       if (hint) hint.style.display = quantityMode ? 'block' : 'none';
       ['eventProgress', 'eventStatus', 'eventNotes', 'eventPhotos'].forEach(id => { const g = document.getElementById(id)?.closest('.form-group'); if (g) g.style.display = quantityMode ? 'none' : ''; });
@@ -10108,7 +10228,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     }
     function openQuantityFromEvent() {
       const unit = currentEventUnit; const system = document.getElementById('eventSystem')?.value;
-      if (!unit || !QUANTITY_SYSTEMS.includes(system)) return;
+      if (!unit || !quantityManages(unit, system)) return;
       closeAddEventModal();
       setTimeout(() => openQuantityFromUnit(unit.apt, unit.building, unit.floor, system), 450);
     }
@@ -10493,6 +10613,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       document.getElementById('unitNumber').value = '';
       document.getElementById('unitBuilding').value = '';
       document.getElementById('unitFloor').value = '';
+      setupSystemsFormUnit = null;
       setupSystemsForm();
       showAppModal('unitModal');
       setupUnitNumberAutocomplete();
@@ -10543,12 +10664,13 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       autoFillFullUnit(apt);
     }
 
+    let setupSystemsFormUnit = null; // unit being edited (null = new unit)
     function setupSystemsForm() {
       const form = document.getElementById('systemsForm');
       form.innerHTML = SYSTEMS.map(sys => `
         <div class="form-group">
           <label class="form-label">${systemDisplayName(sys)}</label>
-          ${typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(sys) ? '<div style="padding:8px 10px;border:1px solid #BFDBFE;border-radius:6px;background:#EFF6FF;color:#1E3A8A;font-size:11px;">Managed in Quantity Control: takeoff vs installed quantities.</div>' : `<div class="form-row"><input type="number" class="form-input" placeholder="%" min="0" max="100" value="0" data-system="${sys}" data-field="progress" onchange="validateProgress(this)" oninput="const st=this.parentElement.querySelector('[data-field=status]'); if(st) st.value=progressToStatus(Math.min(100,Math.max(0,parseInt(this.value)||0)))"><select class="form-select" data-system="${sys}" data-field="status" disabled title="Set automatically from %"><option value="Behind" selected>Not Started (0%)</option><option value="At Risk">In Progress (1–99%)</option><option value="In Progress">In Progress (1–99%)</option><option value="Completed">Completed (100%)</option></select></div>`}
+          ${typeof QUANTITY_SYSTEMS !== 'undefined' && quantityManages(setupSystemsFormUnit, sys) ? '<div style="padding:8px 10px;border:1px solid #BFDBFE;border-radius:6px;background:#EFF6FF;color:#1E3A8A;font-size:11px;">Managed in Quantity Control: takeoff vs installed quantities.</div>' : `<div class="form-row"><input type="number" class="form-input" placeholder="%" min="0" max="100" value="0" data-system="${sys}" data-field="progress" onchange="validateProgress(this)" oninput="const st=this.parentElement.querySelector('[data-field=status]'); if(st) st.value=progressToStatus(Math.min(100,Math.max(0,parseInt(this.value)||0)))"><select class="form-select" data-system="${sys}" data-field="status" disabled title="Set automatically from %"><option value="Behind" selected>Not Started (0%)</option><option value="At Risk">In Progress (1–99%)</option><option value="In Progress">In Progress (1–99%)</option><option value="Completed">Completed (100%)</option></select></div>`}
         </div>
       `).join('');
     }
@@ -10582,6 +10704,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     }
 
     function setupModal() {
+      setupSystemsFormUnit = null;
       setupSystemsForm();
     }
 
@@ -10645,7 +10768,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       updateCharts();
       closeUnitModal();
       const savedUnit = data.find(unit => unit.apt === unitNumber && unit.building === building && unit.floor === floor);
-      const firstQuantitySystem = savedUnit ? QUANTITY_SYSTEMS.find(system => savedUnit.systems?.[system]) : null;
+      const firstQuantitySystem = savedUnit ? quantitySystemsFor(savedUnit).find(system => savedUnit.systems?.[system]) : null;
       if (savedUnit && firstQuantitySystem) {
         quantityCurrentSystem = firstQuantitySystem;
         switchMainTab('quantity', null);
@@ -10700,7 +10823,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     }
 
     function updateQuickEntryMode(system) {
-      const quantityMode = typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(system);
+      const quantityMode = typeof QUANTITY_SYSTEMS !== 'undefined' && quantityManages(quantityQuickUnit(), system);
       const group = document.getElementById('quickProgressGroup');
       const hint = document.getElementById('quickQuantityHint');
       const progress = document.getElementById('quickProgress');
@@ -10719,7 +10842,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       const apt = String(document.getElementById('quickUnit')?.value || '').trim();
       const system = String(document.getElementById('quickSystem')?.value || '');
       const unit = data.find(item => String(item.apt) === apt);
-      if (!unit || !QUANTITY_SYSTEMS.includes(system)) { alert('Select an existing unit and a quantity system first.'); return; }
+      if (!unit || !quantityManages(unit, system)) { alert('Select an existing unit and a quantity system first.'); return; }
       closeQuickAddModal();
       setTimeout(() => openQuantityFromUnit(unit.apt, unit.building, unit.floor, system), 450);
     }
@@ -10855,7 +10978,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       const apt = document.getElementById('quickUnit').value;
       const floor = document.getElementById('quickFloor').value;
       const system = document.getElementById('quickSystem').value;
-      const quantityMode = typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(system);
+      const quantityMode = typeof QUANTITY_SYSTEMS !== 'undefined' && quantityManages(quantityQuickUnit(), system);
       const progress = quantityMode ? 0 : parseInt(document.getElementById('quickProgress').value);
       const hasPhoto = pendingQuickPhotos.length > 0;
 
@@ -10928,7 +11051,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       updateCharts();
       closeQuickAddModal();
       const quickSavedUnit = quickUnitForRemote || data.find(unit => unit.apt === apt && (!building || unit.building === building));
-      if (typeof QUANTITY_SYSTEMS !== 'undefined' && QUANTITY_SYSTEMS.includes(system) && quickSavedUnit) {
+      if (typeof QUANTITY_SYSTEMS !== 'undefined' && quickSavedUnit && quantityManages(quickSavedUnit, system)) {
         // Quantity systems use the same unit record, then continue directly to
         // the system-specific takeoff/drawing view instead of a second data path.
         quantityCurrentSystem = system;
@@ -13311,7 +13434,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           // has is at 100%, and every quality inspection that applies to the
           // unit (the ones linked to those quantity systems and all the others)
           // has a passed latest result.
-          const unitQuantity = QUANTITY_SYSTEMS.filter(system => (unit.systems || {})[system]);
+          const unitQuantity = quantitySystemsFor(unit).filter(system => (unit.systems || {})[system]);
           const quantityReady = unitQuantity.every(system => Number(unit.systems[system].progress || 0) >= 100);
           const allRecords = typeof inspGetInspections === 'function' ? inspGetInspections() : [];
           const types = (typeof INSP_INSPECTION_TYPES !== 'undefined' ? INSP_INSPECTION_TYPES : []).filter(type => typeof inspIsInspectionTypeApplicableForUnit !== 'function' || inspIsInspectionTypeApplicableForUnit(type, unit));
@@ -13383,7 +13506,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       let finalReadyMode = 'ready';
       function finalReadiness(unit) {
         const missing = [];
-        QUANTITY_SYSTEMS.filter(system => (unit.systems || {})[system]).forEach(system => { const p = Number(unit.systems[system].progress || 0); if (p < 100) missing.push({ kind: 'qty', label: `${system} ${Math.round(p)}%` }); });
+        quantitySystemsFor(unit).filter(system => (unit.systems || {})[system]).forEach(system => { const p = Number(unit.systems[system].progress || 0); if (p < 100) missing.push({ kind: 'qty', label: `${system} ${Math.round(p)}%` }); });
         const allRecords = typeof inspGetInspections === 'function' ? inspGetInspections() : [];
         const types = (typeof INSP_INSPECTION_TYPES !== 'undefined' ? INSP_INSPECTION_TYPES : []).filter(type => typeof inspIsInspectionTypeApplicableForUnit !== 'function' || inspIsInspectionTypeApplicableForUnit(type, unit));
         const unitRecords = allRecords.filter(r => String(r.apt) === String(unit.apt) && (!r.building || String(r.building) === String(unit.building)));
