@@ -49,7 +49,7 @@ export default async (request) => {
       let conversationId = /^[0-9a-f-]{36}$/i.test(String(input.conversationId || '')) ? input.conversationId : null;
       if (!conversationId) { const c = await sb('/rest/v1/ai_conversations', auth, { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ project_id: projectId, user_id: user.id, title: question.slice(0, 80), context: {} }) }); conversationId = c?.[0]?.id; }
       if (conversationId) {
-        await sb('/rest/v1/ai_messages', auth, { method: 'POST', body: JSON.stringify([{ conversation_id: conversationId, project_id: projectId, role: 'user', content: question }, { conversation_id: conversationId, project_id: projectId, role: 'assistant', content: answer, citations: Array.isArray(input.citations) ? input.citations.slice(0, 4) : [] }]) }).catch(() => {});
+        await sb('/rest/v1/ai_messages', auth, { method: 'POST', body: JSON.stringify([{ conversation_id: conversationId, project_id: projectId, role: 'user', content: question, citations: [] }, { conversation_id: conversationId, project_id: projectId, role: 'assistant', content: answer, citations: Array.isArray(input.citations) ? input.citations.slice(0, 4) : [] }]) }).catch(() => {});
         await sb(`/rest/v1/ai_conversations?id=eq.${conversationId}`, auth, { method: 'PATCH', body: JSON.stringify({ updated_at: new Date().toISOString() }) }).catch(() => {});
       }
       return json(200, { conversationId });

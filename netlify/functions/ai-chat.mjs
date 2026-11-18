@@ -187,7 +187,7 @@ export default async (request) => {
           cachedConversation = created?.[0]?.id || null;
         }
         if (cachedConversation) await sb('/rest/v1/ai_messages', auth, { method: 'POST', body: JSON.stringify([
-          { conversation_id: cachedConversation, project_id: projectId, role: 'user', content: question },
+          { conversation_id: cachedConversation, project_id: projectId, role: 'user', content: question, citations: [] },
           { conversation_id: cachedConversation, project_id: projectId, role: 'assistant', content: hit.result.answer, citations: hit.result.citations || [] }
         ]) }).catch(() => {});
         sb(`/rest/v1/ai_answer_cache?project_id=eq.${projectId}&question_key=eq.${encodeURIComponent(questionKey)}`, auth, { method: 'PATCH', body: JSON.stringify({ hits: (hit.hits || 0) + 1 }) }).catch(() => {});
@@ -323,7 +323,7 @@ export default async (request) => {
       conversationId = created?.[0]?.id;
     }
     if (conversationId) await sb('/rest/v1/ai_messages', auth, { method: 'POST', body: JSON.stringify([
-      { conversation_id: conversationId, project_id: projectId, role: 'user', content: question },
+      { conversation_id: conversationId, project_id: projectId, role: 'user', content: question, citations: [] },
       { conversation_id: conversationId, project_id: projectId, role: 'assistant', content: answer, citations: used }
     ]) }).catch(() => {});
     if (conversationId) await sb(`/rest/v1/ai_conversations?id=eq.${conversationId}`, auth, { method: 'PATCH', body: JSON.stringify({ updated_at: new Date().toISOString() }) }).catch(() => {});
