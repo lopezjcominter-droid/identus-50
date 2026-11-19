@@ -7436,9 +7436,16 @@ showAppModal('projectSetupModal');
 
         // Collect distinct systems per building_id
         const systemsByBuilding = {}; // building_id -> Set of system names
+        // A building whose Underground area has its own systems: the building's
+        // boxes come from its regular units only (else the U unit's systems would
+        // be switched on for every unit on the next Apply).
+        const savedResidentialByName = new Map((((typeof remoteSetupConfig !== 'undefined' && remoteSetupConfig) || await loadRemoteSetupConfig() || {}).residential_configs || []).map(cfg => [String(cfg.name), cfg]));
+        const buildingNameById = {}; (Array.isArray(buildings) ? buildings : []).forEach(b => { buildingNameById[b.id] = b.name; });
+        const unitFloorById = {}; allUnits.forEach(u => { unitFloorById[u.id] = u.floor; });
         allUSS.forEach(row => {
           const bId = unitIdToBuildingId[row.unit_id];
           if (!bId) return;
+          if (unitFloorById[row.unit_id] === 'Underground' && Array.isArray(savedResidentialByName.get(String(buildingNameById[bId]))?.undergroundSystems)) return;
           if (!systemsByBuilding[bId]) systemsByBuilding[bId] = new Set();
           systemsByBuilding[bId].add(canonicalSystemName(row.system_id));
         });
