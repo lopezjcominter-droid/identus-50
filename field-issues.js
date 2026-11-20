@@ -313,7 +313,7 @@
         <div class="fi-muted fi-small">${esc(i.created_by_name || '')} · ${fmt(i.created_at)}</div>
         ${(i.resolution_history || []).length ? `<div class="fi-muted fi-small">↺ Reopened ${i.resolution_history.length}×: ${i.resolution_history.map(h => `closed ${fmt(h.resolved_at)} by ${esc(h.resolved_by_name || '-')} (“${esc(h.note || '')}”), reopened ${fmt(h.reopened_at)} by ${esc(h.reopened_by_name || '-')}`).join(' · ')}</div>` : ''}
         ${i.status === 'resolved' && (i.resolution_note || (i.resolution_photos || []).length) ? `<div class="fi-resolution">✓ ${esc(i.resolution_note || '')} <span class="fi-muted fi-small">— ${esc(i.resolved_by_name || '')} · ${fmt(i.resolved_at)}</span></div>` : ''}
-        <div class="fi-thumbs" id="fiPh-${i.id}" hidden>${[...(i.photos || []), ...(i.resolution_photos || [])].map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(typeof storageThumbnailUrl === 'function' ? storageThumbnailUrl(u) : u)}" data-full="${esc(u)}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
+        <div class="fi-thumbs" id="fiPh-${i.id}" hidden>${[...(i.photos || []), ...(i.resolution_photos || [])].map((u, k, arr) => `<a href="${esc(u)}" onclick="event.preventDefault();fiLightbox(${esc(JSON.stringify(arr))},${k})"><img src="${esc(typeof storageThumbnailUrl === 'function' ? storageThumbnailUrl(u) : u)}" data-full="${esc(u)}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
       </div>
       <div class="fi-row-actions">
         ${(i.photos || []).length + (i.resolution_photos || []).length ? `<button type="button" class="fi-icon" title="Show photos" onclick="fiTogglePhotos('${i.id}')">📷 ${(i.photos || []).length + (i.resolution_photos || []).length}</button>` : ''}
@@ -487,3 +487,35 @@ This is an automated message. Please do not reply to this e-mail. For questions,
   .fi-wrap{max-width:900px}`;
   document.head.appendChild(css);
 })();
+
+// Photo lightbox: in-page preview with prev/next arrows and download
+window.fiLightbox = function (urls, idx) {
+  let i = idx || 0; document.getElementById('fiLb')?.remove();
+  const d = document.createElement('div'); d.id = 'fiLb';
+  d.innerHTML = `<div class="fi-lb-top"><span id="fiLbN"></span><button type="button" class="fi-lb-b" id="fiLbDl" title="Download"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 19h14"/></svg></button><button type="button" class="fi-lb-b" id="fiLbX" title="Close">✕</button></div>
+    <button type="button" class="fi-lb-nav" id="fiLbP" title="Previous">‹</button><img id="fiLbImg" alt="Issue photo"><button type="button" class="fi-lb-nav" id="fiLbNx" title="Next">›</button>`;
+  document.body.appendChild(d);
+  const show = () => { document.getElementById('fiLbImg').src = urls[i]; document.getElementById('fiLbN').textContent = `${i + 1} / ${urls.length}`;
+    const many = urls.length > 1; document.getElementById('fiLbP').hidden = !many; document.getElementById('fiLbNx').hidden = !many; };
+  const go = n => { i = (i + n + urls.length) % urls.length; show(); };
+  const close = () => { d.remove(); document.removeEventListener('keydown', key); };
+  const key = e => { if (e.key === 'Escape') close(); else if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1); };
+  document.addEventListener('keydown', key);
+  d.onclick = e => { if (e.target === d) close(); };
+  document.getElementById('fiLbX').onclick = close;
+  document.getElementById('fiLbP').onclick = () => go(-1);
+  document.getElementById('fiLbNx').onclick = () => go(1);
+  document.getElementById('fiLbDl').onclick = async () => {
+    try { const b = await (await fetch(urls[i])).blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(b);
+      a.download = (urls[i].split('/').pop().split('?')[0]) || `photo-${i + 1}.jpg`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+    catch (_) { window.open(urls[i], '_blank'); } };
+  let x0 = null; d.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+  d.addEventListener('touchend', e => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1); x0 = null; });
+  show();
+};
+(function(){ const st = document.createElement('style'); st.textContent = `#fiLb{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.92);display:flex;align-items:center;justify-content:center}
+#fiLbImg{max-width:88vw;max-height:84vh;object-fit:contain;border-radius:6px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.fi-lb-top{position:absolute;top:12px;left:16px;right:16px;display:flex;align-items:center;gap:10px;color:#fff;font:600 14px system-ui}
+.fi-lb-top span{flex:1}.fi-lb-b{width:38px;height:38px;border-radius:50%;border:0;background:#fff;color:#1D4ED8;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px}
+#fiLbX{color:#0f172a}.fi-lb-nav{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;background:rgba(255,255,255,.9);font-size:30px;line-height:1;cursor:pointer;color:#0f172a}
+#fiLbP{left:16px}#fiLbNx{right:16px}`; document.head.appendChild(st); })();
