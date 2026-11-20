@@ -223,8 +223,21 @@
     }
   };
   // Export the list (current filter) to CSV with photo links (opens in Excel).
-  window.fiExport = () => {
+  window.fiExport = async (btn) => {
     const rows = visible();
+    try {
+      if (btn) { btn.disabled = true; btn.dataset.t = btn.textContent; btn.textContent = 'Preparing…'; }
+      const ExcelJS = await window.xlReport.loadExcelJS();
+      const project = typeof getProjectName === 'function' ? getProjectName() : 'Project';
+      const address = typeof getProjectAddress === 'function' ? getProjectAddress() : '';
+      const today = new Date();
+      const wb = window.xlReport.buildIssuesWorkbook(ExcelJS, { project, address, issues: rows, logo: await window.xlReport.loadLogo(), today });
+      await window.xlReport.download(wb, `${project.replace(/\s+/g, '-')}-Field-Issues-${window.xlReport.day(today)}.xlsx`);
+    } catch (_) { fiExportCsv(rows); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = btn.dataset.t; } }
+  };
+  // Fallback when the Excel library cannot load (offline)
+  const fiExportCsv = (rows) => {
     const head = ['Unit', 'Building', 'Floor', 'Type', 'Description', 'Status', 'Reported by', 'Date', 'Photos', 'Resolved by', 'Resolved at', 'Resolution note', 'Proof photos'];
     const csv = [head, ...rows.map(i => [i.apt, i.building, i.floor, i.issue_type, i.description || '', i.status, i.created_by_name || '', i.created_at, (i.photos || []).join(' '), i.resolved_by_name || '', i.resolved_at || '', i.resolution_note || '', (i.resolution_photos || []).join(' ')])]
       .map(r => r.map(v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
@@ -342,7 +355,7 @@
   const toolbar = () => `<div class="fi-toolbar">
       ${['open', 'resolved', 'all'].map(f => `<button type="button" class="btn ${filter === f ? 'btn-primary' : 'btn-secondary'}" onclick="fiFilter('${f}')">${f === 'open' ? 'Open' : f === 'resolved' ? 'Resolved' : 'All'} (${issues.filter(i => f === 'all' || i.status === f).length})</button>`).join('')}
       <input type="search" class="form-input fi-search" id="fiSearch" name="fi-filter-${Date.now()}" placeholder="Search unit or type" autocomplete="off" autocapitalize="none" spellcheck="false" role="searchbox" aria-autocomplete="none" data-form-type="other" data-lpignore="true" data-1p-ignore="true" readonly onpointerdown="this.removeAttribute('readonly')" onkeydown="this.removeAttribute('readonly')" value="${esc(search)}" oninput="fiSearchInput(this.value)">
-      <button type="button" class="btn btn-secondary" onclick="fiExportPdf(this)">📄 Export PDF</button><button type="button" class="btn btn-secondary" onclick="fiExport()" title="Spreadsheet with photo links">⬇ Excel</button>${canManageReport() ? '<button type="button" class="btn btn-secondary" onclick="fiReportSettings()" title="Weekly e-mail report (admins/PMs)">✉ Weekly e-mail</button>' : ''}
+      <button type="button" class="btn btn-secondary" onclick="fiExportPdf(this)">📄 Export PDF</button><button type="button" class="btn btn-secondary" onclick="fiExport(this)" title="Spreadsheet with photo links">⬇ Excel</button>${canManageReport() ? '<button type="button" class="btn btn-secondary" onclick="fiReportSettings()" title="Weekly e-mail report (admins/PMs)">✉ Weekly e-mail</button>' : ''}
     </div>`;
 
   // ---------- weekly e-mail report (settings; admins/PMs only) ----------

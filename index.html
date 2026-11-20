@@ -12001,86 +12001,9 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       }
       const project = getProjectName(); const address = getProjectAddress ? getProjectAddress() : '';
       const today = new Date();
-      const wb = new ExcelJS.Workbook(); wb.creator = 'Identus 50 QA/QC'; wb.created = today;
-      const NAVY = 'FF0B5394', LIGHT = 'FFF1F5F9', WHITE = 'FFFFFFFF';
-      const fillFor = p => p >= 100 ? 'FFD1FAE5' : p > 0 ? 'FFDBEAFE' : 'FFFEE2E2';
-      const fontFor = p => p >= 100 ? 'FF065F46' : p > 0 ? 'FF1E3A8A' : 'FF991B1B';
-      const statusOf = p => p >= 100 ? 'Completed' : p > 0 ? 'In Progress' : 'Not Started';
-      const border = { top: { style: 'thin', color: { argb: 'FFE2E8F0' } }, left: { style: 'thin', color: { argb: 'FFE2E8F0' } }, bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } }, right: { style: 'thin', color: { argb: 'FFE2E8F0' } } };
-      const title = (ws, text, cols) => {
-        ws.mergeCells(1, 1, 1, cols); const t = ws.getCell(1, 1); t.value = project; t.font = { bold: true, size: 16, color: { argb: NAVY } };
-        ws.mergeCells(2, 1, 2, cols); const s2 = ws.getCell(2, 1); s2.value = `${text} · ${address ? address + ' · ' : ''}${today.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`; s2.font = { color: { argb: 'FF475569' } };
-      };
-      const header = (row) => row.eachCell(c => { c.font = { bold: true, color: { argb: WHITE } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }; c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; c.border = border; });
-      const systems = SYSTEMS.filter(sys => data.some(u => u.systems && u.systems[sys]));
-
-      // 1) Summary
-      const sum = wb.addWorksheet('Summary', { views: [{ showGridLines: false }] });
-      title(sum, 'QA/QC Progress Report', 4);
-      // Project details (client, GC, permit, schedule) when they are filled in.
-      (typeof window.projectReportLines === 'function' ? window.projectReportLines() : []).forEach(line => { const r = sum.addRow([line]); sum.mergeCells(r.number, 1, r.number, 4); r.getCell(1).font = { color: { argb: 'FF334155' } }; });
-      let tp = 0, tn = 0; const units = { done: 0, prog: 0, none: 0 }; const byB = {}, bySys = {};
-      data.forEach(u => {
-        const vals = Object.values(u.systems || {}).map(x => Number(x.progress) || 0);
-        const avg = vals.length ? vals.reduce((a, v) => a + v, 0) / vals.length : 0;
-        units[avg >= 100 ? 'done' : vals.some(v => v > 0) ? 'prog' : 'none']++;
-        const b = byB[u.building] = byB[u.building] || { n: 0, tp: 0, tn: 0 }; b.n++;
-        Object.entries(u.systems || {}).forEach(([sys, x]) => { const p = Number(x.progress) || 0; tp += p; tn++; b.tp += p; b.tn++; const y = bySys[sys] = bySys[sys] || { tp: 0, tn: 0, done: 0 }; y.tp += p; y.tn++; if (p >= 100) y.done++; });
-      });
-      const pct = (a, n) => n ? Math.round((a / n) * 10) / 10 : 0;
-      sum.addRow([]);
-      const kpiRow = sum.addRow(['Overall progress', 'Units', 'Completed', 'In progress']); header(kpiRow);
-      const kv = sum.addRow([pct(tp, tn) / 100, data.length, units.done, units.prog]);
-      kv.eachCell(c => { c.font = { bold: true, size: 14 }; c.alignment = { horizontal: 'center' }; c.border = border; }); kv.getCell(1).numFmt = '0.0%';
-      sum.addRow([]);
-      header(sum.addRow(['Building', 'Units', 'Progress', '']));
-      Object.entries(byB).forEach(([k, v]) => { const r = sum.addRow([k, v.n, pct(v.tp, v.tn) / 100]); r.getCell(3).numFmt = '0.0%'; r.eachCell(c => c.border = border); });
-      sum.addRow([]);
-      header(sum.addRow(['System', 'Progress', 'Units completed', 'Units']));
-      systems.forEach(sys => { const v = bySys[sys] || { tp: 0, tn: 0, done: 0 }; const r = sum.addRow([sys, pct(v.tp, v.tn) / 100, v.done, v.tn]); r.getCell(2).numFmt = '0.0%'; r.eachCell(c => c.border = border); });
-      sum.columns = [{ width: 30 }, { width: 16 }, { width: 18 }, { width: 14 }];
-
-      // 2) Progress matrix: one row per unit, one column per system
-      const mx = wb.addWorksheet('Progress by unit', { views: [{ state: 'frozen', xSplit: 3, ySplit: 4 }] });
-      const cols = ['Unit', 'Building', 'Floor', ...systems, 'Average'];
-      title(mx, 'Progress by unit and system', cols.length);
-      mx.addRow([]);
-      header(mx.addRow(cols));
-      data.slice().sort((a, b) => String(a.building).localeCompare(String(b.building)) || String(a.apt).localeCompare(String(b.apt), undefined, { numeric: true })).forEach(u => {
-        const vals = systems.map(sys => (u.systems && u.systems[sys]) ? (Number(u.systems[sys].progress) || 0) : null);
-        const have = vals.filter(v => v != null);
-        const avg = have.length ? have.reduce((a, v) => a + v, 0) / have.length : 0;
-        const r = mx.addRow([u.apt, u.building, u.floor, ...vals.map(v => v == null ? '—' : v / 100), avg / 100]);
-        r.eachCell((c, i) => {
-          c.border = border;
-          if (i > 3 && typeof c.value === 'number') { const p = c.value * 100; c.numFmt = '0%'; c.alignment = { horizontal: 'center' }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillFor(p) } }; c.font = { color: { argb: fontFor(p) }, bold: i === cols.length }; }
-          if (i > 3 && c.value === '—') { c.alignment = { horizontal: 'center' }; c.font = { color: { argb: 'FF94A3B8' } }; }
-        });
-      });
-      mx.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: cols.length } };
-      mx.columns = cols.map((_, i) => ({ width: i < 3 ? 14 : 13 }));
-      mx.getRow(4).height = 32;
-
-      // 3) Detail: last update per unit/system
-      const dt = wb.addWorksheet('Detail', { views: [{ state: 'frozen', ySplit: 4 }] });
-      const dcols = ['Unit', 'Building', 'Floor', 'System', 'Progress', 'Status', 'Photos', 'Last update', 'Updated by'];
-      title(dt, 'Detail by unit and system', dcols.length);
-      dt.addRow([]); header(dt.addRow(dcols));
-      data.forEach(u => Object.entries(u.systems || {}).forEach(([sys, x]) => {
-        const ev = x.events || []; const last = ev.length ? ev[ev.length - 1] : null; const p = Number(x.progress) || 0;
-        const r = dt.addRow([u.apt, u.building, u.floor, sys, p / 100, statusOf(p), Number(x.photos) || 0, last ? new Date(last.timestamp) : null, last && last.by ? last.by : '']);
-        r.getCell(5).numFmt = '0%'; r.getCell(8).numFmt = 'mmm d, yyyy h:mm AM/PM';
-        r.getCell(6).font = { bold: true, color: { argb: fontFor(p) } }; r.getCell(6).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillFor(p) } };
-        r.eachCell(c => { c.border = border; });
-      }));
-      dt.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: dcols.length } };
-      dt.columns = [{ width: 12 }, { width: 14 }, { width: 12 }, { width: 26 }, { width: 11 }, { width: 14 }, { width: 9 }, { width: 22 }, { width: 18 }];
-
-      [sum, mx, dt].forEach(ws => { ws.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } }; ws.headerFooter = { oddFooter: `&L${project}&RPage &P of &N` }; });
-      const buf = await wb.xlsx.writeBuffer();
-      const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-      const a = document.createElement('a'); a.href = url; a.download = `${project.replace(/\s+/g, '-')}-QAQC-progress-${today.toISOString().split('T')[0]}.xlsx`; document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      const lines = typeof window.projectReportLines === 'function' ? window.projectReportLines() : [];
+      const wb = window.xlReport.buildQaqcWorkbook(ExcelJS, { project, address, data, SYSTEMS, lines, logo: await window.xlReport.loadLogo(), today });
+      await window.xlReport.download(wb, `${project.replace(/\s+/g, '-')}-QAQC-progress-${window.xlReport.day(today)}.xlsx`);
     }
     // Fallback if the Excel library cannot load (offline): simple CSV.
     function exportExcelCsv() {
@@ -13939,6 +13862,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
   <script src="js/auth.js"></script>
 
 <script src="js/inspections.js"></script>
+<script src="js/xl-report.js"></script>
 <script src="ai-knowledge.js" defer></script>
 <script src="field-issues.js" defer></script>
 <script src="js/projects.js" defer></script>
