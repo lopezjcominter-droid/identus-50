@@ -156,9 +156,11 @@
   window.fiResolve = async id => {
     const i = issues.find(x => x.id === id); if (!i) return;
     if (isPending(id)) { note('Waiting for signal to upload this issue'); return; }
+    if (!canManageReport()) { note('Only admins or PMs can close or reopen issues'); return; }
     if (i.status === 'resolved') {
       if (!confirm('Reopen this issue?')) return;
-      const patch = { status: 'open', resolved_at: null, resolved_by_name: null };
+      const history = [...(i.resolution_history || []), { resolved_at: i.resolved_at, resolved_by_name: i.resolved_by_name, note: i.resolution_note || '', photos: i.resolution_photos || [], reopened_at: new Date().toISOString(), reopened_by_name: userName() }];
+      const patch = { status: 'open', resolved_at: null, resolved_by_name: null, resolution_note: null, resolution_photos: [], resolution_history: history };
       const { error } = await client().from('field_issues').update(patch).eq('id', id);
       if (error) { note(`❌ ${error.message}`); return; }
       Object.assign(i, patch); rerender(); return;
@@ -296,12 +298,13 @@
         <div class="fi-row-top"><strong>${esc(i.apt)}</strong><span class="fi-muted">${esc(i.building)}</span><span class="fi-chip">${esc(i.issue_type)}</span>${isOld(i) ? `<span class="fi-chip" style="background:#FEE2E2;color:#991B1B;">⚠ ${daysOpen(i)} days open</span>` : ''}<span class="fi-status">${i._pending ? '📴 Pending upload' : i.status === 'resolved' ? '✓ Resolved' : 'Open'}</span></div>
         <div class="fi-comment">${i.description ? esc(i.description) : '<span class="fi-muted">No comment</span>'}</div>
         <div class="fi-muted fi-small">${esc(i.created_by_name || '')} · ${fmt(i.created_at)}</div>
+        ${(i.resolution_history || []).length ? `<div class="fi-muted fi-small">↺ Reopened ${i.resolution_history.length}×: ${i.resolution_history.map(h => `closed ${fmt(h.resolved_at)} by ${esc(h.resolved_by_name || '-')} (“${esc(h.note || '')}”), reopened ${fmt(h.reopened_at)} by ${esc(h.reopened_by_name || '-')}`).join(' · ')}</div>` : ''}
         ${i.status === 'resolved' && (i.resolution_note || (i.resolution_photos || []).length) ? `<div class="fi-resolution">✓ ${esc(i.resolution_note || '')} <span class="fi-muted fi-small">— ${esc(i.resolved_by_name || '')} · ${fmt(i.resolved_at)}</span></div>` : ''}
         <div class="fi-thumbs" id="fiPh-${i.id}" hidden>${[...(i.photos || []), ...(i.resolution_photos || [])].map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(typeof storageThumbnailUrl === 'function' ? storageThumbnailUrl(u) : u)}" data-full="${esc(u)}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
       </div>
       <div class="fi-row-actions">
         ${(i.photos || []).length + (i.resolution_photos || []).length ? `<button type="button" class="fi-icon" title="Show photos" onclick="fiTogglePhotos('${i.id}')">📷 ${(i.photos || []).length + (i.resolution_photos || []).length}</button>` : ''}
-        <button type="button" class="fi-icon" title="${i.status === 'resolved' ? 'Reopen' : 'Resolve'}" onclick="fiResolve('${i.id}')">${i.status === 'resolved' ? '↺' : '✓'}</button>
+        ${canManageReport() ? `<button type="button" class="fi-icon" title="${i.status === 'resolved' ? 'Reopen' : 'Resolve'}" onclick="fiResolve('${i.id}')">${i.status === 'resolved' ? '↺' : '✓'}</button>` : ''}
         <button type="button" class="fi-icon" title="Download photos" onclick="fiDownload('${i.id}')">⬇</button>
         <button type="button" class="fi-icon" title="Edit" onclick="fiEdit('${i.id}')">✏️</button>
         <button type="button" class="fi-icon fi-del" title="Delete" onclick="fiDelete('${i.id}')">🗑</button>

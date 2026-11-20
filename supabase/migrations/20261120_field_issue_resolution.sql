@@ -24,3 +24,4 @@ create policy fi_report_settings_rw on public.field_issue_report_settings for al
   using (current_profile_role() = 'admin' or has_project_access(project_id, array['admin','pm']))
   with check (current_profile_role() = 'admin' or has_project_access(project_id, array['admin','pm']));
 select 'weekly report settings ready' as result;
+alter table public.field_issues add column if not exists resolution_history jsonb not null default '[]'::jsonb;
