@@ -10467,13 +10467,13 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     function photoLocationText() { try { return [getProjectName(), getProjectAddress()].filter(Boolean).join(' · '); } catch (_) { return ''; } }
     function photoLocationHeight(canvas) {
       if (!photoLocationText()) return 0;
-      const fs = Math.max(14, Math.round(canvas.width / 70)), size = Math.max(13, Math.round(canvas.width / 60));
+      const fs = Math.max(14, Math.round(canvas.width / 70)), size = Math.max(11, Math.round(canvas.width / 85));
       return size + Math.round(Math.max(8, Math.round(fs * 0.55)) * 0.9);
     }
     function drawPhotoLocation(ctx, canvas) {
       const loc = photoLocationText(); if (!loc) return 0;
       const fs = Math.max(14, Math.round(canvas.width / 70)), padding = Math.max(8, Math.round(fs * 0.55));
-      const locSize = Math.max(13, Math.round(canvas.width / 60)), locH = photoLocationHeight(canvas);
+      const locSize = Math.max(11, Math.round(canvas.width / 85)), locH = photoLocationHeight(canvas);
       const cy = canvas.height - 4 - locH / 2, r = locSize * 0.38, px = 4 + padding * 0.6 + r;
       ctx.save(); ctx.textBaseline = 'middle';
       ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = Math.max(2, locSize / 6);
