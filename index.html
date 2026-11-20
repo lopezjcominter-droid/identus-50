@@ -2112,13 +2112,22 @@ Object.assign(APP_TRANSLATIONS.en, {
         return true;
       } catch (error) { console.error('Quantity Control Supabase save failed', error); quantitySuccessToast(`❌ Quantity Control could not be saved to Supabase: ${String(error?.message || error || 'connection error').slice(0, 220)}`); return false; }
     }
+    let quantityRemoteLoadingUnitOnly = false;
     async function quantityHydrateRemote(options = {}) {
-      if (quantityUsesLocalStorage() || quantityRemoteLoading) return quantityRemoteLoading;
       const unitOnly = options.unitId != null;
+      if (quantityUsesLocalStorage()) return quantityRemoteLoading;
+      // A unit-only load in progress does not bring plans/contours: wait for it, then do the full load.
+      if (quantityRemoteLoading) {
+        if (unitOnly || !quantityRemoteLoadingUnitOnly) return quantityRemoteLoading;
+        return Promise.resolve(quantityRemoteLoading).catch(() => {}).then(() => quantityRemoteReady ? true : quantityHydrateRemote(options));
+      }
+      quantityRemoteLoadingUnitOnly = unitOnly;
       const unitIdFilter = unitOnly ? `&unit_id=eq.${encodeURIComponent(options.unitId)}` : '';
       const unitTypeFilter = unitOnly && options.unitType ? `&unit_type=eq.${encodeURIComponent(options.unitType)}` : '';
       quantityRemoteLoading = (async () => {
         try {
+          // Plans and contours are matched to buildings through the unit list: wait for it (up to 20 s).
+          for (let t = 0; !unitOnly && !(Array.isArray(data) && data.length) && t < 40; t++) await new Promise(r => setTimeout(r, 500));
           const headers = await quantityAuthHeaders(); const q = async path => { const r = await withTimeout(proxyFetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers }), 12000, 'Quantity Control request'); if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`); return r.json(); };
           if (quantitySystemColumns == null) quantitySystemColumns = await quantityDetectSystemColumns(headers);
           const systemColumn = quantitySystemColumns ? ',system' : '';
@@ -9961,7 +9970,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         <section><h2>2. Quality inspections</h2>${types.length ? `<table><tr><th>Inspection</th><th>Result</th><th>Date</th><th>Inspector</th><th>Rev.</th></tr>${types.map(t => { const rs = records.filter(r => r.typeId === t.id); const r = rs[rs.length - 1]; return `<tr><td><b>${e(t.name)}</b></td><td>${r ? (r.failedCount > 0 ? pill(`FAILED (${r.failedCount})`, '#DC2626') : pill('PASSED', '#059669')) : pill('PENDING', '#D97706')}</td><td>${r ? d(r.date) : '—'}</td><td>${r ? e(r.inspector) : '—'}</td><td>${r ? rs.length : '—'}</td></tr>${r && r.failedCount > 0 ? `<tr><td colspan="5" class="fail">${(r.items || []).filter(i => i.status === 'FAIL').map(i => `• ${e(i.description)}${i.comment ? ' — ' + e(i.comment) : ''}`).join('<br>')}</td></tr>` : ''}`; }).join('')}</table>` : '<p class="muted">No inspections apply.</p>'}</section>
         <section><h2>3. Official Final inspection</h2>${off ? `<table><tr><th>Result</th><th>Date</th><th>Inspector</th><th>Agency</th><th>Certificate</th></tr><tr><td>${pill(off.result || '—', resColor(off.result))}</td><td>${d(off.date)}</td><td>${e(off.inspector || '—')}</td><td>${e(off.company || '—')}</td><td>${e(off.certificate || '—')}</td></tr></table>${off.comments ? `<p><b>Comments:</b> ${e(off.comments)}</p>` : ''}${off.reportUrl ? `<p><b>Report:</b> <a href="${e(off.reportUrl)}">${e(off.reportName || 'Open report')}</a></p>` : ''}${photoGrid(off.photoUrls || [])}` : '<p class="muted">Not recorded yet.</p>'}</section>
         <section><h2>4. Punch list</h2>${punches.length ? `<table><tr><th>Description</th><th>Priority</th><th>Status</th><th>Closed</th></tr>${punches.map(p => `<tr><td>${e(p.description)}</td><td>${e(p.priority || '')}</td><td>${pill(p.status || 'Open', p.status === 'Closed' ? '#059669' : '#D97706')}</td><td>${p.closedAt ? d(p.closedAt) + (p.closedBy ? ' · ' + e(p.closedBy) : '') : '—'}</td></tr>`).join('')}</table>` : '<p class="muted">No punch items.</p>'}</section>
-        <section><h2>5. Field issues</h2>${issues.length ? `<table><tr><th>Type</th><th>Comment</th><th>Reported</th><th>Status</th></tr>${issues.map(i => `<tr><td>${e(i.issue_type)}</td><td>${e(i.description || '')}</td><td>${d(i.created_at)} · ${e(i.created_by_name || '')}</td><td>${pill(i.status === 'resolved' ? 'Resolved' : 'Open', i.status === 'resolved' ? '#059669' : '#D97706')}</td></tr>`).join('')}</table>` : '<p class="muted">No field issues.</p>'}</section>
+        <section><h2>5. Field issues</h2>${issues.length ? `<table><tr><th>Type</th><th>Comment</th><th>Reported</th><th>Status</th></tr>${issues.map(i => `<tr><td>${e(i.issue_type)}</td><td>${e(i.description || '')}</td><td>${d(i.created_at)} · ${e(i.created_by_name || '')}</td><td>${pill(i.status === 'resolved' ? 'Resolved' : 'Open', i.status === 'resolved' ? '#059669' : '#D97706')}</td></tr>${i.status === 'resolved' && (i.resolution_note || (i.resolution_photos || []).length) ? `<tr><td colspan="4" style="background:#F0FDF4;"><b>Resolution</b> · ${d(i.resolved_at)} · ${e(i.resolved_by_name || '')}: ${e(i.resolution_note || '')}${(i.resolution_photos || []).length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">${i.resolution_photos.map(u => `<img src="${e(u)}" style="width:150px;height:110px;object-fit:cover;border-radius:4px;border:1px solid #E2E8F0;">`).join('')}</div>` : ''}</td></tr>` : ''}`).join('')}</table>` : '<p class="muted">No field issues.</p>'}</section>
         <section><h2>6. Photo record</h2>${systems.map(([n, s]) => { const urls = (s.events || []).flatMap(x => x.images || []).filter(u => u && !String(u).startsWith('data:')).slice(-8); return urls.length ? `<div style="break-inside:avoid"><b>${e(n)}</b>${photoGrid(urls)}</div>` : ''; }).join('') || '<p class="muted">No photos.</p>'}</section>
         <div class="sig"><div>QA/QC Manager — name, signature, date</div><div>General Contractor — name, signature, date</div></div>
         </body></html>`;
