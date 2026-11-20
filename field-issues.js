@@ -334,24 +334,24 @@
 
   // ---------- weekly e-mail report (settings; admins/PMs only) ----------
   const canManageReport = () => window.userRole === 'admin' || window.userRole === 'pm';
-  const DEFAULT_SUBJECT = '{proyecto} – Reporte Semanal de Field Issues | {fecha}';
-  const DEFAULT_BODY = `Buenas tardes,
+  const DEFAULT_SUBJECT = '{project} – Weekly Field Issues Report | Week Ending {date}';
+  const DEFAULT_BODY = `Good afternoon,
 
-Adjunto el reporte semanal de Field Issues del proyecto {proyecto}.
+Please find attached the weekly Field Issues report for {project}, covering the week ending {date}.
 
-• Resueltos esta semana: {resueltos_semana}
-• Pendientes: {abiertos}
-• Más de 7 días abiertos: {mas_de_7_dias}
+• Resolved this week: {resolved_week}
+• Open: {open_count}
+• Open for more than 7 days: {old_count}
 
-El reporte incluye el detalle y las fotos de cada issue. Agradecemos su apoyo para coordinar el cierre de los pendientes.
+The report includes the details and photos of each item. We appreciate your support in coordinating the closure of the open items.
 
-Saludos cordiales,
+Best regards,
 
-{nombre_remitente}
-{cargo} | {empresa}
-{teléfono}`;
+Aireko QA/QC Automated System
+
+This is an automated message. Please do not reply to this e-mail. For questions, contact {contact_email}.`;
   const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const reportDefaults = () => ({ enabled: false, weekday: 5, send_time: '18:00', timezone: 'America/New_York', recipients: '', subject: DEFAULT_SUBJECT, body: DEFAULT_BODY, sender_name: userName(), sender_title: '', company: '', sender_phone: '' });
+  const reportDefaults = () => ({ enabled: false, weekday: 5, send_time: '18:00', timezone: 'America/New_York', recipients: '', subject: DEFAULT_SUBJECT, body: DEFAULT_BODY, sender_name: 'Aireko QA/QC Automated System', sender_title: '', company: 'Aireko', sender_phone: '' });
   window.fiReportSettings = async () => {
     if (!canManageReport()) { note('Admins or PMs only'); return; }
     const { data, error } = await client().from('field_issue_report_settings').select('*').eq('project_id', pid()).maybeSingle();
@@ -371,13 +371,27 @@ Saludos cordiales,
         ${inp('fiRepSubject', 'Subject', r.subject)}
         <label>Body<textarea id="fiRepBody" class="form-input" rows="12">${esc(r.body)}</textarea></label>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          ${inp('fiRepName', 'Sender name', r.sender_name)}${inp('fiRepTitle', 'Title', r.sender_title)}
-          ${inp('fiRepCompany', 'Company', r.company)}${inp('fiRepPhone', 'Phone', r.sender_phone)}
+          ${inp('fiRepName', 'Sender', r.sender_name, 'readonly')}${inp('fiRepTitle', 'Contact e-mail for questions', r.sender_title, 'type="email"')}
         </div>
-        <div class="fi-muted fi-small">Fields: {proyecto} {fecha} {resueltos_semana} {abiertos} {mas_de_7_dias} {nombre_remitente} {cargo} {empresa} {teléfono}. The PDF of open issues is attached.${r.last_sent_at ? ' Last sent: ' + fmt(r.last_sent_at) : ''}</div>
-        <div class="fi-modal-actions"><button type="button" class="btn btn-secondary" onclick="fiReportDefaults()">Restore default text</button><button type="button" class="btn btn-secondary" onclick="document.getElementById('fiReportModal').remove()">Cancel</button><button type="button" class="btn btn-primary" onclick="fiReportSave(this)">Save</button></div>
+        <div class="fi-muted fi-small">Fields: {project} {date} {resolved_week} {open_count} {old_count} {contact_email}. Only this project's issues are included; the PDF report is attached.${r.last_sent_at ? ' Last sent: ' + fmt(r.last_sent_at) : ''}</div>
+        <div class="fi-modal-actions" style="flex-wrap:wrap"><button type="button" class="btn btn-secondary" onclick="fiReportRun('pdf', this)">📄 Preview PDF</button><button type="button" class="btn btn-secondary" onclick="fiReportRun('test', this)">✉ Send test to me</button><button type="button" class="btn btn-secondary" onclick="fiReportDefaults()">Restore default text</button><button type="button" class="btn btn-secondary" onclick="document.getElementById('fiReportModal').remove()">Cancel</button><button type="button" class="btn btn-primary" onclick="fiReportSave(this)">Save</button></div>
       </div>`;
     document.body.appendChild(m);
+  };
+  // Preview the PDF or e-mail a test to yourself (uses the saved settings: save first).
+  window.fiReportRun = async (action, btn) => {
+    const old = btn.textContent; btn.disabled = true; btn.textContent = 'Working…';
+    try {
+      const { data: { session } } = await client().auth.getSession();
+      const r = await fetch('/.netlify/functions/fi-report', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action, projectId: pid() }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      if (action === 'pdf') {
+        const bytes = Uint8Array.from(atob(j.pdf), c => c.charCodeAt(0));
+        window.open(URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })), '_blank');
+      } else note(`✅ Test sent to ${j.sentTo}`);
+    } catch (e) { note(`❌ ${e.message}`); }
+    finally { btn.disabled = false; btn.textContent = old; }
   };
   window.fiReportDefaults = () => { document.getElementById('fiRepSubject').value = DEFAULT_SUBJECT; document.getElementById('fiRepBody').value = DEFAULT_BODY; };
   window.fiReportSave = async btn => {
@@ -389,7 +403,7 @@ Saludos cordiales,
     if (on && !recipients.length) { note('Add at least one recipient'); return; }
     if (!v('fiRepSubject') || !v('fiRepBody')) { note('Subject and body are required'); return; }
     btn.disabled = true;
-    const row = { project_id: pid(), enabled: on, weekday: Number(v('fiRepDay')), send_time: v('fiRepTime') || '18:00', timezone: 'America/New_York', recipients: recipients.join(', '), subject: v('fiRepSubject'), body: document.getElementById('fiRepBody').value, sender_name: v('fiRepName'), sender_title: v('fiRepTitle'), company: v('fiRepCompany'), sender_phone: v('fiRepPhone'), updated_by_name: userName(), updated_at: new Date().toISOString() };
+    const row = { project_id: pid(), enabled: on, weekday: Number(v('fiRepDay')), send_time: v('fiRepTime') || '18:00', timezone: 'America/New_York', recipients: recipients.join(', '), subject: v('fiRepSubject'), body: document.getElementById('fiRepBody').value, sender_name: 'Aireko QA/QC Automated System', sender_title: v('fiRepTitle'), company: 'Aireko', sender_phone: '', updated_by_name: userName(), updated_at: new Date().toISOString() };
     const { error } = await client().from('field_issue_report_settings').upsert(row, { onConflict: 'project_id' });
     btn.disabled = false;
     if (error) { note(`❌ ${error.message}`); return; }
