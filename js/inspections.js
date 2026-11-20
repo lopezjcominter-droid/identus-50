@@ -2224,10 +2224,12 @@ function stampPhotoDataUrl(dataUrl, inspector) {
       const padding = Math.max(8, Math.round(fontSize * .55));
       ctx.font = `600 ${fontSize}px Arial, sans-serif`;
       const boxHeight = fontSize + padding * 2;
+      const lh = typeof photoLocationHeight === 'function' ? photoLocationHeight(canvas) : 0;
       ctx.fillStyle = 'rgba(0,0,0,.72)';
-      ctx.fillRect(4, canvas.height - boxHeight - 4, canvas.width - 8, boxHeight);
+      ctx.fillRect(4, canvas.height - boxHeight - 4 - lh, canvas.width - 8, boxHeight);
       ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle';
-      ctx.fillText(text, 4 + padding, canvas.height - boxHeight / 2 - 4);
+      ctx.fillText(text, 4 + padding, canvas.height - boxHeight / 2 - 4 - lh);
+      if (lh) drawPhotoLocation(ctx, canvas);
       resolve(canvas.toDataURL('image/jpeg', .82));
     };
     img.onerror = () => reject(new Error('Failed to read image'));
