@@ -403,8 +403,14 @@ This is an automated message. Please do not reply to this e-mail. For questions,
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       if (action === 'pdf') {
         const bytes = Uint8Array.from(atob(j.pdf), c => c.charCodeAt(0));
-        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = j.filename || 'Field_Issues.pdf';
-        document.body.appendChild(a); a.click(); a.remove(); note('📄 PDF downloaded');
+        // Show it inside the page (no pop-up to block), with a download button.
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        document.getElementById('fiPdfPreview')?.remove();
+        const v = document.createElement('div'); v.id = 'fiPdfPreview'; v.className = 'fi-modal'; v.style.zIndex = '10001';
+        v.innerHTML = `<div class="fi-modal-box" style="width:min(900px,100%);height:90vh;grid-template-rows:auto 1fr">
+            <div style="display:flex;gap:8px;align-items:center"><strong style="flex:1">${esc(j.filename || 'Report')}</strong><a class="btn btn-primary" href="${url}" download="${esc(j.filename || 'Field_Issues.pdf')}">⬇ Download</a><button type="button" class="btn btn-secondary" onclick="document.getElementById('fiPdfPreview').remove()">Close</button></div>
+            <iframe src="${url}" title="Report preview" style="width:100%;height:100%;border:1px solid #E2E8F0;border-radius:8px"></iframe></div>`;
+        document.body.appendChild(v);
       } else note(`✅ Test sent to ${j.sentTo}`);
     } catch (e) { note(`❌ ${e.message}`); }
     finally { btn.disabled = false; btn.textContent = old; }
