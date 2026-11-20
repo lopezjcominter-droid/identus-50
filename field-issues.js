@@ -374,9 +374,24 @@ This is an automated message. Please do not reply to this e-mail. For questions,
           ${inp('fiRepName', 'Sender', r.sender_name, 'readonly')}${inp('fiRepTitle', 'Contact e-mail for questions', r.sender_title, 'type="email"')}
         </div>
         <div class="fi-muted fi-small">Fields: {project} {date} {resolved_week} {open_count} {old_count} {contact_email}. Only this project's issues are included; the PDF report is attached.${r.last_sent_at ? ' Last sent: ' + fmt(r.last_sent_at) : ''}</div>
-        <div class="fi-modal-actions"><button type="button" class="btn btn-secondary" onclick="fiReportDefaults()">Restore default text</button><button type="button" class="btn btn-secondary" onclick="document.getElementById('fiReportModal').remove()">Cancel</button><button type="button" class="btn btn-primary" onclick="fiReportSave(this)">Save</button></div>
+        <div class="fi-modal-actions" style="flex-wrap:wrap"><button type="button" class="btn btn-secondary" onclick="fiReportRun('pdf', this)">📄 Preview PDF</button><button type="button" class="btn btn-secondary" onclick="fiReportRun('test', this)">✉ Send test to me</button><button type="button" class="btn btn-secondary" onclick="fiReportDefaults()">Restore default text</button><button type="button" class="btn btn-secondary" onclick="document.getElementById('fiReportModal').remove()">Cancel</button><button type="button" class="btn btn-primary" onclick="fiReportSave(this)">Save</button></div>
       </div>`;
     document.body.appendChild(m);
+  };
+  // Preview the PDF or e-mail a test to yourself (uses the saved settings: save first).
+  window.fiReportRun = async (action, btn) => {
+    const old = btn.textContent; btn.disabled = true; btn.textContent = 'Working…';
+    try {
+      const { data: { session } } = await client().auth.getSession();
+      const r = await fetch('/.netlify/functions/fi-report', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action, projectId: pid() }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      if (action === 'pdf') {
+        const bytes = Uint8Array.from(atob(j.pdf), c => c.charCodeAt(0));
+        window.open(URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })), '_blank');
+      } else note(`✅ Test sent to ${j.sentTo}`);
+    } catch (e) { note(`❌ ${e.message}`); }
+    finally { btn.disabled = false; btn.textContent = old; }
   };
   window.fiReportDefaults = () => { document.getElementById('fiRepSubject').value = DEFAULT_SUBJECT; document.getElementById('fiRepBody').value = DEFAULT_BODY; };
   window.fiReportSave = async btn => {
