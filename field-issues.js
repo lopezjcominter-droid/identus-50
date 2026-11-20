@@ -234,7 +234,22 @@
 
   // Professional PDF report (print to PDF): header, summary and one block per
   // issue with its photos — same style as the Punch List report.
-  window.fiExportPdf = () => {
+  window.fiExportPdf = async (btn) => {
+    // Project view: the full weekly-style report (logo, summary, open issues with photos, resolved with proof).
+    if (!currentUnit && client()) {
+      const b = btn || document.activeElement; const old = b?.textContent; if (b) { b.disabled = true; b.textContent = 'Preparing…'; }
+      try {
+        const { data: { session } } = await client().auth.getSession();
+        const r = await fetch('/.netlify/functions/fi-report', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action: 'pdf', projectId: pid() }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(j.pdf), c => c.charCodeAt(0))], { type: 'application/pdf' }));
+        const a = document.createElement('a'); a.href = url; a.download = j.filename; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        return;
+      } catch (e) { note(`❌ ${e.message}`); return; }
+      finally { if (b) { b.disabled = false; b.textContent = old; } }
+    }
     const rows = visible(currentUnit);
     if (!rows.length) { note('No issues to export'); return; }
     const project = (document.querySelector('.project-name, #projectNameLabel')?.textContent || document.title || 'Identus 50').trim();
@@ -329,7 +344,7 @@
   const toolbar = () => `<div class="fi-toolbar">
       ${['open', 'resolved', 'all'].map(f => `<button type="button" class="btn ${filter === f ? 'btn-primary' : 'btn-secondary'}" onclick="fiFilter('${f}')">${f === 'open' ? 'Open' : f === 'resolved' ? 'Resolved' : 'All'} (${issues.filter(i => f === 'all' || i.status === f).length})</button>`).join('')}
       <input type="search" class="form-input fi-search" id="fiSearch" name="fi-filter-${Date.now()}" placeholder="Search unit or type" autocomplete="off" autocapitalize="none" spellcheck="false" role="searchbox" aria-autocomplete="none" data-form-type="other" data-lpignore="true" data-1p-ignore="true" readonly onpointerdown="this.removeAttribute('readonly')" onkeydown="this.removeAttribute('readonly')" value="${esc(search)}" oninput="fiSearchInput(this.value)">
-      <button type="button" class="btn btn-secondary" onclick="fiExportPdf()">📄 Export PDF</button><button type="button" class="btn btn-secondary" onclick="fiExport()" title="Spreadsheet with photo links">⬇ Excel</button>${canManageReport() ? '<button type="button" class="btn btn-secondary" onclick="fiReportSettings()" title="Weekly e-mail report (admins/PMs)">✉ Weekly e-mail</button>' : ''}
+      <button type="button" class="btn btn-secondary" onclick="fiExportPdf(this)">📄 Export PDF</button><button type="button" class="btn btn-secondary" onclick="fiExport()" title="Spreadsheet with photo links">⬇ Excel</button>${canManageReport() ? '<button type="button" class="btn btn-secondary" onclick="fiReportSettings()" title="Weekly e-mail report (admins/PMs)">✉ Weekly e-mail</button>' : ''}
     </div>`;
 
   // ---------- weekly e-mail report (settings; admins/PMs only) ----------
@@ -383,12 +398,19 @@ This is an automated message. Please do not reply to this e-mail. For questions,
     const old = btn.textContent; btn.disabled = true; btn.textContent = 'Working…';
     try {
       const { data: { session } } = await client().auth.getSession();
-      const r = await fetch('/.netlify/functions/fi-report', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action, projectId: pid() }) });
+      const r = await fetch('/.netlify/functions/fi-report', { method: 'POST', signal: AbortSignal.timeout(30000), headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action, projectId: pid() }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       if (action === 'pdf') {
         const bytes = Uint8Array.from(atob(j.pdf), c => c.charCodeAt(0));
-        window.open(URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })), '_blank');
+        // Show it inside the page (no pop-up to block), with a download button.
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        document.getElementById('fiPdfPreview')?.remove();
+        const v = document.createElement('div'); v.id = 'fiPdfPreview'; v.className = 'fi-modal'; v.style.zIndex = '10001';
+        v.innerHTML = `<div class="fi-modal-box" style="width:min(900px,100%);height:90vh;grid-template-rows:auto 1fr">
+            <div style="display:flex;gap:8px;align-items:center"><strong style="flex:1">${esc(j.filename || 'Report')}</strong><a class="btn btn-primary" href="${url}" download="${esc(j.filename || 'Field_Issues.pdf')}">⬇ Download</a><button type="button" class="btn btn-secondary" onclick="document.getElementById('fiPdfPreview').remove()">Close</button></div>
+            <iframe src="${url}" title="Report preview" style="width:100%;height:100%;border:1px solid #E2E8F0;border-radius:8px"></iframe></div>`;
+        document.body.appendChild(v);
       } else note(`✅ Test sent to ${j.sentTo}`);
     } catch (e) { note(`❌ ${e.message}`); }
     finally { btn.disabled = false; btn.textContent = old; }
