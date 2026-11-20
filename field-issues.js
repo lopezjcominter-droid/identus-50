@@ -313,11 +313,11 @@
         <div class="fi-muted fi-small">${esc(i.created_by_name || '')} · ${fmt(i.created_at)}</div>
         ${(i.resolution_history || []).length ? `<div class="fi-muted fi-small">↺ Reopened ${i.resolution_history.length}×: ${i.resolution_history.map(h => `closed ${fmt(h.resolved_at)} by ${esc(h.resolved_by_name || '-')} (“${esc(h.note || '')}”), reopened ${fmt(h.reopened_at)} by ${esc(h.reopened_by_name || '-')}`).join(' · ')}</div>` : ''}
         ${i.status === 'resolved' && (i.resolution_note || (i.resolution_photos || []).length) ? `<div class="fi-resolution">✓ ${esc(i.resolution_note || '')} <span class="fi-muted fi-small">— ${esc(i.resolved_by_name || '')} · ${fmt(i.resolved_at)}</span></div>` : ''}
-        <div class="fi-thumbs" id="fiPh-${i.id}" hidden>${[...(i.photos || []), ...(i.resolution_photos || [])].map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(typeof storageThumbnailUrl === 'function' ? storageThumbnailUrl(u) : u)}" data-full="${esc(u)}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
+        <div class="fi-thumbs" id="fiPh-${i.id}" hidden>${[...(i.photos || []), ...(i.resolution_photos || [])].map((u, k, arr) => `<a href="${esc(u)}" onclick="event.preventDefault();fiLightbox(${esc(JSON.stringify(arr))},${k})"><img src="${esc(typeof storageThumbnailUrl === 'function' ? storageThumbnailUrl(u) : u)}" data-full="${esc(u)}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
       </div>
       <div class="fi-row-actions">
         ${(i.photos || []).length + (i.resolution_photos || []).length ? `<button type="button" class="fi-icon" title="Show photos" onclick="fiTogglePhotos('${i.id}')">📷 ${(i.photos || []).length + (i.resolution_photos || []).length}</button>` : ''}
-        ${canManageReport() ? `<button type="button" class="fi-icon ${i.status === 'resolved' ? 'fi-reopen' : 'fi-resolve'}" title="${i.status === 'resolved' ? 'Reopen this issue' : 'Close this issue with proof'}" onclick="fiResolve('${i.id}')">${i.status === 'resolved' ? '↺ Reopen' : '✓ Resolve'}</button>` : ''}
+        ${canManageReport() ? `<button type="button" class="fi-icon fi-state" title="${i.status === 'resolved' ? 'Resolved · click to reopen' : 'Pending · click to resolve with proof'}" aria-label="${i.status === 'resolved' ? 'Reopen' : 'Resolve'}" onclick="fiResolve('${i.id}')">${i.status === 'resolved' ? '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="display:block"><circle cx="12" cy="12" r="10" fill="#16A34A"/><path d="M7.5 12.5l3 3 6-6.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="display:block"><circle cx="12" cy="12" r="10" fill="#F59E0B"/><path d="M12 7v5.5l3.2 2" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'}</button>` : ''}
         <button type="button" class="fi-icon fi-dl" title="Download photos" aria-label="Download photos" onclick="fiDownload('${i.id}')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:block"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 19h14"/></svg></button>
         <button type="button" class="fi-icon" title="Edit" onclick="fiEdit('${i.id}')">✏️</button>
         <button type="button" class="fi-icon fi-del" title="Delete" onclick="fiDelete('${i.id}')">🗑</button>
@@ -481,9 +481,41 @@ This is an automated message. Please do not reply to this e-mail. For questions,
   .fi-row.fi-resolved{border-left-color:#16A34A;opacity:.8}.fi-row-main{flex:1;min-width:0;display:grid;gap:3px}
   .fi-row-top{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px}.fi-comment{font-size:14px;font-weight:600;color:#0F172A;overflow-wrap:anywhere}
   .fi-muted{color:#64748B}.fi-small{font-size:11px}.fi-row-actions{display:flex;gap:4px;flex-shrink:0}
-  .fi-icon{border:1px solid #E2E8F0;background:#F8FAFC;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;white-space:nowrap}.fi-icon:hover{background:#EFF6FF}.fi-del:hover{background:#FEE2E2}.fi-resolve{background:#DCFCE7;border-color:#86EFAC;color:#166534;font-weight:600}.fi-resolve:hover{background:#BBF7D0}.fi-reopen{background:#FEF3C7;border-color:#FCD34D;color:#92400E;font-weight:600}.fi-reopen:hover{background:#FDE68A}.fi-dl{display:inline-flex;align-items:center;justify-content:center;padding:4px 7px;background:#DBEAFE;border-color:#93C5FD;color:#1E40AF;font-weight:600}.fi-dl:hover{background:#BFDBFE}
+  .fi-icon{border:1px solid #E2E8F0;background:#F8FAFC;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;white-space:nowrap}.fi-icon:hover{background:#EFF6FF}.fi-del:hover{background:#FEE2E2}.fi-resolve{background:#DCFCE7;border-color:#86EFAC;color:#166534;font-weight:600}.fi-resolve:hover{background:#BBF7D0}.fi-reopen{background:#FEF3C7;border-color:#FCD34D;color:#92400E;font-weight:600}.fi-reopen:hover{background:#FDE68A}.fi-dl{display:inline-flex;align-items:center;justify-content:center;padding:4px 7px;background:#fff;border-color:#93C5FD;color:#1D4ED8}.fi-dl:hover{background:#EFF6FF}.fi-state{display:inline-flex;align-items:center;justify-content:center;padding:3px 6px;background:#fff}.fi-state:hover{background:#F8FAFC}
   .fi-unit-pick{position:relative}.fi-unit-results{display:none;position:absolute;left:0;right:0;top:100%;z-index:50;max-height:240px;overflow:auto;background:#fff;border:1px solid #CBD5E1;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.12)}
   .fi-unit-results button{display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:#fff;font-size:13px;cursor:pointer}.fi-unit-results button:hover{background:#EFF6FF}
   .fi-wrap{max-width:900px}`;
   document.head.appendChild(css);
 })();
+
+// Photo lightbox: in-page preview with prev/next arrows and download
+window.fiLightbox = function (urls, idx) {
+  let i = idx || 0; document.getElementById('fiLb')?.remove();
+  const d = document.createElement('div'); d.id = 'fiLb';
+  d.innerHTML = `<div class="fi-lb-top"><span id="fiLbN"></span><button type="button" class="fi-lb-b" id="fiLbDl" title="Download"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 19h14"/></svg></button><button type="button" class="fi-lb-b" id="fiLbX" title="Close">✕</button></div>
+    <button type="button" class="fi-lb-nav" id="fiLbP" title="Previous">‹</button><img id="fiLbImg" alt="Issue photo"><button type="button" class="fi-lb-nav" id="fiLbNx" title="Next">›</button>`;
+  document.body.appendChild(d);
+  const show = () => { document.getElementById('fiLbImg').src = urls[i]; document.getElementById('fiLbN').textContent = `${i + 1} / ${urls.length}`;
+    const many = urls.length > 1; document.getElementById('fiLbP').hidden = !many; document.getElementById('fiLbNx').hidden = !many; };
+  const go = n => { i = (i + n + urls.length) % urls.length; show(); };
+  const close = () => { d.remove(); document.removeEventListener('keydown', key); };
+  const key = e => { if (e.key === 'Escape') close(); else if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'ArrowRight') go(1); };
+  document.addEventListener('keydown', key);
+  d.onclick = e => { if (e.target === d) close(); };
+  document.getElementById('fiLbX').onclick = close;
+  document.getElementById('fiLbP').onclick = () => go(-1);
+  document.getElementById('fiLbNx').onclick = () => go(1);
+  document.getElementById('fiLbDl').onclick = async () => {
+    try { const b = await (await fetch(urls[i])).blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(b);
+      a.download = (urls[i].split('/').pop().split('?')[0]) || `photo-${i + 1}.jpg`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+    catch (_) { window.open(urls[i], '_blank'); } };
+  let x0 = null; d.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+  d.addEventListener('touchend', e => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1); x0 = null; });
+  show();
+};
+(function(){ const st = document.createElement('style'); st.textContent = `#fiLb{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.92);display:flex;align-items:center;justify-content:center}
+#fiLbImg{max-width:88vw;max-height:84vh;object-fit:contain;border-radius:6px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.fi-lb-top{position:absolute;top:12px;left:16px;right:16px;display:flex;align-items:center;gap:10px;color:#fff;font:600 14px system-ui}
+.fi-lb-top span{flex:1}.fi-lb-b{width:38px;height:38px;border-radius:50%;border:0;background:#fff;color:#1D4ED8;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px}
+#fiLbX{color:#0f172a}.fi-lb-nav{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;background:rgba(255,255,255,.9);font-size:30px;line-height:1;cursor:pointer;color:#0f172a}
+#fiLbP{left:16px}#fiLbNx{right:16px}`; document.head.appendChild(st); })();
