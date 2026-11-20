@@ -326,8 +326,73 @@
   const toolbar = () => `<div class="fi-toolbar">
       ${['open', 'resolved', 'all'].map(f => `<button type="button" class="btn ${filter === f ? 'btn-primary' : 'btn-secondary'}" onclick="fiFilter('${f}')">${f === 'open' ? 'Open' : f === 'resolved' ? 'Resolved' : 'All'} (${issues.filter(i => f === 'all' || i.status === f).length})</button>`).join('')}
       <input type="search" class="form-input fi-search" id="fiSearch" name="fi-filter-${Date.now()}" placeholder="Search unit or type" autocomplete="off" autocapitalize="none" spellcheck="false" role="searchbox" aria-autocomplete="none" data-form-type="other" data-lpignore="true" data-1p-ignore="true" readonly onpointerdown="this.removeAttribute('readonly')" onkeydown="this.removeAttribute('readonly')" value="${esc(search)}" oninput="fiSearchInput(this.value)">
-      <button type="button" class="btn btn-secondary" onclick="fiExportPdf()">📄 Export PDF</button><button type="button" class="btn btn-secondary" onclick="fiExport()" title="Spreadsheet with photo links">⬇ Excel</button>
+      <button type="button" class="btn btn-secondary" onclick="fiExportPdf()">📄 Export PDF</button><button type="button" class="btn btn-secondary" onclick="fiExport()" title="Spreadsheet with photo links">⬇ Excel</button>${canManageReport() ? '<button type="button" class="btn btn-secondary" onclick="fiReportSettings()" title="Weekly e-mail report (admins/PMs)">✉ Weekly e-mail</button>' : ''}
     </div>`;
+
+  // ---------- weekly e-mail report (settings; admins/PMs only) ----------
+  const canManageReport = () => window.userRole === 'admin' || window.userRole === 'pm';
+  const DEFAULT_SUBJECT = '{proyecto} – Reporte Semanal de Field Issues | {fecha}';
+  const DEFAULT_BODY = `Buenas tardes,
+
+Adjunto el reporte semanal de Field Issues del proyecto {proyecto}.
+
+• Resueltos esta semana: {resueltos_semana}
+• Pendientes: {abiertos}
+• Más de 7 días abiertos: {mas_de_7_dias}
+
+El reporte incluye el detalle y las fotos de cada issue. Agradecemos su apoyo para coordinar el cierre de los pendientes.
+
+Saludos cordiales,
+
+{nombre_remitente}
+{cargo} | {empresa}
+{teléfono}`;
+  const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const reportDefaults = () => ({ enabled: false, weekday: 5, send_time: '18:00', timezone: 'America/New_York', recipients: '', subject: DEFAULT_SUBJECT, body: DEFAULT_BODY, sender_name: userName(), sender_title: '', company: '', sender_phone: '' });
+  window.fiReportSettings = async () => {
+    if (!canManageReport()) { note('Admins or PMs only'); return; }
+    const { data, error } = await client().from('field_issue_report_settings').select('*').eq('project_id', pid()).maybeSingle();
+    if (error) { note(`❌ ${/relation|does not exist/i.test(error.message) ? 'run the field issue SQL in Supabase first' : error.message}`); return; }
+    const r = { ...reportDefaults(), ...(data || {}) };
+    document.getElementById('fiReportModal')?.remove();
+    const m = document.createElement('div'); m.id = 'fiReportModal'; m.className = 'fi-modal';
+    const inp = (id, label, val, extra = '') => `<label>${label}<input id="${id}" class="form-input" value="${esc(val || '')}" ${extra}></label>`;
+    m.innerHTML = `<div class="fi-modal-box" style="width:min(560px,100%)">
+        <h3>✉ Weekly Field Issues e-mail</h3>
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="fiRepOn" ${r.enabled ? 'checked' : ''}> Send automatically</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label>Day<select id="fiRepDay" class="form-select">${DAYS.map((d, k) => `<option value="${k}" ${Number(r.weekday) === k ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+          ${inp('fiRepTime', 'Time (Eastern)', r.send_time, 'type="time"')}
+        </div>
+        <label>Recipients (comma separated)<textarea id="fiRepTo" class="form-input" rows="2" placeholder="name@company.com, gc@company.com">${esc(r.recipients)}</textarea></label>
+        ${inp('fiRepSubject', 'Subject', r.subject)}
+        <label>Body<textarea id="fiRepBody" class="form-input" rows="12">${esc(r.body)}</textarea></label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          ${inp('fiRepName', 'Sender name', r.sender_name)}${inp('fiRepTitle', 'Title', r.sender_title)}
+          ${inp('fiRepCompany', 'Company', r.company)}${inp('fiRepPhone', 'Phone', r.sender_phone)}
+        </div>
+        <div class="fi-muted fi-small">Fields: {proyecto} {fecha} {resueltos_semana} {abiertos} {mas_de_7_dias} {nombre_remitente} {cargo} {empresa} {teléfono}. The PDF of open issues is attached.${r.last_sent_at ? ' Last sent: ' + fmt(r.last_sent_at) : ''}</div>
+        <div class="fi-modal-actions"><button type="button" class="btn btn-secondary" onclick="fiReportDefaults()">Restore default text</button><button type="button" class="btn btn-secondary" onclick="document.getElementById('fiReportModal').remove()">Cancel</button><button type="button" class="btn btn-primary" onclick="fiReportSave(this)">Save</button></div>
+      </div>`;
+    document.body.appendChild(m);
+  };
+  window.fiReportDefaults = () => { document.getElementById('fiRepSubject').value = DEFAULT_SUBJECT; document.getElementById('fiRepBody').value = DEFAULT_BODY; };
+  window.fiReportSave = async btn => {
+    const v = id => document.getElementById(id)?.value.trim() || '';
+    const recipients = v('fiRepTo').split(/[,;\s]+/).filter(Boolean);
+    const bad = recipients.filter(e => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+    if (bad.length) { note(`Check these e-mails: ${bad.join(', ')}`); return; }
+    const on = document.getElementById('fiRepOn').checked;
+    if (on && !recipients.length) { note('Add at least one recipient'); return; }
+    if (!v('fiRepSubject') || !v('fiRepBody')) { note('Subject and body are required'); return; }
+    btn.disabled = true;
+    const row = { project_id: pid(), enabled: on, weekday: Number(v('fiRepDay')), send_time: v('fiRepTime') || '18:00', timezone: 'America/New_York', recipients: recipients.join(', '), subject: v('fiRepSubject'), body: document.getElementById('fiRepBody').value, sender_name: v('fiRepName'), sender_title: v('fiRepTitle'), company: v('fiRepCompany'), sender_phone: v('fiRepPhone'), updated_by_name: userName(), updated_at: new Date().toISOString() };
+    const { error } = await client().from('field_issue_report_settings').upsert(row, { onConflict: 'project_id' });
+    btn.disabled = false;
+    if (error) { note(`❌ ${error.message}`); return; }
+    document.getElementById('fiReportModal')?.remove();
+    note(on ? `✅ Weekly e-mail on: ${DAYS[row.weekday]} ${row.send_time}` : 'Weekly e-mail saved (off)');
+  };
   // Used by the unit Closeout PDF.
   window.fiIssuesForUnit = async unit => { try { await load(); } catch (_) {} return issues.filter(i => i.apt === String(unit.apt) && (!unit.building || !i.building || i.building === unit.building)); };
   window.fiFilter = f => { filter = f; rerender(); };
