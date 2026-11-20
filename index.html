@@ -4148,6 +4148,121 @@ Object.assign(APP_TRANSLATIONS.en, {
       const a = quantityNormalizeContourPoints(left); const b = quantityNormalizeContourPoints(right);
       return a.length === b.length && a.every((point, index) => point[0] === b[index][0] && point[1] === b[index][1]);
     }
+    // ---- Floor/Site plan zoom (wheel, pinch, + / −, drag to pan) ----
+    // The plan keeps its light base drawing; when zoomed in, only the part on
+    // screen is drawn again from the original PDF at full screen resolution,
+    // so lines and text stay sharp at any zoom. Contours are vector (SVG).
+    let quantityFloorZoom = 1, quantityFloorPanX = 0, quantityFloorPanY = 0, quantityFloorViewKey = '';
+    let quantityFloorDetailTimer = null, quantityFloorDetailTask = null, quantityFloorDragged = false;
+    const quantityFloorPageCache = new Map();
+    function quantityFloorMedia() { return document.querySelector('#quantityFloorPlanBoard .quantity-plan-media'); }
+    function quantityFloorApplyView(planKey) {
+      const board = document.getElementById('quantityFloorPlanBoard'); const media = quantityFloorMedia();
+      if (!board || !media) return;
+      if (planKey !== quantityFloorViewKey) { quantityFloorViewKey = planKey; quantityFloorZoom = 1; quantityFloorPanX = 0; quantityFloorPanY = 0; }
+      if (!board.dataset.floorZoomBound) {
+        board.dataset.floorZoomBound = '1';
+        board.addEventListener('wheel', quantityFloorWheel, { passive: false });
+        board.addEventListener('pointerdown', quantityFloorPointerDown);
+        board.addEventListener('touchstart', quantityFloorTouchStart, { passive: false });
+        board.addEventListener('touchmove', quantityFloorTouchMove, { passive: false });
+        board.addEventListener('touchend', quantityFloorTouchEnd);
+        board.addEventListener('click', e => { if (quantityFloorDragged) { e.stopPropagation(); e.preventDefault(); quantityFloorDragged = false; } }, true);
+      }
+      if (!board.querySelector('.quantity-floor-zoom')) {
+        const bar = document.createElement('div'); bar.className = 'quantity-floor-zoom';
+        bar.style.cssText = 'position:absolute;right:8px;top:8px;z-index:5;display:flex;gap:4px;align-items:center;background:rgba(255,255,255,.92);border:1px solid #CBD5E1;border-radius:8px;padding:3px;box-shadow:0 2px 6px rgba(0,0,0,.12);';
+        const btn = (t, title, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = t; b.title = title; b.style.cssText = 'min-width:30px;height:28px;border:0;border-radius:6px;background:#EFF6FF;color:#1E3A8A;font-weight:700;cursor:pointer;'; b.onclick = e => { e.stopPropagation(); fn(); }; return b; };
+        const label = document.createElement('span'); label.className = 'quantity-floor-zoom-label'; label.style.cssText = 'font-size:11px;min-width:40px;text-align:center;color:#334155;';
+        bar.append(btn('−', 'Zoom out', () => quantityFloorZoomAt(1 / 1.5)), label, btn('+', 'Zoom in', () => quantityFloorZoomAt(1.5)), btn('↺', 'Fit plan', quantityFloorReset));
+        board.appendChild(bar);
+      }
+      media.style.transformOrigin = '0 0';
+      media.style.transform = `translate(${quantityFloorPanX}px, ${quantityFloorPanY}px) scale(${quantityFloorZoom})`;
+      media.style.setProperty('--qz-label', String(Math.max(0.3, Math.pow(quantityFloorZoom, -0.65))));
+      media.style.willChange = 'transform';
+      board.style.cursor = quantityFloorZoom > 1.01 ? 'grab' : '';
+      const label = board.querySelector('.quantity-floor-zoom-label'); if (label) label.textContent = `${Math.round(quantityFloorZoom * 100)}%`;
+      quantityFloorScheduleDetail();
+    }
+    function quantityFloorReset() { quantityFloorZoom = 1; quantityFloorPanX = 0; quantityFloorPanY = 0; quantityFloorApplyView(quantityFloorViewKey); }
+    // Zoom keeping the point under the pointer/fingers (or the board center) fixed.
+    function quantityFloorZoomAt(factor, clientX, clientY) {
+      const board = document.getElementById('quantityFloorPlanBoard'); const media = quantityFloorMedia(); if (!board || !media) return;
+      const next = Math.max(1, Math.min(16, quantityFloorZoom * factor)); const f = next / quantityFloorZoom; if (Math.abs(f - 1) < 0.001) return;
+      const br = board.getBoundingClientRect();
+      const px = (clientX ?? br.left + br.width / 2) - br.left - media.offsetLeft, py = (clientY ?? br.top + br.height / 2) - br.top - media.offsetTop;
+      quantityFloorPanX = px - (px - quantityFloorPanX) * f; quantityFloorPanY = py - (py - quantityFloorPanY) * f; quantityFloorZoom = next;
+      if (next <= 1.001) { quantityFloorPanX = 0; quantityFloorPanY = 0; }
+      quantityFloorApplyView(quantityFloorViewKey);
+    }
+    function quantityFloorWheel(e) {
+      if (!quantityFloorMedia()) return;
+      e.preventDefault();
+      quantityFloorZoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0025)), e.clientX, e.clientY);
+    }
+    function quantityFloorPointerDown(e) {
+      if (e.pointerType === 'touch' || quantityFloorZoom <= 1.01 || e.button !== 0 || e.target.closest('.quantity-floor-zoom')) return;
+      const sx = e.clientX, sy = e.clientY, px = quantityFloorPanX, py = quantityFloorPanY; let moved = false;
+      const move = ev => { const dx = ev.clientX - sx, dy = ev.clientY - sy; if (!moved && Math.hypot(dx, dy) < 4) return; moved = true; quantityFloorPanX = px + dx; quantityFloorPanY = py + dy; quantityFloorApplyView(quantityFloorViewKey); };
+      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); if (moved) quantityFloorDragged = true; };
+      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+    }
+    let quantityFloorTouch = null;
+    function quantityFloorTouchStart(e) {
+      if (!quantityFloorMedia()) return;
+      const t = e.touches;
+      if (t.length === 2) { e.preventDefault(); quantityFloorTouch = { pinch: true, d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY), cx: (t[0].clientX + t[1].clientX) / 2, cy: (t[0].clientY + t[1].clientY) / 2 }; }
+      else if (t.length === 1 && quantityFloorZoom > 1.01) quantityFloorTouch = { pinch: false, x: t[0].clientX, y: t[0].clientY, px: quantityFloorPanX, py: quantityFloorPanY, moved: false };
+    }
+    function quantityFloorTouchMove(e) {
+      const st = quantityFloorTouch; if (!st) return; const t = e.touches;
+      if (st.pinch && t.length === 2) {
+        e.preventDefault();
+        const d = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY); const cx = (t[0].clientX + t[1].clientX) / 2, cy = (t[0].clientY + t[1].clientY) / 2;
+        quantityFloorPanX += cx - st.cx; quantityFloorPanY += cy - st.cy;
+        quantityFloorZoomAt(d / st.d, cx, cy); st.d = d; st.cx = cx; st.cy = cy;
+      } else if (!st.pinch && t.length === 1) {
+        const dx = t[0].clientX - st.x, dy = t[0].clientY - st.y; if (!st.moved && Math.hypot(dx, dy) < 6) return;
+        e.preventDefault(); st.moved = true; quantityFloorPanX = st.px + dx; quantityFloorPanY = st.py + dy; quantityFloorApplyView(quantityFloorViewKey);
+      }
+    }
+    function quantityFloorTouchEnd(e) { if (quantityFloorTouch?.moved) quantityFloorDragged = true; if (!e.touches.length) quantityFloorTouch = null; }
+    async function quantityFloorPage(canvas) {
+      const key = canvas?.dataset?.pdfKey, source = canvas?.dataset?.pdf; if (!key || !source) return null;
+      if (!quantityFloorPageCache.has(key)) {
+        quantityFloorPageCache.clear(); // one plan at a time keeps memory low on iPad
+        quantityFloorPageCache.set(key, (async () => { const pdfjs = await quantityEnsurePdfJs(); pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; const pdf = await pdfjs.getDocument({ data: await quantityPdfBytes(key, source) }).promise; return pdf.getPage(1); })().catch(err => { quantityFloorPageCache.delete(key); throw err; }));
+      }
+      return quantityFloorPageCache.get(key);
+    }
+    function quantityFloorScheduleDetail() { clearTimeout(quantityFloorDetailTimer); quantityFloorDetailTimer = setTimeout(quantityFloorRenderDetail, 180); }
+    async function quantityFloorRenderDetail() {
+      const board = document.getElementById('quantityFloorPlanBoard'); const media = quantityFloorMedia(); const base = media?.querySelector('canvas.quantity-pdf-canvas');
+      try { quantityFloorDetailTask?.cancel(); } catch (_) {}
+      const old = media?.querySelector('canvas.quantity-floor-detail');
+      if (!board || !media || !base || quantityFloorZoom <= 1.05) { old?.remove(); return; }
+      const br = board.getBoundingClientRect(), mr = media.getBoundingClientRect();
+      const left = Math.max(br.left, mr.left), top = Math.max(br.top, mr.top), right = Math.min(br.right, mr.right), bottom = Math.min(br.bottom, mr.bottom);
+      if (right - left < 4 || bottom - top < 4) { old?.remove(); return; }
+      const z = quantityFloorZoom, dpr = Math.min(window.devicePixelRatio || 1, 3);
+      const bx = base.offsetLeft || 0, by = base.offsetTop || 0, bw = base.offsetWidth || media.offsetWidth;
+      const lx = (left - mr.left) / z, ly = (top - mr.top) / z, lw = (right - left) / z, lh = (bottom - top) / z;
+      try {
+        const page = await quantityFloorPage(base); if (!page || quantityFloorMedia() !== media) return;
+        const v1 = page.getViewport({ scale: 1 });
+        const scale = (bw / v1.width) * z * dpr;
+        const viewport = page.getViewport({ scale, offsetX: -(lx - bx) * z * dpr, offsetY: -(ly - by) * z * dpr });
+        const canvas = document.createElement('canvas'); canvas.className = 'quantity-floor-detail';
+        canvas.width = Math.ceil((right - left) * dpr); canvas.height = Math.ceil((bottom - top) * dpr);
+        canvas.style.cssText = `position:absolute;left:${lx}px;top:${ly}px;width:${lw}px;height:${lh}px;pointer-events:none;z-index:1;`;
+        const task = page.render({ canvasContext: canvas.getContext('2d', { alpha: false }), viewport }); quantityFloorDetailTask = task;
+        await task.promise;
+        if (quantityFloorMedia() !== media) return;
+        media.querySelector('canvas.quantity-floor-detail')?.remove();
+        const svg = media.querySelector('svg'); if (svg) { svg.style.position = svg.style.position || 'absolute'; svg.style.zIndex = '2'; media.insertBefore(canvas, svg); } else media.appendChild(canvas);
+      } catch (_) { /* replaced by a newer zoom/pan */ }
+    }
     function quantityPlanContourSvg(planKey, units) {
       // Coordinates are normalized from 0 to 100 so a custom template stays
       // aligned when the PDF scales on desktop, iPad, or phone.
@@ -5156,6 +5271,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (nextCanvas) nextCanvas.replaceWith(previousFloorCanvas);
         if (nextMedia && previousFloorMedia) nextMedia.style.cssText = previousFloorMedia.style.cssText;
       }
+      quantityFloorApplyView(floorPlanKey || planKey);
       if (selectedPlan?.type === 'application/pdf' && selectedPlan.dataUrl && !keepFloorCanvas) {
         // The floor plan is hidden behind the unit modal while a unit is open.
         // Rendering it there competed with the unit drawing for memory and

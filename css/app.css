@@ -1324,11 +1324,11 @@
 .quantity-plan-board > img, .quantity-plan-board > iframe, .quantity-plan-board > canvas { display:block; width:100%; height:100%; min-height:0; object-fit:contain; background:#fff; border:0; }
 .quantity-plan-board > canvas, .quantity-drawing-stage > canvas { width:auto; height:auto; min-width:0; min-height:0; max-width:100%; max-height:100%; margin:auto; }
 .quantity-plan-media { position:relative; width:100%; max-width:100%; aspect-ratio:1.4; margin:auto; background:#fff; }
-.quantity-plan-media > canvas { position:absolute; inset:0; width:100% !important; height:100% !important; max-width:none; max-height:none; }
+.quantity-plan-media > canvas:not(.quantity-floor-detail) { position:absolute; inset:0; width:100% !important; height:100% !important; max-width:none; max-height:none; }
 .quantity-plan-contours { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
 .quantity-plan-contour { fill:rgba(37,99,235,.06); stroke:#2563EB; stroke-width:.35; vector-effect:non-scaling-stroke; cursor:pointer; transition:fill .15s,stroke .15s; }
 .quantity-plan-contour:hover, .quantity-plan-contour:focus { fill:rgba(34,197,94,.28); stroke:#16A34A; stroke-width:.7; outline:none; }
-.quantity-plan-contour-label { font:600 2px Arial,sans-serif; fill:#1D4ED8; paint-order:stroke; stroke:#fff; stroke-width:.45px; stroke-linejoin:round; pointer-events:none; text-anchor:middle; dominant-baseline:middle; }
+.quantity-plan-contour-label { font:600 calc(2px * var(--qz-label, 1)) Arial,sans-serif; fill:#1D4ED8; paint-order:stroke; stroke:#fff; stroke-width:.45px; stroke-linejoin:round; pointer-events:none; text-anchor:middle; dominant-baseline:middle; }
     .quantity-plan-board > iframe, .quantity-drawing-board > iframe { pointer-events:none; }
 .quantity-plan-empty { min-height:460px; display:flex; align-items:center; justify-content:center; text-align:center; padding:28px; color:#64748B; }
 .quantity-plan-empty strong { display:block; color:#334155; margin-bottom:6px; }
@@ -1414,3 +1414,5 @@
 .quantity-modal-footer { padding:12px 16px; border-top:1px solid #E2E8F0; display:flex; justify-content:flex-end; gap:8px; }
 @media (max-width: 900px) { .quantity-filters { grid-template-columns:repeat(2,minmax(160px,1fr)); } }
 @media (max-width: 760px) { .quantity-plan-layout, .quantity-modal-body { grid-template-columns:1fr; } .quantity-filters { grid-template-columns:1fr; } .quantity-plan-board,.quantity-plan-board > img,.quantity-plan-empty { min-height:320px; } .quantity-drawing-board,.quantity-drawing-board > img,.quantity-drawing-empty { min-height:320px; } }
+
+.quantity-plan-media > canvas.quantity-floor-detail { max-width:none; max-height:none; inset:auto; }
