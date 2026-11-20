@@ -89,13 +89,13 @@ async function buildReportOnce(projectId, settings, now, opts) {
   const mainText = rawMain.replace(/\s*Aireko QA\/QC Automated System\s*$/, '');
   const html = `<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;color:#000">
     ${mainText.trim().split(/\n{2,}/).map(para).join('')}
-    <p style="margin:18px 0 0;line-height:1.35">Aireko QA/QC Automated System<br><b>${COMPANY[0]}</b><br>${COMPANY[1]}<br>${COMPANY[2]}<br>${COMPANY[3].replace(' | ', '<br>')}<br><a href="https://www.airekoenergygroup.com" style="color:#0563C1">${COMPANY[4]}</a></p>
+    <p style="margin:16px 0 0;font-size:10pt;line-height:1.35">Aireko QA/QC Automated System<br><b>${COMPANY[0]}</b><br>${COMPANY[1]}<br>${COMPANY[2]}<br>${COMPANY[3].replace(' | ', '<br>')}<br><a href="https://www.airekoenergygroup.com" style="color:#0563C1">${COMPANY[4]}</a></p>
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 0;border-collapse:collapse"><tr>
-      <td style="vertical-align:bottom;padding:0 8px 0 0"><img src="${APP_URL}/assets/aeg-logo.png" alt="AEG Aireko Energy Group" width="190" style="width:190px;height:auto;border:0;display:block"></td>
-      <td style="vertical-align:bottom;border-left:1px solid #000;padding:0 0 0 8px"><img src="${APP_URL}/assets/abc-top-performers-2025.png" alt="ABC 2025 Top Performers" width="150" style="width:150px;height:auto;border:0;display:block"></td>
+      <td style="vertical-align:middle;padding:0 10px 0 0"><img src="${APP_URL}/assets/aeg-logo.png" alt="AEG Aireko Energy Group" height="44" style="height:44px;width:auto;border:0;display:block"></td>
+      <td style="vertical-align:middle;border-left:1px solid #9CA3AF;padding:0 0 0 10px"><img src="${APP_URL}/assets/abc-top-performers-2025.png" alt="ABC 2025 Top Performers" height="60" style="height:60px;width:auto;border:0;display:block"></td>
     </tr></table>
-    ${notice ? `<p style="margin:14px 0 0;font-size:9pt;color:#555">${esc(notice.trim())}</p>` : ''}
-    <p style="margin:10px 0 0;font-size:8pt;color:#9CA3AF;line-height:1.35">${esc(CONFIDENTIAL)}</p>
+    ${notice ? `<p style="margin:14px 0 0;font-size:8.5pt;color:#555">${esc(notice.trim())}</p>` : ''}
+    <p style="margin:6px 0 0;font-size:7.5pt;color:#9CA3AF;line-height:1.35">${esc(CONFIDENTIAL)}</p>
   </div>`;
   const textFull = `${text}\n\n--\n${COMPANY.join('\n')}\n\n${CONFIDENTIAL}`;
 
