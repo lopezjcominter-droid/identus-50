@@ -1,6 +1,7 @@
 // Weekly Field Issues report: PDF (pdf-lib) + e-mail (Resend). One project at a time.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { rest } from '../digest/core.mjs';
+import jpeg from 'jpeg-js';
 
 const RESEND_KEY = process.env.RESEND_API_KEY || '';
 const APP_URL = process.env.APP_URL || 'https://identus-50.netlify.app';
@@ -27,20 +28,41 @@ export async function loadReportSettings(projectId) {
 }
 
 const imageCache = new Map();
+// Photos use the small copy the app saves beside each one (name_t.jpg), so the e-mail stays small; full size if there is none.
+const thumbOf = url => (/\/storage\/v1\/object\/public\/.+\.jpe?g$/i.test(url) && !/_t\.jpg$/i.test(url) ? url.replace(/\.jpe?g$/i, '_t.jpg') : null);
+// Big JPEGs without a small copy are shrunk here (max 900 px, quality 60).
+function shrink(img, maxPx = 900) {
+  if (img.png || img.buf.length < 120_000) return img;
+  try {
+    const src = jpeg.decode(img.buf, { useTArray: true, maxMemoryUsageInMB: 512 });
+    const k = Math.min(1, maxPx / Math.max(src.width, src.height)); if (k >= 1) return img;
+    const w = Math.max(1, Math.round(src.width * k)), h = Math.max(1, Math.round(src.height * k));
+    const out = new Uint8Array(w * h * 4);
+    for (let y = 0; y < h; y++) { const sy = Math.min(src.height - 1, Math.floor(y / k)); for (let x = 0; x < w; x++) { const sx = Math.min(src.width - 1, Math.floor(x / k)); const si = (sy * src.width + sx) * 4, di = (y * w + x) * 4; out[di] = src.data[si]; out[di + 1] = src.data[si + 1]; out[di + 2] = src.data[si + 2]; out[di + 3] = 255; } }
+    return { buf: new Uint8Array(jpeg.encode({ data: out, width: w, height: h }, 60).data), png: false };
+  } catch (_) { return img; }
+}
+const rawCache = new Map();
+function fetchRaw(url) {
+  if (!rawCache.has(url)) rawCache.set(url, (async () => { const t = thumbOf(url); return (t && await fetchJpegNow(t)) || await fetchJpegNow(url); })());
+  return rawCache.get(url);
+}
+let PHOTO_PX = 900;
 function fetchJpeg(url) {
-  if (!imageCache.has(url)) imageCache.set(url, fetchJpegNow(url));
-  return imageCache.get(url);
+  const key = PHOTO_PX + '|' + url;
+  if (!imageCache.has(key)) imageCache.set(key, fetchRaw(url).then(img => img && shrink(img, PHOTO_PX)));
+  return imageCache.get(key);
 }
 async function fetchJpegNow(url) {
   try {
     const r = await fetch(url, { signal: AbortSignal.timeout(6000) }); if (!r.ok) return null;
     const type = r.headers.get('content-type') || ''; const buf = new Uint8Array(await r.arrayBuffer());
-    if (buf.length > 4_000_000) return null;
+    if (buf.length > 12_000_000) return null;
     return { buf, png: /png/.test(type) || (buf[0] === 0x89 && buf[1] === 0x50) };
   } catch (_) { return null; }
 }
 
-export async function buildReport(projectId, settings, now = new Date()) {
+async function buildReportOnce(projectId, settings, now, opts) {
   const tz = settings?.timezone || 'America/New_York';
   const [project] = await rest(`/rest/v1/projects?id=eq.${projectId}&select=name`);
   const name = project?.name || 'Project';
@@ -64,7 +86,8 @@ export async function buildReport(projectId, settings, now = new Date()) {
 
   // ---------- PDF ----------
   // Download every photo at once (one by one was too slow for big projects).
-  const photoUrls = [...open.flatMap(i => (i.photos || []).slice(0, 3)), ...resolvedWeek.flatMap(i => (i.resolution_photos || []).slice(0, 3))];
+  PHOTO_PX = opts.px;
+  const photoUrls = opts.perIssue ? [...open.flatMap(i => (i.photos || []).slice(0, opts.perIssue)), ...resolvedWeek.flatMap(i => (i.resolution_photos || []).slice(0, opts.perIssue))] : [];
   for (let k = 0; k < photoUrls.length; k += 12) await Promise.all(photoUrls.slice(k, k + 12).map(fetchJpeg));
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica); const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -97,7 +120,7 @@ export async function buildReport(projectId, settings, now = new Date()) {
   y -= Math.max(h1, h2) + 16;
   const section = t => { need(30); page.drawText(t, { x: M, y, size: 12, font: bold, color: BLUE }); page.drawLine({ start: { x: M, y: y - 4 }, end: { x: W - M, y: y - 4 }, thickness: 0.7, color: rgb(0.8, 0.84, 0.88) }); y -= 18; };
   const photoRow = async urls => {
-    const list = (urls || []).slice(0, 3); if (!list.length) return;
+    const list = (urls || []).slice(0, opts.perIssue); if (!list.length) return;
     const pw = (W - 2 * M - 30) / 3, ph = 105; need(ph + 6); let x = M + 10;
     for (const u of list) { const img = await fetchJpeg(u); if (!img) continue; try { const e = img.png ? await pdf.embedPng(img.buf) : await pdf.embedJpg(img.buf); const s = Math.min(pw / e.width, ph / e.height); page.drawImage(e, { x: x + (pw - e.width * s) / 2, y: y - ph + (ph - e.height * s) / 2, width: e.width * s, height: e.height * s }); } catch (_) {} x += pw + 5; }
     y -= ph + 6;
@@ -132,6 +155,7 @@ export async function buildReport(projectId, settings, now = new Date()) {
   if (!resolvedWeek.length) { page.drawText('No issues resolved this week.', { x: M + 10, y, size: 10, font, color: GRAY }); y -= 16; }
   for (const i of resolvedWeek) await issueBlock(i, 0, true);
   pdf.getPages().forEach((p, k, arr) => { const t = safe(`Generated automatically by the Aireko QA/QC System · ${name} · Page ${k + 1} of ${arr.length}`); p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 14, size: 7, font, color: GRAY }); const c = safe(`${COMPANY[0]} · ${COMPANY[1]}, ${COMPANY[2]} · ${COMPANY[3]} · ${COMPANY[4]}`); p.drawText(c, { x: (W - font.widthOfTextAtSize(c, 7)) / 2, y: 24, size: 7, font, color: GRAY }); });
+  if (!opts.perIssue) pdf.getPages().forEach(p => { const t = 'Photos are not included because of their size. See them in Identus 50: ' + APP_URL; p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 34, size: 7, font, color: GRAY }); });
   const bytes = await pdf.save();
   const filename = `${name.replace(/[^\w]+/g, '_')}_Field_Issues_${new Date(now).toISOString().slice(0, 10)}.pdf`;
   return { subject, html, text: textFull, pdf: Buffer.from(bytes).toString('base64'), filename, counts: vars };
@@ -142,6 +166,18 @@ export async function sendReport(to, report) {
   const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ from: fromAddress(), to, subject: report.subject, html: report.html, text: report.text, attachments: [{ filename: report.filename, content: report.pdf }] }) });
   if (!r.ok) throw new Error(`Resend ${r.status}: ${(await r.text()).slice(0, 200)}`);
+}
+
+// Keeps the PDF under ~3 MB so Outlook always accepts it, however many issues there are:
+// first 3 photos per issue at 900 px, then 2 at 600 px, then 1 at 400 px, then no photos (with a link).
+const MAX_PDF = 3_000_000;
+export async function buildReport(projectId, settings, now = new Date()) {
+  let r;
+  for (const opts of [{ px: 900, perIssue: 3 }, { px: 600, perIssue: 2 }, { px: 400, perIssue: 1 }, { px: 400, perIssue: 0 }]) {
+    r = await buildReportOnce(projectId, settings, now, opts);
+    if (r.pdf.length * 0.75 <= MAX_PDF) return r;
+  }
+  return r;
 }
 
 // Projects whose weekly report is due now (their day, at or after their time, not sent in the last 2 days).
