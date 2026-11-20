@@ -398,12 +398,13 @@ This is an automated message. Please do not reply to this e-mail. For questions,
     const old = btn.textContent; btn.disabled = true; btn.textContent = 'Working…';
     try {
       const { data: { session } } = await client().auth.getSession();
-      const r = await fetch('/.netlify/functions/fi-report', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action, projectId: pid() }) });
+      const r = await fetch('/.netlify/functions/fi-report', { method: 'POST', signal: AbortSignal.timeout(30000), headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action, projectId: pid() }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       if (action === 'pdf') {
         const bytes = Uint8Array.from(atob(j.pdf), c => c.charCodeAt(0));
-        window.open(URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })), '_blank');
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = j.filename || 'Field_Issues.pdf';
+        document.body.appendChild(a); a.click(); a.remove(); note('📄 PDF downloaded');
       } else note(`✅ Test sent to ${j.sentTo}`);
     } catch (e) { note(`❌ ${e.message}`); }
     finally { btn.disabled = false; btn.textContent = old; }

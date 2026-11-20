@@ -26,9 +26,14 @@ export async function loadReportSettings(projectId) {
   return row || null;
 }
 
-async function fetchJpeg(url) {
+const imageCache = new Map();
+function fetchJpeg(url) {
+  if (!imageCache.has(url)) imageCache.set(url, fetchJpegNow(url));
+  return imageCache.get(url);
+}
+async function fetchJpegNow(url) {
   try {
-    const r = await fetch(url); if (!r.ok) return null;
+    const r = await fetch(url, { signal: AbortSignal.timeout(6000) }); if (!r.ok) return null;
     const type = r.headers.get('content-type') || ''; const buf = new Uint8Array(await r.arrayBuffer());
     if (buf.length > 4_000_000) return null;
     return { buf, png: /png/.test(type) || (buf[0] === 0x89 && buf[1] === 0x50) };
@@ -58,6 +63,9 @@ export async function buildReport(projectId, settings, now = new Date()) {
   const textFull = `${text}\n\n--\n${COMPANY.join('\n')}`;
 
   // ---------- PDF ----------
+  // Download every photo at once (one by one was too slow for big projects).
+  const photoUrls = [...open.flatMap(i => (i.photos || []).slice(0, 3)), ...resolvedWeek.flatMap(i => (i.resolution_photos || []).slice(0, 3))];
+  for (let k = 0; k < photoUrls.length; k += 12) await Promise.all(photoUrls.slice(k, k + 12).map(fetchJpeg));
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica); const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const W = 612, H = 792, M = 36; const BLUE = rgb(0.043, 0.325, 0.58), GRAY = rgb(0.39, 0.45, 0.55), DARK = rgb(0.06, 0.09, 0.16), RED = rgb(0.86, 0.15, 0.15), GREEN = rgb(0.09, 0.64, 0.29), AMBER = rgb(0.85, 0.47, 0.02);
