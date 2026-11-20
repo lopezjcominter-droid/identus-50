@@ -144,10 +144,11 @@ export async function sendReport(to, report) {
   if (!r.ok) throw new Error(`Resend ${r.status}: ${(await r.text()).slice(0, 200)}`);
 }
 
-// Every 15 minutes: send each enabled project once per week at its day/time.
-export async function runScheduledReports(now = new Date()) {
+// Projects whose weekly report is due now (their day, at or after their time, not sent in the last 2 days).
+// Each one is marked as sent before it is returned, so a retry never sends twice.
+export async function collectDueReports(now = new Date()) {
   const rows = await rest('/rest/v1/field_issue_report_settings?enabled=eq.true&select=*') || [];
-  const results = [];
+  const due = [];
   for (const s of rows) {
     try {
       const local = localParts(now, s.timezone || 'America/New_York');
@@ -156,12 +157,21 @@ export async function runScheduledReports(now = new Date()) {
       if (s.last_sent_at && now.getTime() - Date.parse(s.last_sent_at) < 2 * DAY) continue;
       const to = String(s.recipients || '').split(/[,;\s]+/).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
       if (!to.length) continue;
-      // Mark first, so a retry never sends twice.
       await rest(`/rest/v1/field_issue_report_settings?project_id=eq.${s.project_id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ last_sent_at: now.toISOString() }) });
       const report = await buildReport(s.project_id, s, now);
-      await sendReport(to, report);
-      results.push({ project: s.project_id, sent: to.length });
-    } catch (e) { console.error('fi report failed', s.project_id, e.message); results.push({ project: s.project_id, error: e.message }); }
+      due.push({ projectId: s.project_id, to, report });
+    } catch (e) { console.error('fi report failed', s.project_id, e.message); }
+  }
+  return due;
+}
+
+// Netlify schedule: sends through Resend only when Resend is set up and Power Automate is not.
+export async function runScheduledReports(now = new Date()) {
+  if (!RESEND_KEY || process.env.FI_FLOW_KEY) return [{ skipped: !RESEND_KEY ? 'no RESEND_API_KEY' : 'sent by Power Automate' }];
+  const results = [];
+  for (const d of await collectDueReports(now)) {
+    try { await sendReport(d.to, d.report); results.push({ project: d.projectId, sent: d.to.length }); }
+    catch (e) { console.error('fi report send failed', d.projectId, e.message); results.push({ project: d.projectId, error: e.message }); }
   }
   return results;
 }
