@@ -243,7 +243,7 @@
         const r = await fetch('/.netlify/functions/fi-report', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action: 'pdf', projectId: pid() }) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-        showPdf(Uint8Array.from(atob(j.pdf), c => c.charCodeAt(0)), j.filename);
+        showPdf(Uint8Array.from(atob(j.pdf), c => c.charCodeAt(0)), j.filename, true);
         return;
       } catch (e) { note(`❌ ${e.message}`); return; }
       finally { if (b) { b.disabled = false; b.textContent = old; } }
@@ -407,7 +407,7 @@ This is an automated message. Please do not reply to this e-mail. For questions,
     finally { btn.disabled = false; btn.textContent = old; }
   };
   // Shows a PDF inside the page (no pop-up to block) with Print, Download and Close.
-  const showPdf = (bytes, filename) => {
+  const showPdf = (bytes, filename, autoPrint) => {
     const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
     document.getElementById('fiPdfPreview')?.remove();
     const v = document.createElement('div'); v.id = 'fiPdfPreview'; v.className = 'fi-modal'; v.style.zIndex = '10001';
@@ -415,7 +415,10 @@ This is an automated message. Please do not reply to this e-mail. For questions,
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><strong style="flex:1">${esc(filename || 'Report')}</strong><button type="button" class="btn btn-primary" id="fiPdfPrint">🖨 Print</button><a class="btn btn-secondary" href="${url}" download="${esc(filename || 'Field_Issues.pdf')}">⬇ Download</a><button type="button" class="btn btn-secondary" onclick="document.getElementById('fiPdfPreview').remove()">Close</button></div>
         <iframe id="fiPdfFrame" src="${url}" title="Report preview" style="width:100%;height:100%;border:1px solid #E2E8F0;border-radius:8px"></iframe></div>`;
     document.body.appendChild(v);
-    document.getElementById('fiPdfPrint').onclick = () => { try { const f = document.getElementById('fiPdfFrame'); f.contentWindow.focus(); f.contentWindow.print(); } catch (_) { window.open(url, '_blank'); } };
+    const print = () => { try { const f = document.getElementById('fiPdfFrame'); f.contentWindow.focus(); f.contentWindow.print(); } catch (_) { window.open(url, '_blank'); } };
+    document.getElementById('fiPdfPrint').onclick = print;
+    // Export PDF: open the print dialog right away, as before.
+    if (autoPrint) document.getElementById('fiPdfFrame').addEventListener('load', () => setTimeout(print, 600), { once: true });
   };
   window.fiReportDefaults = () => { document.getElementById('fiRepSubject').value = DEFAULT_SUBJECT; document.getElementById('fiRepBody').value = DEFAULT_BODY; };
   window.fiReportSave = async btn => {
