@@ -88,7 +88,8 @@ async function buildReportOnce(projectId, settings, now, opts) {
   };
   const [rawMain, notice] = text.split(/\n\s*\n(?=This is an automated message)/);
   const mainText = rawMain.replace(/\s*Aireko QA\/QC Automated System\s*$/, '');
-  const html = `<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;color:#000">
+  // IDSTART-7Q: the relay flow keeps only what follows this marker (drops notes Outlook adds on top).
+  const html = `<span style="display:none;font-size:0;color:transparent">IDSTART-7Q</span><div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;color:#000">
     ${mainText.trim().split(/\n{2,}/).map(para).join('')}
     <p style="margin:16px 0 0;font-size:10pt;line-height:1.35">Aireko QA/QC Automated System<br><b>${COMPANY[0]}</b><br>${COMPANY[1]}<br>${COMPANY[2]}<br>${COMPANY[3].replace(' | ', '<br>')}<br><a href="https://www.airekoenergygroup.com" style="color:#0563C1">${COMPANY[4]}</a></p>
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 0;border-collapse:collapse"><tr>
