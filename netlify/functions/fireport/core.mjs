@@ -30,6 +30,19 @@ export async function loadReportSettings(projectId) {
 }
 
 const imageCache = new Map();
+// Storage cache (bucket identus-files, folder cache/): resized photos and finished PDFs are kept so the
+// next preview / test / weekly send does not download and resize every photo again.
+const SB_URL = process.env.SUPABASE_URL || 'https://kihsukzcbohmxovbyisi.supabase.co';
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const sha1 = v => createHash('sha1').update(String(v)).digest('hex');
+async function cacheGet(path) {
+  if (!SB_KEY) return null;
+  try { const r = await fetch(`${SB_URL}/storage/v1/object/identus-files/cache/${path}`, { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, signal: AbortSignal.timeout(5000) }); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null; } catch (_) { return null; }
+}
+async function cachePut(path, bytes, type) {
+  if (!SB_KEY) return;
+  try { await fetch(`${SB_URL}/storage/v1/object/identus-files/cache/${path}`, { method: 'POST', headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': type, 'x-upsert': 'true' }, body: bytes, signal: AbortSignal.timeout(8000) }); } catch (_) {}
+}
 // Photos use the small copy the app saves beside each one (name_t.jpg), so the e-mail stays small; full size if there is none.
 const thumbOf = url => (/\/storage\/v1\/object\/public\/.+\.jpe?g$/i.test(url) && !/_t\.jpg$/i.test(url) ? url.replace(/\.jpe?g$/i, '_t.jpg') : null);
 // Big JPEGs without a small copy are shrunk here (max 900 px, quality 60).
@@ -52,7 +65,14 @@ function fetchRaw(url) {
 let PHOTO_PX = 900;
 function fetchJpeg(url) {
   const key = PHOTO_PX + '|' + url;
-  if (!imageCache.has(key)) imageCache.set(key, fetchRaw(url).then(img => img && shrink(img, PHOTO_PX)));
+  const px = PHOTO_PX;
+  if (!imageCache.has(key)) imageCache.set(key, (async () => {
+    const path = `fi-photos/${sha1(url)}_${px}.jpg`;
+    const hit = await cacheGet(path); if (hit && hit.length > 100) return { buf: hit, png: false };
+    const img = await fetchRaw(url); if (!img) return null;
+    const small = shrink(img, px); if (!small.png) await cachePut(path, small.buf, 'image/jpeg');
+    return small;
+  })());
   return imageCache.get(key);
 }
 async function fetchJpegNow(url) {
@@ -104,6 +124,10 @@ async function buildReportOnce(projectId, settings, now, opts) {
   // ---------- PDF ----------
   // Download every photo at once (one by one was too slow for big projects).
   PHOTO_PX = opts.px;
+  const filename0 = `${name.replace(/[^\w]+/g, '_')}_Field_Issues_${new Date(now).toISOString().slice(0, 10)}.pdf`;
+  const pdfKey = `fi-reports/${projectId}/${sha1(JSON.stringify({ v: 2, opts, date, tz, all }))}.pdf`;
+  const cachedPdf = await cacheGet(pdfKey);
+  if (cachedPdf && cachedPdf.length > 500) return { subject, html, text: textFull, pdf: Buffer.from(cachedPdf).toString('base64'), filename: filename0, counts: vars, cached: true };
   const photoUrls = opts.perIssue ? [...open.flatMap(i => (i.photos || []).slice(0, opts.perIssue)), ...resolvedWeek.flatMap(i => (i.resolution_photos || []).slice(0, opts.perIssue))] : [];
   for (let k = 0; k < photoUrls.length; k += 12) await Promise.all(photoUrls.slice(k, k + 12).map(fetchJpeg));
   const pdf = await PDFDocument.create();
@@ -174,6 +198,7 @@ async function buildReportOnce(projectId, settings, now, opts) {
   pdf.getPages().forEach((p, k, arr) => { const t = safe(`Generated automatically by the Aireko QA/QC System · ${name} · Page ${k + 1} of ${arr.length}`); p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 14, size: 7, font, color: GRAY }); const c = safe(`${COMPANY[0]} · ${COMPANY[1]}, ${COMPANY[2]} · ${COMPANY[3]} · ${COMPANY[4]}`); p.drawText(c, { x: (W - font.widthOfTextAtSize(c, 7)) / 2, y: 24, size: 7, font, color: GRAY }); wrap(CONFIDENTIAL, 6, font, W - 2 * M).forEach((l, k) => p.drawText(l, { x: M, y: 50 - k * 7, size: 6, font, color: rgb(0.75, 0.78, 0.82) })); });
   if (!opts.perIssue) pdf.getPages().forEach(p => { const t = opts.forEmail ? 'Photos of each item are available in Identus 50 (Field Issues > Export PDF): ' + APP_URL : 'Photos are not included because of their size. See them in Identus 50: ' + APP_URL; p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 34, size: 7, font, color: GRAY }); });
   const bytes = await pdf.save();
+  await cachePut(pdfKey, bytes, 'application/pdf');
   const filename = `${name.replace(/[^\w]+/g, '_')}_Field_Issues_${new Date(now).toISOString().slice(0, 10)}.pdf`;
   return { subject, html, text: textFull, pdf: Buffer.from(bytes).toString('base64'), filename, counts: vars };
 }
