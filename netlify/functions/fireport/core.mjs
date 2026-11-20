@@ -10,6 +10,7 @@ const fromAddress = () => {
   const m = raw.match(/<([^>]+)>/); return `${SENDER} <${m ? m[1] : raw.trim()}>`;
 };
 const DAY = 86400000;
+const COMPANY = ['AIREKO ENERGY GROUP US', '2415 W Sand Lake Road Ste E', 'Orlando, Florida 32809', '407-706-2800 | 407-595-9467', 'www.airekoenergygroup.com'];
 const esc = v => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 // Standard PDF fonts only know Latin-1 (+ a few signs): replace anything else.
 const safe = v => String(v ?? '').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[^\x20-\x7E -ÿ–—•]/g, '');
@@ -52,7 +53,9 @@ export async function buildReport(projectId, settings, now = new Date()) {
   const text = fill(settings?.body || '');
   const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;max-width:640px;line-height:1.5">
     <img src="${APP_URL}/assets/aeg-logo.png" alt="Aireko Energy Group" style="height:56px;margin-bottom:12px">
-    ${esc(text).split(/\n{2,}/).map(p => `<p style="margin:0 0 12px">${p.replace(/\n/g, '<br>')}</p>`).join('')}</div>`;
+    ${esc(text).split(/\n{2,}/).map(p => `<p style="margin:0 0 12px">${p.replace(/\n/g, '<br>')}</p>`).join('')}
+    <div style="border-top:2px solid #0B5394;margin-top:16px;padding-top:10px;font-size:12px;color:#334155;line-height:1.45"><b style="color:#0B5394">${COMPANY[0]}</b><br>${COMPANY[1]}<br>${COMPANY[2]}<br>${COMPANY[3]}<br><a href="https://www.airekoenergygroup.com" style="color:#0B5394">${COMPANY[4]}</a></div></div>`;
+  const textFull = `${text}\n\n--\n${COMPANY.join('\n')}`;
 
   // ---------- PDF ----------
   const pdf = await PDFDocument.create();
@@ -120,10 +123,10 @@ export async function buildReport(projectId, settings, now = new Date()) {
   section('Resolved this week');
   if (!resolvedWeek.length) { page.drawText('No issues resolved this week.', { x: M + 10, y, size: 10, font, color: GRAY }); y -= 16; }
   for (const i of resolvedWeek) await issueBlock(i, 0, true);
-  pdf.getPages().forEach((p, k, arr) => { const t = safe(`Generated automatically by the Aireko QA/QC System · ${name} · Page ${k + 1} of ${arr.length}`); p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 18, size: 7, font, color: GRAY }); });
+  pdf.getPages().forEach((p, k, arr) => { const t = safe(`Generated automatically by the Aireko QA/QC System · ${name} · Page ${k + 1} of ${arr.length}`); p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 14, size: 7, font, color: GRAY }); const c = safe(`${COMPANY[0]} · ${COMPANY[1]}, ${COMPANY[2]} · ${COMPANY[3]} · ${COMPANY[4]}`); p.drawText(c, { x: (W - font.widthOfTextAtSize(c, 7)) / 2, y: 24, size: 7, font, color: GRAY }); });
   const bytes = await pdf.save();
   const filename = `${name.replace(/[^\w]+/g, '_')}_Field_Issues_${new Date(now).toISOString().slice(0, 10)}.pdf`;
-  return { subject, html, text, pdf: Buffer.from(bytes).toString('base64'), filename, counts: vars };
+  return { subject, html, text: textFull, pdf: Buffer.from(bytes).toString('base64'), filename, counts: vars };
 }
 
 export async function sendReport(to, report) {
