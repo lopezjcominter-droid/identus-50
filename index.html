@@ -10483,11 +10483,30 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
               const textWidth = ctx.measureText(stampText).width;
               const boxWidth = Math.min(canvas.width - 8, textWidth + padding * 2);
               const boxHeight = fontSize + padding * 2;
+              // Project/address line (watermark style) under the date/inspector box
+              let loc = '';
+              try { loc = [getProjectName(), getProjectAddress()].filter(Boolean).join(' · '); } catch (_) {}
+              const locSize = Math.max(11, Math.round(fontSize * 0.8));
+              const locH = loc ? locSize + Math.round(padding * 0.9) : 0;
+              const boxBottom = canvas.height - 4 - locH;
               ctx.fillStyle = 'rgba(0,0,0,.72)';
-              ctx.fillRect(4, canvas.height - boxHeight - 4, boxWidth, boxHeight);
+              ctx.fillRect(4, boxBottom - boxHeight, boxWidth, boxHeight);
               ctx.fillStyle = '#fff';
               ctx.textBaseline = 'middle';
-              ctx.fillText(stampText, 4 + padding, canvas.height - boxHeight / 2 - 4);
+              ctx.fillText(stampText, 4 + padding, boxBottom - boxHeight / 2);
+              if (loc) {
+                const cy = canvas.height - 4 - locH / 2, r = locSize * 0.38, px = 4 + padding * 0.6 + r;
+                ctx.save();
+                ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = Math.max(2, locSize / 6);
+                ctx.fillStyle = '#EA4335'; // GPS pin
+                ctx.beginPath(); ctx.arc(px, cy - r * 0.45, r, Math.PI * 0.85, Math.PI * 0.15); ctx.lineTo(px, cy + r * 1.35); ctx.closePath(); ctx.fill();
+                ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(px, cy - r * 0.45, r * 0.38, 0, Math.PI * 2); ctx.fill();
+                ctx.shadowBlur = Math.max(2, locSize / 6);
+                ctx.font = `600 ${locSize}px Arial, sans-serif`;
+                ctx.fillStyle = 'rgba(255,255,255,.62)';
+                ctx.fillText(loc, px + r + padding * 0.6, cy);
+                ctx.restore();
+              }
             }
             const compressed = canvas.toDataURL('image/jpeg', quality);
             resolve(compressed);
