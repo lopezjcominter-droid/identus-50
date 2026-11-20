@@ -168,12 +168,12 @@ export async function sendReport(to, report) {
   if (!r.ok) throw new Error(`Resend ${r.status}: ${(await r.text()).slice(0, 200)}`);
 }
 
-// Keeps the PDF under ~3 MB so Outlook always accepts it, however many issues there are:
-// first 3 photos per issue at 900 px, then 2 at 600 px, then 1 at 400 px, then no photos (with a link).
-const MAX_PDF = 3_000_000;
+// Keeps the PDF under ~0.9 MB (FI_MAX_PDF) so Outlook always accepts it, however many issues there are:
+// first 2 photos per issue at 800 px, then 1 at 600/450 px, then no photos (with a link).
+const MAX_PDF = Number(process.env.FI_MAX_PDF || 900_000);
 export async function buildReport(projectId, settings, now = new Date()) {
   let r;
-  for (const opts of [{ px: 900, perIssue: 3 }, { px: 600, perIssue: 2 }, { px: 400, perIssue: 1 }, { px: 400, perIssue: 0 }]) {
+  for (const opts of [{ px: 800, perIssue: 2 }, { px: 600, perIssue: 1 }, { px: 450, perIssue: 1 }, { px: 400, perIssue: 0 }]) {
     r = await buildReportOnce(projectId, settings, now, opts);
     if (r.pdf.length * 0.75 <= MAX_PDF) return r;
   }
