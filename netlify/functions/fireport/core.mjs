@@ -11,6 +11,7 @@ const fromAddress = () => {
   const m = raw.match(/<([^>]+)>/); return `${SENDER} <${m ? m[1] : raw.trim()}>`;
 };
 const DAY = 86400000;
+const CONFIDENTIAL = 'The information contained in this e-mail may be privileged, confidential, and protected from disclosure. If you are not the intended recipient, you are hereby notified that any dissemination, distribution or duplication of this communication is strictly prohibited. If you have received this communication in error, please notify the sender immediately and delete all copies.';
 const COMPANY = ['AIREKO ENERGY GROUP US', '2415 W Sand Lake Road Ste E', 'Orlando, Florida 32809', '407-706-2800 | 407-595-9467', 'www.airekoenergygroup.com'];
 const esc = v => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 // Standard PDF fonts only know Latin-1 (+ a few signs): replace anything else.
@@ -78,11 +79,25 @@ async function buildReportOnce(projectId, settings, now, opts) {
   const fill = t => String(t || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
   const subject = fill(settings?.subject || '{project} – Weekly Field Issues Report | Week Ending {date}');
   const text = fill(settings?.body || '');
-  const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;max-width:640px;line-height:1.5">
-    <img src="${APP_URL}/assets/aeg-logo.png" alt="Aireko Energy Group" style="height:56px;margin-bottom:12px">
-    ${esc(text).split(/\n{2,}/).map(p => `<p style="margin:0 0 12px">${p.replace(/\n/g, '<br>')}</p>`).join('')}
-    <div style="border-top:2px solid #0B5394;margin-top:16px;padding-top:10px;font-size:12px;color:#334155;line-height:1.45"><b style="color:#0B5394">${COMPANY[0]}</b><br>${COMPANY[1]}<br>${COMPANY[2]}<br>${COMPANY[3]}<br><a href="https://www.airekoenergygroup.com" style="color:#0B5394">${COMPANY[4]}</a></div></div>`;
-  const textFull = `${text}\n\n--\n${COMPANY.join('\n')}`;
+  // Plain Outlook look (like an Aireko e-mail): text first, signature with the AEG logo at the end.
+  const para = p => {
+    const lines = p.split('\n');
+    if (lines.every(l => /^\s*[•\-]\s+/.test(l))) return `<ul style="margin:0 0 12px 18px;padding:0">${lines.map(l => `<li style="margin:0 0 2px">${esc(l.replace(/^\s*[•\-]\s+/, ''))}</li>`).join('')}</ul>`;
+    return `<p style="margin:0 0 12px">${lines.map(esc).join('<br>')}</p>`;
+  };
+  const [rawMain, notice] = text.split(/\n\s*\n(?=This is an automated message)/);
+  const mainText = rawMain.replace(/\s*Aireko QA\/QC Automated System\s*$/, '');
+  const html = `<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;color:#000">
+    ${mainText.trim().split(/\n{2,}/).map(para).join('')}
+    <p style="margin:16px 0 0;font-size:10pt;line-height:1.35">Aireko QA/QC Automated System<br><b>${COMPANY[0]}</b><br>${COMPANY[1]}<br>${COMPANY[2]}<br>${COMPANY[3].replace(' | ', '<br>')}<br><a href="https://www.airekoenergygroup.com" style="color:#0563C1">${COMPANY[4]}</a></p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 0;border-collapse:collapse"><tr>
+      <td style="vertical-align:middle;padding:0 10px 0 0"><img src="${APP_URL}/assets/aeg-logo.png" alt="AEG Aireko Energy Group" height="44" style="height:44px;width:auto;border:0;display:block"></td>
+      <td style="vertical-align:middle;border-left:1px solid #9CA3AF;padding:0 0 0 10px"><img src="${APP_URL}/assets/abc-top-performers-2025.png" alt="ABC 2025 Top Performers" height="60" style="height:60px;width:auto;border:0;display:block"></td>
+    </tr></table>
+    ${notice ? `<p style="margin:14px 0 0;font-size:8.5pt;color:#555">${esc(notice.trim())}</p>` : ''}
+    <p style="margin:6px 0 0;font-size:7.5pt;color:#9CA3AF;line-height:1.35">${esc(CONFIDENTIAL)}</p>
+  </div>`;
+  const textFull = `${text}\n\n--\n${COMPANY.join('\n')}\n\n${CONFIDENTIAL}`;
 
   // ---------- PDF ----------
   // Download every photo at once (one by one was too slow for big projects).
@@ -103,7 +118,7 @@ async function buildReportOnce(projectId, settings, now, opts) {
     page.drawRectangle({ x: M, y: y - 60, width: W - 2 * M, height: 2.5, color: BLUE });
     y -= 76;
   };
-  const need = h => { if (y - h < M + 20) newPage(); };
+  const need = h => { if (y - h < M + 40) newPage(); };
   const wrap = (t, size, f, width) => { const words = safe(t).split(/\s+/); const lines = []; let line = ''; for (const w of words) { const test = line ? line + ' ' + w : w; if (f.widthOfTextAtSize(test, size) > width && line) { lines.push(line); line = w; } else line = test; } if (line) lines.push(line); return lines; };
   newPage();
   page.drawText('Weekly Field Issues Report', { x: M, y, size: 18, font: bold, color: DARK }); y -= 16;
@@ -154,7 +169,7 @@ async function buildReportOnce(projectId, settings, now, opts) {
   section('Resolved this week');
   if (!resolvedWeek.length) { page.drawText('No issues resolved this week.', { x: M + 10, y, size: 10, font, color: GRAY }); y -= 16; }
   for (const i of resolvedWeek) await issueBlock(i, 0, true);
-  pdf.getPages().forEach((p, k, arr) => { const t = safe(`Generated automatically by the Aireko QA/QC System · ${name} · Page ${k + 1} of ${arr.length}`); p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 14, size: 7, font, color: GRAY }); const c = safe(`${COMPANY[0]} · ${COMPANY[1]}, ${COMPANY[2]} · ${COMPANY[3]} · ${COMPANY[4]}`); p.drawText(c, { x: (W - font.widthOfTextAtSize(c, 7)) / 2, y: 24, size: 7, font, color: GRAY }); });
+  pdf.getPages().forEach((p, k, arr) => { const t = safe(`Generated automatically by the Aireko QA/QC System · ${name} · Page ${k + 1} of ${arr.length}`); p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 14, size: 7, font, color: GRAY }); const c = safe(`${COMPANY[0]} · ${COMPANY[1]}, ${COMPANY[2]} · ${COMPANY[3]} · ${COMPANY[4]}`); p.drawText(c, { x: (W - font.widthOfTextAtSize(c, 7)) / 2, y: 24, size: 7, font, color: GRAY }); wrap(CONFIDENTIAL, 6, font, W - 2 * M).forEach((l, k) => p.drawText(l, { x: M, y: 50 - k * 7, size: 6, font, color: rgb(0.75, 0.78, 0.82) })); });
   if (!opts.perIssue) pdf.getPages().forEach(p => { const t = 'Photos are not included because of their size. See them in Identus 50: ' + APP_URL; p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 34, size: 7, font, color: GRAY }); });
   const bytes = await pdf.save();
   const filename = `${name.replace(/[^\w]+/g, '_')}_Field_Issues_${new Date(now).toISOString().slice(0, 10)}.pdf`;
@@ -168,12 +183,12 @@ export async function sendReport(to, report) {
   if (!r.ok) throw new Error(`Resend ${r.status}: ${(await r.text()).slice(0, 200)}`);
 }
 
-// Keeps the PDF under ~3 MB so Outlook always accepts it, however many issues there are:
-// first 3 photos per issue at 900 px, then 2 at 600 px, then 1 at 400 px, then no photos (with a link).
-const MAX_PDF = 3_000_000;
+// Keeps the PDF under ~0.9 MB (FI_MAX_PDF) so Outlook always accepts it, however many issues there are:
+// first 2 photos per issue at 800 px, then 1 at 600/450 px, then no photos (with a link).
+const MAX_PDF = Number(process.env.FI_MAX_PDF || 900_000);
 export async function buildReport(projectId, settings, now = new Date()) {
   let r;
-  for (const opts of [{ px: 900, perIssue: 3 }, { px: 600, perIssue: 2 }, { px: 400, perIssue: 1 }, { px: 400, perIssue: 0 }]) {
+  for (const opts of [{ px: 800, perIssue: 2 }, { px: 600, perIssue: 1 }, { px: 450, perIssue: 1 }, { px: 400, perIssue: 0 }]) {
     r = await buildReportOnce(projectId, settings, now, opts);
     if (r.pdf.length * 0.75 <= MAX_PDF) return r;
   }
