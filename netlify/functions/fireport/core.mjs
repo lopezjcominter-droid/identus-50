@@ -78,10 +78,20 @@ async function buildReportOnce(projectId, settings, now, opts) {
   const fill = t => String(t || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
   const subject = fill(settings?.subject || '{project} – Weekly Field Issues Report | Week Ending {date}');
   const text = fill(settings?.body || '');
-  const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;max-width:640px;line-height:1.5">
-    <img src="${APP_URL}/assets/aeg-logo.png" alt="Aireko Energy Group" style="height:56px;margin-bottom:12px">
-    ${esc(text).split(/\n{2,}/).map(p => `<p style="margin:0 0 12px">${p.replace(/\n/g, '<br>')}</p>`).join('')}
-    <div style="border-top:2px solid #0B5394;margin-top:16px;padding-top:10px;font-size:12px;color:#334155;line-height:1.45"><b style="color:#0B5394">${COMPANY[0]}</b><br>${COMPANY[1]}<br>${COMPANY[2]}<br>${COMPANY[3]}<br><a href="https://www.airekoenergygroup.com" style="color:#0B5394">${COMPANY[4]}</a></div></div>`;
+  // Plain Outlook look (like an Aireko e-mail): text first, signature with the AEG logo at the end.
+  const para = p => {
+    const lines = p.split('\n');
+    if (lines.every(l => /^\s*[•\-]\s+/.test(l))) return `<ul style="margin:0 0 12px 18px;padding:0">${lines.map(l => `<li style="margin:0 0 2px">${esc(l.replace(/^\s*[•\-]\s+/, ''))}</li>`).join('')}</ul>`;
+    return `<p style="margin:0 0 12px">${lines.map(esc).join('<br>')}</p>`;
+  };
+  const [rawMain, notice] = text.split(/\n\s*\n(?=This is an automated message)/);
+  const mainText = rawMain.replace(/\s*Aireko QA\/QC Automated System\s*$/, '');
+  const html = `<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;color:#000">
+    ${mainText.trim().split(/\n{2,}/).map(para).join('')}
+    <p style="margin:18px 0 0;line-height:1.35">Aireko QA/QC Automated System<br><b>${COMPANY[0]}</b><br>${COMPANY[1]}<br>${COMPANY[2]}<br>${COMPANY[3].replace(' | ', '<br>')}<br><a href="https://www.airekoenergygroup.com" style="color:#0563C1">${COMPANY[4]}</a></p>
+    <p style="margin:8px 0 0"><img src="${APP_URL}/assets/aeg-logo.png" alt="AEG Aireko Energy Group" width="190" style="width:190px;height:auto;border:0"></p>
+    ${notice ? `<p style="margin:14px 0 0;font-size:9pt;color:#555">${esc(notice.trim())}</p>` : ''}
+  </div>`;
   const textFull = `${text}\n\n--\n${COMPANY.join('\n')}`;
 
   // ---------- PDF ----------
