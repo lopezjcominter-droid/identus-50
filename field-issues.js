@@ -356,7 +356,7 @@ Please find attached the weekly Field Issues report for {project}, covering the 
 • Open: {open_count}
 • Open for more than 7 days: {old_count}
 
-The report includes the details and photos of each item. We appreciate your support in coordinating the closure of the open items.
+The attached report lists each item with its location and description; photos are available in Identus 50. We appreciate your support in coordinating the closure of the open items.
 
 Best regards,
 
