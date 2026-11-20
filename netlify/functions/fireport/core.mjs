@@ -2,6 +2,7 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { rest } from '../digest/core.mjs';
 import jpeg from 'jpeg-js';
+import { createHash } from 'node:crypto';
 
 const RESEND_KEY = process.env.RESEND_API_KEY || '';
 const APP_URL = process.env.APP_URL || 'https://identus-50.netlify.app';
@@ -170,7 +171,7 @@ async function buildReportOnce(projectId, settings, now, opts) {
   if (!resolvedWeek.length) { page.drawText('No issues resolved this week.', { x: M + 10, y, size: 10, font, color: GRAY }); y -= 16; }
   for (const i of resolvedWeek) await issueBlock(i, 0, true);
   pdf.getPages().forEach((p, k, arr) => { const t = safe(`Generated automatically by the Aireko QA/QC System · ${name} · Page ${k + 1} of ${arr.length}`); p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 14, size: 7, font, color: GRAY }); const c = safe(`${COMPANY[0]} · ${COMPANY[1]}, ${COMPANY[2]} · ${COMPANY[3]} · ${COMPANY[4]}`); p.drawText(c, { x: (W - font.widthOfTextAtSize(c, 7)) / 2, y: 24, size: 7, font, color: GRAY }); wrap(CONFIDENTIAL, 6, font, W - 2 * M).forEach((l, k) => p.drawText(l, { x: M, y: 50 - k * 7, size: 6, font, color: rgb(0.75, 0.78, 0.82) })); });
-  if (!opts.perIssue) pdf.getPages().forEach(p => { const t = 'Photos are not included because of their size. See them in Identus 50: ' + APP_URL; p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 34, size: 7, font, color: GRAY }); });
+  if (!opts.perIssue) pdf.getPages().forEach(p => { const t = opts.forEmail ? 'Photos of each item are available in Identus 50 (Field Issues > Export PDF): ' + APP_URL : 'Photos are not included because of their size. See them in Identus 50: ' + APP_URL; p.drawText(t, { x: (W - font.widthOfTextAtSize(t, 7)) / 2, y: 34, size: 7, font, color: GRAY }); });
   const bytes = await pdf.save();
   const filename = `${name.replace(/[^\w]+/g, '_')}_Field_Issues_${new Date(now).toISOString().slice(0, 10)}.pdf`;
   return { subject, html, text: textFull, pdf: Buffer.from(bytes).toString('base64'), filename, counts: vars };
@@ -183,12 +184,12 @@ export async function sendReport(to, report) {
   if (!r.ok) throw new Error(`Resend ${r.status}: ${(await r.text()).slice(0, 200)}`);
 }
 
-// Keeps the PDF under ~0.9 MB (FI_MAX_PDF) so Outlook always accepts it, however many issues there are:
+// Keeps the PDF under ~8 MB (FI_MAX_PDF) so Outlook always accepts it, however many issues there are:
 // first 2 photos per issue at 800 px, then 1 at 600/450 px, then no photos (with a link).
-const MAX_PDF = Number(process.env.FI_MAX_PDF || 900_000);
-export async function buildReport(projectId, settings, now = new Date()) {
+const MAX_PDF = Number(process.env.FI_MAX_PDF || 8_000_000);
+export async function buildReport(projectId, settings, now = new Date(), { forEmail = false } = {}) {
   let r;
-  for (const opts of [{ px: 800, perIssue: 2 }, { px: 600, perIssue: 1 }, { px: 450, perIssue: 1 }, { px: 400, perIssue: 0 }]) {
+  for (const opts of [{ px: 900, perIssue: 3 }, { px: 700, perIssue: 2 }, { px: 500, perIssue: 1 }, { px: 400, perIssue: 0 }]) {
     r = await buildReportOnce(projectId, settings, now, opts);
     if (r.pdf.length * 0.75 <= MAX_PDF) return r;
   }
@@ -209,19 +210,31 @@ export async function collectDueReports(now = new Date()) {
       const to = String(s.recipients || '').split(/[,;\s]+/).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
       if (!to.length) continue;
       await rest(`/rest/v1/field_issue_report_settings?project_id=eq.${s.project_id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ last_sent_at: now.toISOString() }) });
-      const report = await buildReport(s.project_id, s, now);
+      const report = await buildReport(s.project_id, s, now, { forEmail: true });
       due.push({ projectId: s.project_id, to, report });
     } catch (e) { console.error('fi report failed', s.project_id, e.message); }
   }
   return due;
 }
 
-// Netlify schedule: sends through Resend only when Resend is set up and Power Automate is not.
+// Relay mode (no company domain): Identus e-mails each report to ONE Aireko mailbox (FI_RELAY_TO, the
+// Resend account owner), and a standard Power Automate flow in that mailbox re-sends it to the project's
+// recipients. The subject carries the tag, the recipients and a check code the flow verifies.
+const RELAY_TO = process.env.FI_RELAY_TO || '';
+const relayCode = projectId => createHash('sha256').update(String(process.env.FI_FLOW_KEY || '') + '|' + projectId).digest('hex').slice(0, 10);
+export async function relayReport(projectId, to, report) {
+  const subject = `[IDENTUS-FI] ${report.subject} ||to:${to.join(';')}||code:${relayCode(projectId)}`;
+  await sendReport([RELAY_TO], { ...report, subject });
+}
+
+// Netlify schedule: relay mode when FI_RELAY_TO is set; otherwise direct Resend (needs a verified domain);
+// with only FI_FLOW_KEY, Power Automate pulls the reports itself.
 export async function runScheduledReports(now = new Date()) {
-  if (!RESEND_KEY || process.env.FI_FLOW_KEY) return [{ skipped: !RESEND_KEY ? 'no RESEND_API_KEY' : 'sent by Power Automate' }];
+  if (!RESEND_KEY) return [{ skipped: 'no RESEND_API_KEY' }];
+  if (!RELAY_TO && process.env.FI_FLOW_KEY) return [{ skipped: 'sent by Power Automate' }];
   const results = [];
   for (const d of await collectDueReports(now)) {
-    try { await sendReport(d.to, d.report); results.push({ project: d.projectId, sent: d.to.length }); }
+    try { if (RELAY_TO) await relayReport(d.projectId, d.to, d.report); else await sendReport(d.to, d.report); results.push({ project: d.projectId, sent: d.to.length, relay: !!RELAY_TO }); }
     catch (e) { console.error('fi report send failed', d.projectId, e.message); results.push({ project: d.projectId, error: e.message }); }
   }
   return results;
