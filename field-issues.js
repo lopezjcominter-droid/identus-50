@@ -151,14 +151,54 @@
   };
 
   // ---------- actions ----------
+  // Closing an issue asks for proof: a note and at least one photo (like a failed inspection).
+  let resolving = null; let proof = [];
   window.fiResolve = async id => {
     const i = issues.find(x => x.id === id); if (!i) return;
     if (isPending(id)) { note('Waiting for signal to upload this issue'); return; }
-    const reopen = i.status === 'resolved';
-    const patch = reopen ? { status: 'open', resolved_at: null, resolved_by_name: null } : { status: 'resolved', resolved_at: new Date().toISOString(), resolved_by_name: userName() };
-    const { error } = await client().from('field_issues').update(patch).eq('id', id);
-    if (error) { note(`❌ ${error.message}`); return; }
-    Object.assign(i, patch); rerender();
+    if (i.status === 'resolved') {
+      if (!confirm('Reopen this issue?')) return;
+      const patch = { status: 'open', resolved_at: null, resolved_by_name: null };
+      const { error } = await client().from('field_issues').update(patch).eq('id', id);
+      if (error) { note(`❌ ${error.message}`); return; }
+      Object.assign(i, patch); rerender(); return;
+    }
+    resolving = id; proof = [];
+    document.getElementById('fiResolveModal')?.remove();
+    const m = document.createElement('div'); m.id = 'fiResolveModal'; m.className = 'fi-modal';
+    m.innerHTML = `<div class="fi-modal-box">
+        <h3>Close issue · Unit ${esc(i.apt)}</h3>
+        <div class="fi-muted fi-small">${esc(i.issue_type)}${i.description ? ' — ' + esc(i.description) : ''}</div>
+        <label>What was done to resolve it? *<textarea id="fiResNote" class="form-input" rows="3" placeholder="Describe the correction"></textarea></label>
+        <div class="fi-photo-btns">
+          <label class="btn btn-secondary">📷 Take photo<input type="file" accept="image/*" capture="environment" multiple hidden onchange="fiProofPick(this)"></label>
+          <label class="btn btn-secondary">📁 Upload<input type="file" accept="image/*" multiple hidden onchange="fiProofPick(this)"></label>
+        </div>
+        <div id="fiProofPreview" class="fi-thumbs"></div>
+        <div class="fi-modal-actions"><button type="button" class="btn btn-secondary" onclick="fiResolveCancel()">Cancel</button><button type="button" class="btn btn-primary" id="fiResSave" onclick="fiResolveSave()">✓ Close issue</button></div>
+      </div>`;
+    document.body.appendChild(m);
+  };
+  const proofPreview = () => { const box = document.getElementById('fiProofPreview'); if (box) box.innerHTML = proof.map((f, k) => `<span class="fi-thumb"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" onclick="fiProofUnpick(${k})">×</button></span>`).join(''); };
+  window.fiProofPick = input => { proof = proof.concat(Array.from(input.files || [])); input.value = ''; proofPreview(); };
+  window.fiProofUnpick = k => { proof.splice(k, 1); proofPreview(); };
+  window.fiResolveCancel = () => { resolving = null; proof = []; document.getElementById('fiResolveModal')?.remove(); };
+  window.fiResolveSave = async () => {
+    const i = issues.find(x => x.id === resolving); if (!i) return window.fiResolveCancel();
+    const text = document.getElementById('fiResNote')?.value.trim();
+    if (!text) { note('Write a note explaining how it was resolved'); return; }
+    if (!proof.length) { note('Add at least one photo as proof'); return; }
+    if (!navigator.onLine) { note('No signal: connect to close this issue'); return; }
+    const btn = document.getElementById('fiResSave'); if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+      window.__photoUploadDeferred = false;
+      const urls = await readAndCompressPhotos(proof, 0.7, userName());
+      if (urls.some(u => String(u).startsWith('data:'))) throw new Error('the signal dropped while uploading photos; try again');
+      const patch = { status: 'resolved', resolved_at: new Date().toISOString(), resolved_by_name: userName(), resolution_note: text, resolution_photos: urls };
+      const { error } = await client().from('field_issues').update(patch).eq('id', i.id);
+      if (error) throw new Error(/resolution_/.test(error.message) ? 'run the field issue resolution SQL in Supabase first' : error.message);
+      Object.assign(i, patch); window.fiResolveCancel(); note('✅ Issue closed with proof'); rerender();
+    } catch (e) { note(`❌ Could not close: ${e.message || 'connection error'}`); if (btn) { btn.disabled = false; btn.textContent = '✓ Close issue'; } }
   };
   window.fiDelete = async id => {
     if (!confirm('Delete this issue and its record? This cannot be undone.')) return;
@@ -170,11 +210,12 @@
   // Download all photos of one issue.
   window.fiDownload = async id => {
     const i = issues.find(x => x.id === id); if (!i) return;
-    for (const [n, url] of (i.photos || []).entries()) {
+    const all = [...(i.photos || []).map(u => [u, '']), ...(i.resolution_photos || []).map(u => [u, '_proof'])];
+    for (const [n, [url, tag]] of all.entries()) {
       try {
         const blob = await (await fetch(url)).blob();
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-        a.download = `${i.apt}_${String(i.issue_type).replace(/\W+/g, '-')}_${n + 1}.jpg`;
+        a.download = `${i.apt}_${String(i.issue_type).replace(/\W+/g, '-')}${tag}_${n + 1}.jpg`;
         document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       } catch (_) { window.open(url, '_blank'); }
     }
@@ -182,8 +223,8 @@
   // Export the list (current filter) to CSV with photo links (opens in Excel).
   window.fiExport = () => {
     const rows = visible();
-    const head = ['Unit', 'Building', 'Floor', 'Type', 'Description', 'Status', 'Reported by', 'Date', 'Photos'];
-    const csv = [head, ...rows.map(i => [i.apt, i.building, i.floor, i.issue_type, i.description || '', i.status, i.created_by_name || '', i.created_at, (i.photos || []).join(' ')])]
+    const head = ['Unit', 'Building', 'Floor', 'Type', 'Description', 'Status', 'Reported by', 'Date', 'Photos', 'Resolved by', 'Resolved at', 'Resolution note', 'Proof photos'];
+    const csv = [head, ...rows.map(i => [i.apt, i.building, i.floor, i.issue_type, i.description || '', i.status, i.created_by_name || '', i.created_at, (i.photos || []).join(' '), i.resolved_by_name || '', i.resolved_at || '', i.resolution_note || '', (i.resolution_photos || []).join(' ')])]
       .map(r => r.map(v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
     a.download = `field-issues-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove();
@@ -202,6 +243,7 @@
         <div class="desc">${i.description ? esc(i.description) : '<em>No comment</em>'}</div>
         <div class="meta">Reported by ${esc(i.created_by_name || '-')} · ${fmt(i.created_at)}${i.resolved_at ? ` · Resolved ${fmt(i.resolved_at)}${i.resolved_by_name ? ' by ' + esc(i.resolved_by_name) : ''}` : ''}</div>
         ${(i.photos || []).length ? `<div class="ph">${i.photos.map(u => `<img src="${esc(u)}" alt="">`).join('')}</div>` : ''}
+        ${i.status === 'resolved' && (i.resolution_note || (i.resolution_photos || []).length) ? `<div class="res"><b>Resolution:</b> ${esc(i.resolution_note || '')}${(i.resolution_photos || []).length ? `<div class="ph">${i.resolution_photos.map(u => `<img src="${esc(u)}" alt="">`).join('')}</div>` : ''}</div>` : ''}
       </section>`;
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Field Issues Report</title><style>
       @page{size:letter;margin:14mm}body{font-family:Inter,Arial,sans-serif;color:#0F172A;font-size:12px;margin:0}
@@ -213,6 +255,7 @@
       .type{background:#FEF3C7;color:#92400E;border-radius:999px;padding:1px 8px;font-size:11px}.st{margin-left:auto;font-weight:700;font-size:11px}.st.open{color:#DC2626}.st.ok{color:#16A34A}
       .desc{font-size:13px;font-weight:600;margin:6px 0 3px}.meta{color:#64748B;font-size:10px}
       .ph{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}.ph img{width:100%;height:150px;object-fit:cover;border-radius:4px;border:1px solid #E2E8F0}
+      .res{margin-top:8px;padding:6px 8px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px}
       footer{margin-top:16px;color:#94A3B8;font-size:10px;text-align:center}
     </style></head><body>
       <header><div><h1>Field Issues Report</h1><div class="sub">${esc(project)}${currentUnit ? ` · Unit ${esc(currentUnit.apt)}` : ''}</div></div><div class="sub">${new Date().toLocaleString('en-US')}</div></header>
@@ -253,10 +296,11 @@
         <div class="fi-row-top"><strong>${esc(i.apt)}</strong><span class="fi-muted">${esc(i.building)}</span><span class="fi-chip">${esc(i.issue_type)}</span>${isOld(i) ? `<span class="fi-chip" style="background:#FEE2E2;color:#991B1B;">⚠ ${daysOpen(i)} days open</span>` : ''}<span class="fi-status">${i._pending ? '📴 Pending upload' : i.status === 'resolved' ? '✓ Resolved' : 'Open'}</span></div>
         <div class="fi-comment">${i.description ? esc(i.description) : '<span class="fi-muted">No comment</span>'}</div>
         <div class="fi-muted fi-small">${esc(i.created_by_name || '')} · ${fmt(i.created_at)}</div>
-        <div class="fi-thumbs" id="fiPh-${i.id}" hidden>${(i.photos || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(typeof storageThumbnailUrl === 'function' ? storageThumbnailUrl(u) : u)}" data-full="${esc(u)}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
+        ${i.status === 'resolved' && (i.resolution_note || (i.resolution_photos || []).length) ? `<div class="fi-resolution">✓ ${esc(i.resolution_note || '')} <span class="fi-muted fi-small">— ${esc(i.resolved_by_name || '')} · ${fmt(i.resolved_at)}</span></div>` : ''}
+        <div class="fi-thumbs" id="fiPh-${i.id}" hidden>${[...(i.photos || []), ...(i.resolution_photos || [])].map(u => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(typeof storageThumbnailUrl === 'function' ? storageThumbnailUrl(u) : u)}" data-full="${esc(u)}" onerror="this.onerror=null;this.src=this.dataset.full" alt="Issue photo" loading="lazy"></a>`).join('')}</div>
       </div>
       <div class="fi-row-actions">
-        ${(i.photos || []).length ? `<button type="button" class="fi-icon" title="Show photos" onclick="fiTogglePhotos('${i.id}')">📷 ${i.photos.length}</button>` : ''}
+        ${(i.photos || []).length + (i.resolution_photos || []).length ? `<button type="button" class="fi-icon" title="Show photos" onclick="fiTogglePhotos('${i.id}')">📷 ${(i.photos || []).length + (i.resolution_photos || []).length}</button>` : ''}
         <button type="button" class="fi-icon" title="${i.status === 'resolved' ? 'Reopen' : 'Resolve'}" onclick="fiResolve('${i.id}')">${i.status === 'resolved' ? '↺' : '✓'}</button>
         <button type="button" class="fi-icon" title="Download photos" onclick="fiDownload('${i.id}')">⬇</button>
         <button type="button" class="fi-icon" title="Edit" onclick="fiEdit('${i.id}')">✏️</button>
@@ -319,6 +363,7 @@
   .fi-thumb{position:relative}.fi-thumb button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:0;background:#DC2626;color:#fff;font-size:12px;line-height:20px;padding:0}
   .fi-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.fi-search{flex:1;min-width:160px;max-width:300px}
   .fi-card{border:1px solid #E2E8F0;border-left:4px solid #DC2626;border-radius:8px;padding:10px 12px;background:#fff;display:grid;gap:6px;margin-bottom:8px}
+  .fi-modal{position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px}.fi-modal-box{background:#fff;border-radius:12px;padding:16px;width:min(440px,100%);max-height:90vh;overflow:auto;display:grid;gap:10px}.fi-modal-box h3{margin:0;font-size:16px}.fi-modal-box label{display:grid;gap:4px;font-size:13px;font-weight:600}.fi-modal-actions{display:flex;gap:8px;justify-content:flex-end}.fi-resolution{background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;padding:4px 8px;font-size:12px;color:#166534}
   .fi-card.fi-resolved{border-left-color:#16A34A;opacity:.85}.fi-card-head{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px}
   .fi-chip{background:#FEF3C7;color:#92400E;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600}.fi-status{margin-left:auto;font-size:11px;font-weight:700;color:#64748B}
   .fi-desc{font-size:13px;color:#334155}.fi-meta{font-size:11px;color:#64748B}.fi-actions{display:flex;gap:6px;flex-wrap:wrap}.fi-actions .btn{font-size:12px;padding:4px 10px}
