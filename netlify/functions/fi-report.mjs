@@ -18,7 +18,8 @@ export default async request => {
     const [profile] = await rest(`/rest/v1/profiles?user_id=eq.${me.id}&select=role`);
     const [member] = await rest(`/rest/v1/project_members?project_id=eq.${projectId}&user_id=eq.${me.id}&select=role`);
     const role = normalizeRole(member?.role || profile?.role);
-    if (!['admin', 'pm'].includes(role)) return json(403, { error: 'Admins or PMs only' });
+    // Anyone on the project may download the PDF; only admins/PMs send e-mails.
+    if (body.action === 'pdf' ? !(member || profile?.role === 'admin') : !['admin', 'pm'].includes(role)) return json(403, { error: body.action === 'pdf' ? 'No access to this project' : 'Admins or PMs only' });
     const settings = await loadReportSettings(projectId) || {};
     const report = await buildReport(projectId, settings, new Date());
     if (body.action === 'pdf') return json(200, { filename: report.filename, pdf: report.pdf, subject: report.subject });

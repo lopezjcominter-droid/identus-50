@@ -234,7 +234,22 @@
 
   // Professional PDF report (print to PDF): header, summary and one block per
   // issue with its photos — same style as the Punch List report.
-  window.fiExportPdf = () => {
+  window.fiExportPdf = async (btn) => {
+    // Project view: the full weekly-style report (logo, summary, open issues with photos, resolved with proof).
+    if (!currentUnit && client()) {
+      const b = btn || document.activeElement; const old = b?.textContent; if (b) { b.disabled = true; b.textContent = 'Preparing…'; }
+      try {
+        const { data: { session } } = await client().auth.getSession();
+        const r = await fetch('/.netlify/functions/fi-report', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') }, body: JSON.stringify({ action: 'pdf', projectId: pid() }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(j.pdf), c => c.charCodeAt(0))], { type: 'application/pdf' }));
+        const a = document.createElement('a'); a.href = url; a.download = j.filename; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        return;
+      } catch (e) { note(`❌ ${e.message}`); return; }
+      finally { if (b) { b.disabled = false; b.textContent = old; } }
+    }
     const rows = visible(currentUnit);
     if (!rows.length) { note('No issues to export'); return; }
     const project = (document.querySelector('.project-name, #projectNameLabel')?.textContent || document.title || 'Identus 50').trim();
@@ -329,7 +344,7 @@
   const toolbar = () => `<div class="fi-toolbar">
       ${['open', 'resolved', 'all'].map(f => `<button type="button" class="btn ${filter === f ? 'btn-primary' : 'btn-secondary'}" onclick="fiFilter('${f}')">${f === 'open' ? 'Open' : f === 'resolved' ? 'Resolved' : 'All'} (${issues.filter(i => f === 'all' || i.status === f).length})</button>`).join('')}
       <input type="search" class="form-input fi-search" id="fiSearch" name="fi-filter-${Date.now()}" placeholder="Search unit or type" autocomplete="off" autocapitalize="none" spellcheck="false" role="searchbox" aria-autocomplete="none" data-form-type="other" data-lpignore="true" data-1p-ignore="true" readonly onpointerdown="this.removeAttribute('readonly')" onkeydown="this.removeAttribute('readonly')" value="${esc(search)}" oninput="fiSearchInput(this.value)">
-      <button type="button" class="btn btn-secondary" onclick="fiExportPdf()">📄 Export PDF</button><button type="button" class="btn btn-secondary" onclick="fiExport()" title="Spreadsheet with photo links">⬇ Excel</button>${canManageReport() ? '<button type="button" class="btn btn-secondary" onclick="fiReportSettings()" title="Weekly e-mail report (admins/PMs)">✉ Weekly e-mail</button>' : ''}
+      <button type="button" class="btn btn-secondary" onclick="fiExportPdf(this)">📄 Export PDF</button><button type="button" class="btn btn-secondary" onclick="fiExport()" title="Spreadsheet with photo links">⬇ Excel</button>${canManageReport() ? '<button type="button" class="btn btn-secondary" onclick="fiReportSettings()" title="Weekly e-mail report (admins/PMs)">✉ Weekly e-mail</button>' : ''}
     </div>`;
 
   // ---------- weekly e-mail report (settings; admins/PMs only) ----------
