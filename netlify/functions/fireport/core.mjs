@@ -2,6 +2,7 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { rest } from '../digest/core.mjs';
 import jpeg from 'jpeg-js';
+import { createHash } from 'node:crypto';
 
 const RESEND_KEY = process.env.RESEND_API_KEY || '';
 const APP_URL = process.env.APP_URL || 'https://identus-50.netlify.app';
@@ -183,14 +184,12 @@ export async function sendReport(to, report) {
   if (!r.ok) throw new Error(`Resend ${r.status}: ${(await r.text()).slice(0, 200)}`);
 }
 
-// Keeps the PDF under ~0.9 MB (FI_MAX_PDF) so Outlook always accepts it, however many issues there are:
+// Keeps the PDF under ~8 MB (FI_MAX_PDF) so Outlook always accepts it, however many issues there are:
 // first 2 photos per issue at 800 px, then 1 at 600/450 px, then no photos (with a link).
-const MAX_PDF = Number(process.env.FI_MAX_PDF || 900_000);
+const MAX_PDF = Number(process.env.FI_MAX_PDF || 8_000_000);
 export async function buildReport(projectId, settings, now = new Date(), { forEmail = false } = {}) {
-  // E-mail: no photos (Outlook rejects bigger messages from this mailbox); photos stay in Identus.
-  if (forEmail) return buildReportOnce(projectId, settings, now, { px: 400, perIssue: 0, forEmail: true });
   let r;
-  for (const opts of [{ px: 800, perIssue: 2 }, { px: 600, perIssue: 1 }, { px: 450, perIssue: 1 }, { px: 400, perIssue: 0 }]) {
+  for (const opts of [{ px: 900, perIssue: 3 }, { px: 700, perIssue: 2 }, { px: 500, perIssue: 1 }, { px: 400, perIssue: 0 }]) {
     r = await buildReportOnce(projectId, settings, now, opts);
     if (r.pdf.length * 0.75 <= MAX_PDF) return r;
   }
@@ -218,12 +217,24 @@ export async function collectDueReports(now = new Date()) {
   return due;
 }
 
-// Netlify schedule: sends through Resend only when Resend is set up and Power Automate is not.
+// Relay mode (no company domain): Identus e-mails each report to ONE Aireko mailbox (FI_RELAY_TO, the
+// Resend account owner), and a standard Power Automate flow in that mailbox re-sends it to the project's
+// recipients. The subject carries the tag, the recipients and a check code the flow verifies.
+const RELAY_TO = process.env.FI_RELAY_TO || '';
+const relayCode = projectId => createHash('sha256').update(String(process.env.FI_FLOW_KEY || '') + '|' + projectId).digest('hex').slice(0, 10);
+export async function relayReport(projectId, to, report) {
+  const subject = `[IDENTUS-FI] ${report.subject} ||to:${to.join(';')}||code:${relayCode(projectId)}`;
+  await sendReport([RELAY_TO], { ...report, subject });
+}
+
+// Netlify schedule: relay mode when FI_RELAY_TO is set; otherwise direct Resend (needs a verified domain);
+// with only FI_FLOW_KEY, Power Automate pulls the reports itself.
 export async function runScheduledReports(now = new Date()) {
-  if (!RESEND_KEY || process.env.FI_FLOW_KEY) return [{ skipped: !RESEND_KEY ? 'no RESEND_API_KEY' : 'sent by Power Automate' }];
+  if (!RESEND_KEY) return [{ skipped: 'no RESEND_API_KEY' }];
+  if (!RELAY_TO && process.env.FI_FLOW_KEY) return [{ skipped: 'sent by Power Automate' }];
   const results = [];
   for (const d of await collectDueReports(now)) {
-    try { await sendReport(d.to, d.report); results.push({ project: d.projectId, sent: d.to.length }); }
+    try { if (RELAY_TO) await relayReport(d.projectId, d.to, d.report); else await sendReport(d.to, d.report); results.push({ project: d.projectId, sent: d.to.length, relay: !!RELAY_TO }); }
     catch (e) { console.error('fi report send failed', d.projectId, e.message); results.push({ project: d.projectId, error: e.message }); }
   }
   return results;

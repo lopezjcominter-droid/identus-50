@@ -2,7 +2,7 @@
 // test = e-mail this project's report to yourself; pdf = download the PDF.
 import { rest } from './digest/core.mjs';
 import { normalizeRole } from './ai/roles.mjs';
-import { loadReportSettings, buildReport, sendReport } from './fireport/core.mjs';
+import { loadReportSettings, buildReport, sendReport, relayReport } from './fireport/core.mjs';
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export default async request => {
@@ -23,7 +23,7 @@ export default async request => {
     const settings = await loadReportSettings(projectId) || {};
     const report = await buildReport(projectId, settings, new Date());
     if (body.action === 'pdf') return json(200, { filename: report.filename, pdf: report.pdf, subject: report.subject });
-    if (body.action === 'test') { await sendReport([me.email], report); return json(200, { ok: true, sentTo: me.email, counts: report.counts }); }
+    if (body.action === 'test') { if (process.env.FI_RELAY_TO) await relayReport(projectId, [me.email], report); else await sendReport([me.email], report); return json(200, { ok: true, sentTo: me.email, counts: report.counts }); }
     return json(400, { error: 'Unknown action' });
   } catch (error) { return json(500, { error: error.message || 'Unexpected error' }); }
 };
