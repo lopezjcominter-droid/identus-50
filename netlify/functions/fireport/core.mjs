@@ -27,8 +27,10 @@ export async function loadReportSettings(projectId) {
 }
 
 const imageCache = new Map();
+// Photos use the small copy the app saves beside each one (name_t.jpg), so the e-mail stays small; full size if there is none.
+const thumbOf = url => (/\/storage\/v1\/object\/public\/.+\.jpe?g$/i.test(url) && !/_t\.jpg$/i.test(url) ? url.replace(/\.jpe?g$/i, '_t.jpg') : null);
 function fetchJpeg(url) {
-  if (!imageCache.has(url)) imageCache.set(url, fetchJpegNow(url));
+  if (!imageCache.has(url)) imageCache.set(url, (async () => { const t = thumbOf(url); return (t && await fetchJpegNow(t)) || fetchJpegNow(url); })());
   return imageCache.get(url);
 }
 async function fetchJpegNow(url) {
