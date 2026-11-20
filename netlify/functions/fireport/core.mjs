@@ -34,14 +34,14 @@ const imageCache = new Map();
 const thumbOf = url => (/\/storage\/v1\/object\/public\/.+\.jpe?g$/i.test(url) && !/_t\.jpg$/i.test(url) ? url.replace(/\.jpe?g$/i, '_t.jpg') : null);
 // Big JPEGs without a small copy are shrunk here (max 900 px, quality 60).
 function shrink(img, maxPx = 900) {
-  if (img.png || img.buf.length < 120_000) return img;
+  if (img.png || img.buf.length < 40_000) return img;
   try {
     const src = jpeg.decode(img.buf, { useTArray: true, maxMemoryUsageInMB: 512 });
     const k = Math.min(1, maxPx / Math.max(src.width, src.height)); if (k >= 1) return img;
     const w = Math.max(1, Math.round(src.width * k)), h = Math.max(1, Math.round(src.height * k));
     const out = new Uint8Array(w * h * 4);
     for (let y = 0; y < h; y++) { const sy = Math.min(src.height - 1, Math.floor(y / k)); for (let x = 0; x < w; x++) { const sx = Math.min(src.width - 1, Math.floor(x / k)); const si = (sy * src.width + sx) * 4, di = (y * w + x) * 4; out[di] = src.data[si]; out[di + 1] = src.data[si + 1]; out[di + 2] = src.data[si + 2]; out[di + 3] = 255; } }
-    return { buf: new Uint8Array(jpeg.encode({ data: out, width: w, height: h }, 60).data), png: false };
+    return { buf: new Uint8Array(jpeg.encode({ data: out, width: w, height: h }, 62).data), png: false };
   } catch (_) { return img; }
 }
 const rawCache = new Map();
@@ -185,12 +185,12 @@ export async function sendReport(to, report) {
   if (!r.ok) throw new Error(`Resend ${r.status}: ${(await r.text()).slice(0, 200)}`);
 }
 
-// Keeps the PDF under ~8 MB (FI_MAX_PDF) so Outlook always accepts it, however many issues there are:
+// Keeps every photo (up to 3 per issue), only smaller as the report grows; under ~20 MB (FI_MAX_PDF) so Outlook always accepts it, however many issues there are:
 // first 2 photos per issue at 800 px, then 1 at 600/450 px, then no photos (with a link).
-const MAX_PDF = Number(process.env.FI_MAX_PDF || 8_000_000);
+const MAX_PDF = Number(process.env.FI_MAX_PDF || 20_000_000);
 export async function buildReport(projectId, settings, now = new Date(), { forEmail = false } = {}) {
   let r;
-  for (const opts of [{ px: 900, perIssue: 3 }, { px: 700, perIssue: 2 }, { px: 500, perIssue: 1 }, { px: 400, perIssue: 0 }]) {
+  for (const opts of [{ px: 560, perIssue: 3 }, { px: 440, perIssue: 3 }, { px: 360, perIssue: 3 }, { px: 300, perIssue: 3 }]) {
     r = await buildReportOnce(projectId, settings, now, opts);
     if (r.pdf.length * 0.75 <= MAX_PDF) return r;
   }

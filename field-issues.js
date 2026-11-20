@@ -317,8 +317,8 @@
       </div>
       <div class="fi-row-actions">
         ${(i.photos || []).length + (i.resolution_photos || []).length ? `<button type="button" class="fi-icon" title="Show photos" onclick="fiTogglePhotos('${i.id}')">📷 ${(i.photos || []).length + (i.resolution_photos || []).length}</button>` : ''}
-        ${canManageReport() ? `<button type="button" class="fi-icon" title="${i.status === 'resolved' ? 'Reopen' : 'Resolve'}" onclick="fiResolve('${i.id}')">${i.status === 'resolved' ? '↺' : '✓'}</button>` : ''}
-        <button type="button" class="fi-icon" title="Download photos" onclick="fiDownload('${i.id}')">⬇</button>
+        ${canManageReport() ? `<button type="button" class="fi-icon ${i.status === 'resolved' ? 'fi-reopen' : 'fi-resolve'}" title="${i.status === 'resolved' ? 'Reopen this issue' : 'Close this issue with proof'}" onclick="fiResolve('${i.id}')">${i.status === 'resolved' ? '↺ Reopen' : '✓ Resolve'}</button>` : ''}
+        <button type="button" class="fi-icon fi-dl" title="Download photos" aria-label="Download photos" onclick="fiDownload('${i.id}')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:block"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 19h14"/></svg></button>
         <button type="button" class="fi-icon" title="Edit" onclick="fiEdit('${i.id}')">✏️</button>
         <button type="button" class="fi-icon fi-del" title="Delete" onclick="fiDelete('${i.id}')">🗑</button>
       </div>
@@ -481,7 +481,7 @@ This is an automated message. Please do not reply to this e-mail. For questions,
   .fi-row.fi-resolved{border-left-color:#16A34A;opacity:.8}.fi-row-main{flex:1;min-width:0;display:grid;gap:3px}
   .fi-row-top{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px}.fi-comment{font-size:14px;font-weight:600;color:#0F172A;overflow-wrap:anywhere}
   .fi-muted{color:#64748B}.fi-small{font-size:11px}.fi-row-actions{display:flex;gap:4px;flex-shrink:0}
-  .fi-icon{border:1px solid #E2E8F0;background:#F8FAFC;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;white-space:nowrap}.fi-icon:hover{background:#EFF6FF}.fi-del:hover{background:#FEE2E2}
+  .fi-icon{border:1px solid #E2E8F0;background:#F8FAFC;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;white-space:nowrap}.fi-icon:hover{background:#EFF6FF}.fi-del:hover{background:#FEE2E2}.fi-resolve{background:#DCFCE7;border-color:#86EFAC;color:#166534;font-weight:600}.fi-resolve:hover{background:#BBF7D0}.fi-reopen{background:#FEF3C7;border-color:#FCD34D;color:#92400E;font-weight:600}.fi-reopen:hover{background:#FDE68A}.fi-dl{display:inline-flex;align-items:center;justify-content:center;padding:4px 7px;background:#DBEAFE;border-color:#93C5FD;color:#1E40AF;font-weight:600}.fi-dl:hover{background:#BFDBFE}
   .fi-unit-pick{position:relative}.fi-unit-results{display:none;position:absolute;left:0;right:0;top:100%;z-index:50;max-height:240px;overflow:auto;background:#fff;border:1px solid #CBD5E1;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.12)}
   .fi-unit-results button{display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:#fff;font-size:13px;cursor:pointer}.fi-unit-results button:hover{background:#EFF6FF}
   .fi-wrap{max-width:900px}`;
