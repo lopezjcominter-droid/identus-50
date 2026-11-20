@@ -1,6 +1,7 @@
 // Weekly Field Issues report: PDF (pdf-lib) + e-mail (Resend). One project at a time.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { rest } from '../digest/core.mjs';
+import jpeg from 'jpeg-js';
 
 const RESEND_KEY = process.env.RESEND_API_KEY || '';
 const APP_URL = process.env.APP_URL || 'https://identus-50.netlify.app';
@@ -29,15 +30,27 @@ export async function loadReportSettings(projectId) {
 const imageCache = new Map();
 // Photos use the small copy the app saves beside each one (name_t.jpg), so the e-mail stays small; full size if there is none.
 const thumbOf = url => (/\/storage\/v1\/object\/public\/.+\.jpe?g$/i.test(url) && !/_t\.jpg$/i.test(url) ? url.replace(/\.jpe?g$/i, '_t.jpg') : null);
+// Big JPEGs without a small copy are shrunk here (max 900 px, quality 60).
+function shrink(img) {
+  if (img.png || img.buf.length < 180_000) return img;
+  try {
+    const src = jpeg.decode(img.buf, { useTArray: true, maxMemoryUsageInMB: 512 });
+    const k = Math.min(1, 900 / Math.max(src.width, src.height)); if (k >= 1) return img;
+    const w = Math.max(1, Math.round(src.width * k)), h = Math.max(1, Math.round(src.height * k));
+    const out = new Uint8Array(w * h * 4);
+    for (let y = 0; y < h; y++) { const sy = Math.min(src.height - 1, Math.floor(y / k)); for (let x = 0; x < w; x++) { const sx = Math.min(src.width - 1, Math.floor(x / k)); const si = (sy * src.width + sx) * 4, di = (y * w + x) * 4; out[di] = src.data[si]; out[di + 1] = src.data[si + 1]; out[di + 2] = src.data[si + 2]; out[di + 3] = 255; } }
+    return { buf: new Uint8Array(jpeg.encode({ data: out, width: w, height: h }, 60).data), png: false };
+  } catch (_) { return img; }
+}
 function fetchJpeg(url) {
-  if (!imageCache.has(url)) imageCache.set(url, (async () => { const t = thumbOf(url); return (t && await fetchJpegNow(t)) || fetchJpegNow(url); })());
+  if (!imageCache.has(url)) imageCache.set(url, (async () => { const t = thumbOf(url); const img = (t && await fetchJpegNow(t)) || await fetchJpegNow(url); return img && shrink(img); })());
   return imageCache.get(url);
 }
 async function fetchJpegNow(url) {
   try {
     const r = await fetch(url, { signal: AbortSignal.timeout(6000) }); if (!r.ok) return null;
     const type = r.headers.get('content-type') || ''; const buf = new Uint8Array(await r.arrayBuffer());
-    if (buf.length > 4_000_000) return null;
+    if (buf.length > 12_000_000) return null;
     return { buf, png: /png/.test(type) || (buf[0] === 0x89 && buf[1] === 0x50) };
   } catch (_) { return null; }
 }
