@@ -27,8 +27,10 @@
   }
   function sign(url) {
     const p = pathOf(String(url || '')); if (!p) return Promise.resolve(url);
-    const h = hit(p); if (h) return Promise.resolve(h); if (failed(p)) return Promise.resolve(url);
-    return new Promise(res => { if (!queue.has(p)) queue.set(p, []); queue.get(p).push(s => res(s || url)); if (!timer) timer = setTimeout(flush, 15); });
+    const h = hit(p); if (h) return Promise.resolve(h);
+    // Missing thumbnail (_t.jpg): use the full photo instead.
+    if (failed(p)) return /_t\.jpg$/i.test(p) ? sign(String(url).replace(/_t\.jpg(?=$|[?#])/i, '.jpg')) : Promise.resolve(url);
+    return new Promise(res => { if (!queue.has(p)) queue.set(p, []); queue.get(p).push(s => res(s || (failed(p) && /_t\.jpg$/i.test(p) ? sign(String(url).replace(/_t\.jpg(?=$|[?#])/i, '.jpg')) : url))); if (!timer) timer = setTimeout(flush, 15); });
   }
   const signSync = url => { const p = pathOf(String(url || '')); return p ? hit(p) : null; };
   window.sbSign = sign; window.sbSignSync = signSync; window.sbIsStorageUrl = u => !!pathOf(String(u || ''));
@@ -40,6 +42,7 @@
     get() { return this.__sbWant && !ds.get.call(this) ? this.__sbWant : ds.get.call(this); },
     set(v) {
       const s = String(v); if (!pathOf(s)) { this.__sbWant = null; return ds.set.call(this, v); }
+      if (failed(pathOf(s)) && /_t\.jpg(?=$|[?#])/i.test(s)) return this.src = s.replace(/_t\.jpg(?=$|[?#])/i, '.jpg');
       const now = signSync(s) || (failed(pathOf(s)) ? s : null); if (now) { this.__sbWant = null; this.__sbFinal = now; return ds.set.call(this, now); }
       this.__sbWant = s; sign(s).then(u => { if (this.__sbWant === s) { this.__sbWant = null; this.__sbFinal = u; ds.set.call(this, u); } });
     }
