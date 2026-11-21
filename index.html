@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" media="print" onload="this.media='all'">
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
+  <script src="js/signed-urls.js"></script>
   <script>
     // Monitor Supabase library loading
     window.addEventListener('load', () => {
@@ -92,7 +93,7 @@
           <button class="btn btn-secondary" onclick="backupData()">💾 Backup</button>
           <button class="btn btn-secondary" onclick="exportExcel()">📊 Export Excel</button>
           <button class="btn btn-secondary" onclick="generateClientReport()">📄 Client Report</button>
-          <button class="btn btn-secondary" onclick="document.getElementById('restoreInput').click()">📂 Restore</button>
+          <button class="btn btn-secondary" onclick="openCloudBackups()">📂 Restore</button>
           <button class="btn btn-secondary" onclick="openChangeLog()">🕘 Change Log</button>
           <input type="file" id="restoreInput" accept=".json" style="display:none" onchange="restoreData(this)">
           <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear Data</button>
@@ -11935,7 +11936,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     // ===== Daily automatic backup (goes to the Storage bucket; embedded photos are left out to keep it small) =====
     // Snapshot of the cloud modules (inspections, Official Final, Quantity
     // Control, Issues) so a backup file holds the whole project, not only units.
-    const BACKUP_PROJECT_TABLES = ['inspection_records','inspection_drafts','inspection_required_tasks','official_final_records','official_inspection_requests','quantity_templates','quantity_floor_plans','quantity_unit_states','quantity_installed_marks','quantity_revisions','field_issues'];
+    const BACKUP_PROJECT_TABLES = ['inspection_records','inspection_drafts','inspection_required_tasks','official_final_records','official_inspection_requests','quantity_templates','quantity_floor_plans','quantity_unit_states','quantity_installed_marks','quantity_revisions','field_issues','field_issue_report_settings'];
     async function backupCloudTables() {
       const out = {}; if (!sbClient || LOCAL_PROJECT_MODE || window.location.protocol === 'file:') return out;
       const pageAll = async (q) => { const rows = []; for (let f = 0; ; f += 1000) { const { data: d, error } = await q().range(f, f + 999); if (error) throw error; rows.push(...(d || [])); if (!d || d.length < 1000) break; } return rows; };
@@ -12091,9 +12092,13 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       if (!input.files.length) return;
       const file = input.files[0];
       const reader = new FileReader();
-      reader.onload = async function(e) {
+      reader.onload = e => restoreFromText(e.target.result);
+      reader.readAsText(file);
+      input.value = '';
+    }
+    async function restoreFromText(text) {
         try {
-          const backup = JSON.parse(e.target.result);
+          const backup = JSON.parse(text);
           if (!backup.units || !Array.isArray(backup.units)) {
             alert('Invalid backup file.');
             return;
@@ -12133,9 +12138,32 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         } catch (err) {
           alert('Error reading backup file: ' + err.message);
         }
-      };
-      reader.readAsText(file);
-      input.value = '';
+    }
+
+    // Daily backups saved in the cloud: list them by date and restore or download one.
+    async function openCloudBackups() {
+      if (window.authIsActive && window.authIsActive() && window.userRole !== 'admin') { alert('Only administrators can restore backups.'); return; }
+      if (!sbClient) { document.getElementById('restoreInput').click(); return; }
+      document.getElementById('cloudBackupModal')?.remove();
+      const m = document.createElement('div'); m.id = 'cloudBackupModal'; m.className = 'fi-modal';
+      m.innerHTML = '<div class="fi-modal-box"><h3 style="margin:0 0 8px">Restore a backup</h3><div id="cbList" class="fi-empty">Loading…</div><div style="display:flex;gap:8px;justify-content:space-between;margin-top:12px"><button type="button" class="btn btn-secondary" onclick="document.getElementById(\'restoreInput\').click()">📂 From a file…</button><button type="button" class="btn btn-secondary" onclick="document.getElementById(\'cloudBackupModal\').remove()">Close</button></div></div>';
+      m.onclick = e => { if (e.target === m) m.remove(); };
+      document.body.appendChild(m);
+      const { data: files, error } = await sbClient.storage.from(BACKUP_BUCKET).list(PROJECT_ID, { limit: 100, sortBy: { column: 'name', order: 'desc' } });
+      const box = document.getElementById('cbList');
+      if (error || !files || !files.length) { box.textContent = error ? `Could not list backups: ${error.message}` : 'No daily backups yet.'; return; }
+      box.className = '';
+      box.innerHTML = files.filter(f => f.name.endsWith('.json')).map(f => {
+        const day = f.name.replace('.json', '');
+        return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #E2E8F0"><span style="flex:1;font-weight:600">${day}</span><button type="button" class="btn btn-secondary" style="padding:4px 10px" onclick="cloudBackupGet('${day}', false)">⬇</button><button type="button" class="btn btn-primary" style="padding:4px 10px" onclick="cloudBackupGet('${day}', true)">Restore</button></div>`;
+      }).join('');
+    }
+    async function cloudBackupGet(day, restore) {
+      const { data: blob, error } = await sbClient.storage.from(BACKUP_BUCKET).download(`${PROJECT_ID}/${day}.json`);
+      if (error) { alert('Could not open backup: ' + error.message); return; }
+      if (!restore) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `identus50-backup-${day}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 3000); return; }
+      document.getElementById('cloudBackupModal')?.remove();
+      await restoreFromText(await blob.text());
     }
 
     // Punch List Functions
