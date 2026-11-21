@@ -57,7 +57,23 @@
   window.fetch = (input, init) => { const u = typeof input === 'string' ? input : (input && input.url); return pathOf(u || '') && !/\/object\/sign\//.test(u) ? sign(u).then(s => of(s, init)) : of(input, init); };
   // window.open(url)
   const oo = window.open.bind(window);
+  // Pages written into a new window (closeout, reports, print views): fix their photos too.
+  const watchWin = w => {
+    let n = 0; const fixDoc = () => {
+      try {
+        const doc = w.document; if (!doc) return;
+        doc.querySelectorAll('img[src*="identus-files"],a[href*="identus-files"]').forEach(el => {
+          const attr = el.tagName === 'IMG' ? 'src' : 'href', v = el.getAttribute(attr);
+          if (!v || el.__sbFinal === v || !pathOf(v) || /\/object\/sign\//.test(v)) return;
+          el.__sbFinal = v; sign(v).then(u => { el.__sbFinal = u; el.setAttribute(attr, u); });
+        });
+      } catch (_) { return; }
+      if (++n < 120 && !w.closed) setTimeout(fixDoc, 250);
+    };
+    setTimeout(fixDoc, 50);
+  };
   window.open = (url, ...rest) => {
+    if (!url || url === 'about:blank') { const w = oo(url, ...rest); if (w) watchWin(w); return w; }
     if (!pathOf(String(url || '')) || /\/object\/sign\//.test(url)) return oo(url, ...rest);
     const now = signSync(url); if (now) return oo(now, ...rest);
     const w = oo('', ...rest); sign(url).then(u => { if (w) w.location.href = u; else oo(u, ...rest); }); return w;
