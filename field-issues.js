@@ -298,9 +298,12 @@
   };
 
   // ---------- lists ----------
-  const visible = unit => issues.filter(i => (!unit || (i.apt === unit.apt && (!unit.building || i.building === unit.building)))
-    && (filter === 'all' || i.status === filter)
-    && (!search || `${i.apt} ${i.building} ${i.issue_type} ${i.description || ''}`.toLowerCase().includes(search)));
+  // In a unit's View: every issue of that unit (no tab filter or search).
+  const visible = unit => unit
+    ? issues.filter(i => String(i.apt) === String(unit.apt) && (!unit.building || !i.building || i.building === unit.building))
+        .sort((a, b) => (a.status === 'resolved') - (b.status === 'resolved') || Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0))
+    : issues.filter(i => (filter === 'all' || i.status === filter)
+      && (!search || `${i.apt} ${i.building} ${i.issue_type} ${i.description || ''}`.toLowerCase().includes(search)));
   // Compact row: unit, type, the comment highlighted, a 📷 icon (tap to see
   // the photos) and small actions. Keeps long lists short.
   // Open issues older than 7 days are flagged in red.
@@ -461,20 +464,39 @@ This is an automated message. Please do not reply to this e-mail. For questions,
   let currentUnit = null;
   function rerender() {
     updateIssuesBadge();
-    if (document.getElementById('fiUnitHost')) return window.fiRenderUnit(currentUnit, true);
+    const uh = document.getElementById('fiUnitHost');
+    if (uh && uh.offsetParent !== null && currentUnit) return window.fiRenderUnit(currentUnit, true);
     if (document.getElementById('issuesTabContent')) return window.fiRenderTab(true);
   }
+  let pendingUnit = null;
+  window.fiAddForUnit = () => {
+    if (!currentUnit) return;
+    pendingUnit = { ...currentUnit };
+    if (typeof closeDetailsModal === 'function') closeDetailsModal();
+    const btn = Array.from(document.querySelectorAll('.tab-main')).find(b => /switchMainTab\('issues'/.test(b.getAttribute('onclick') || ''));
+    if (typeof switchMainTab === 'function') switchMainTab('issues', btn); else window.fiRenderTab();
+  };
+  const applyPendingUnit = () => {
+    if (!pendingUnit) return; const want = pendingUnit; pendingUnit = null;
+    const idx = units().findIndex(u => String(u.apt) === String(want.apt) && (!want.building || u.building === want.building));
+    if (idx >= 0) window.fiUnitChoose(idx);
+    search = String(want.apt).toLowerCase(); const sb = document.getElementById('fiSearch'); if (sb) sb.value = want.apt; window.fiSearchInput(want.apt);
+    const form = document.getElementById('fiForm'); if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => document.getElementById('fiType')?.focus(), 300);
+  };
   window.fiRenderTab = async (skipLoad) => {
     const host = document.getElementById('issuesTabContent'); if (!host) return;
     currentUnit = null;
     if (!skipLoad) { host.innerHTML = '<div class="fi-empty">Loading…</div>'; await load(true); }
     host.innerHTML = `<div class="fi-wrap" data-no-translate><h3>📷 Field Issues</h3><p class="fi-sub">Report work that is wrong or cannot be built, with photos.</p>${formHtml(null)}${toolbar()}<div id="fiList">${visible().map(card).join('') || '<div class="fi-empty">No issues.</div>'}</div></div>`;
+    applyPendingUnit();
   };
   window.fiRenderUnit = async (unit, skipLoad) => {
     const host = document.getElementById('fiUnitHost'); if (!host || !unit) return;
     currentUnit = { apt: unit.apt, building: unit.building };
     if (!skipLoad) { host.innerHTML = '<div class="fi-empty">Loading…</div>'; await load(true); }
-    host.innerHTML = `<div class="fi-wrap" data-no-translate>${formHtml(unit)}${toolbar()}<div id="fiList">${visible(currentUnit).map(card).join('') || '<div class="fi-empty">No issues for this unit.</div>'}</div></div>`;
+    const list = visible(currentUnit), open = list.filter(i => i.status !== 'resolved').length;
+    host.innerHTML = `<div class="fi-wrap" data-no-translate><div class="fi-toolbar"><span class="fi-muted" style="flex:1">${list.length} issue${list.length === 1 ? '' : 's'} · ${open} open</span><button type="button" class="btn btn-primary" onclick="fiAddForUnit()">＋ Add issue</button></div><div id="fiList">${list.map(card).join('') || '<div class="fi-empty">No issues for this unit.</div>'}</div></div>`;
   };
 
   const css = document.createElement('style');
