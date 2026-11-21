@@ -77,7 +77,12 @@ function fetchJpeg(url) {
 }
 async function fetchJpegNow(url) {
   try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(6000) }); if (!r.ok) return null;
+    // Private bucket: read identus-files objects with the service key.
+    const m = String(url).match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/identus-files\/([^?#]+)/);
+    const r = m && SB_KEY
+      ? await fetch(`${SB_URL}/storage/v1/object/identus-files/${m[1]}`, { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }, signal: AbortSignal.timeout(6000) })
+      : await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!r.ok) return null;
     const type = r.headers.get('content-type') || ''; const buf = new Uint8Array(await r.arrayBuffer());
     if (buf.length > 12_000_000) return null;
     return { buf, png: /png/.test(type) || (buf[0] === 0x89 && buf[1] === 0x50) };

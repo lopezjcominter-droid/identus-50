@@ -163,7 +163,8 @@ function buildIssuesWorkbook(ExcelJS, o) {
     st.fill = fill(ok ? 'FFD1FAE5' : 'FFFEF3C7'); st.font = { bold: true, color: { argb: ok ? 'FF065F46' : 'FFB45309' } };
     if (!ok && days(i) >= 14) r.getCell(8).font = { bold: true, color: { argb: 'FF991B1B' } };
     r.getCell(10).numFmt = r.getCell(13).numFmt = 'mmm d, yyyy';
-    const link = (cell, urls, label) => { if (!urls.length) return; cell.value = urls.length === 1 ? { text: `View ${label}`, hyperlink: urls[0] } : { text: `View ${label} (${urls.length})`, hyperlink: urls[0] }; cell.font = { color: { argb: BLUE }, underline: true }; if (urls.length > 1) cell.note = urls.join('\n'); };
+    const appLink = u => (typeof location !== 'undefined' && /^https?:/.test(location.origin) ? location.origin : 'https://identus-50.netlify.app') + '/?photo=' + encodeURIComponent(u);
+    const link = (cell, urls0, label) => { const urls = urls0.map(appLink); if (!urls.length) return; cell.value = urls.length === 1 ? { text: `View ${label}`, hyperlink: urls[0] } : { text: `View ${label} (${urls.length})`, hyperlink: urls[0] }; cell.font = { color: { argb: BLUE }, underline: true }; if (urls.length > 1) cell.note = urls.join('\n'); };
     link(r.getCell(11), ph, 'photo'); link(r.getCell(15), pr, 'proof');
   });
   ws.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: cols.length } };

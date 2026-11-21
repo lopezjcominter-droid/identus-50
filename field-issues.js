@@ -554,3 +554,16 @@ window.fiLightbox = function (urls, idx) {
 .fi-lb-top span{flex:1}.fi-lb-b{width:38px;height:38px;border-radius:50%;border:0;background:#fff;color:#1D4ED8;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px}
 #fiLbX{color:#0f172a}.fi-lb-nav{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;background:rgba(255,255,255,.9);font-size:30px;line-height:1;cursor:pointer;color:#0f172a}
 #fiLbP{left:16px}#fiLbNx{right:16px}`; document.head.appendChild(st); })();
+
+// Excel/e-mail photo links (?photo=...) open the photo inside the app after sign-in.
+(function () {
+  let want = null; try { want = new URLSearchParams(location.search).get('photo'); } catch (_) {}
+  if (!want) return;
+  const tick = async (n) => {
+    const c = typeof sbClient !== 'undefined' ? sbClient : null;
+    let ok = false; try { ok = !!(c && (await c.auth.getSession()).data.session); } catch (_) {}
+    if (ok) { try { history.replaceState(null, '', location.pathname); } catch (_) {} window.fiLightbox([want], 0); return; }
+    if (n < 600) setTimeout(() => tick(n + 1), 1000);
+  };
+  setTimeout(() => tick(0), 800);
+})();
