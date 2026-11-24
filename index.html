@@ -10498,7 +10498,6 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
             const scale = Math.min(1, MAX / Math.max(img.width, img.height));
             canvas.width = Math.round(img.width * scale);
             canvas.height = Math.round(img.height * scale);
-            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); // transparent PNGs: white, not black, in JPEG
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             if (stampText) {
               const fontSize = Math.max(14, Math.round(canvas.width / 70));
@@ -10584,7 +10583,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     function makeThumbnail(dataUrl, max = 360) {
       return new Promise(resolve => {
         const img = new Image();
-        img.onload = () => { const k = Math.min(1, max / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); { const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height); } c.toBlob(b => resolve(b), 'image/jpeg', 0.7); };
+        img.onload = () => { const k = Math.min(1, max / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); c.toBlob(b => resolve(b), 'image/jpeg', 0.7); };
         img.onerror = () => resolve(null); img.src = dataUrl;
       });
     }
@@ -13477,7 +13476,6 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
               const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
               const MAX = 1600; const scale = Math.min(1, MAX / Math.max(img.width, img.height));
               canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
-              ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); // transparent PNGs: white, not black, in JPEG
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
               try {
                 const c = window._stampCtx || {};

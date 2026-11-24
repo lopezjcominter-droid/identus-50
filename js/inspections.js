@@ -2218,7 +2218,6 @@ function stampPhotoDataUrl(dataUrl, inspector) {
       canvas.width = Math.max(1, Math.round(img.width * scale));
       canvas.height = Math.max(1, Math.round(img.height * scale));
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); // transparent PNGs: white, not black, in JPEG
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       const text = photoStampText(inspector);
       const fontSize = Math.max(14, Math.round(canvas.width / 70));
