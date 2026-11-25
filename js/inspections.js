@@ -1187,9 +1187,7 @@ function inspSearchUnits(q) {
   const q2 = q.trim().toLowerCase();
   const sourceUnits = inspectionEntitySource().map(u => ({ ...u, apt: String(u.apt || u.unit_number || ''), building: String(u.building || ''), floor: String(u.floor || '') }));
   const numericQuery = /^\d+$/.test(q2);
-  const filtered = sourceUnits.filter(u => numericQuery
-    ? u.apt.toLowerCase().startsWith(q2)
-    : u.apt.toLowerCase().includes(q2) || u.building.toLowerCase().includes(q2) || u.floor.toLowerCase().includes(q2)
+  const filtered = sourceUnits.filter(u => u.apt.toLowerCase().startsWith(q2)
   ).slice(0, 15);
 
   hint.classList.add('hidden');
@@ -2988,7 +2986,7 @@ function inspLoadHistory() {
     new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0)
   ).filter(r =>
     (!unitFilter || String(r.apt) === unitFilter) &&
-    (!query || [r.apt, r.type, r.inspector, r.building].some(v => String(v || '').toLowerCase().includes(query)))
+    (!query || String(r.apt || '').toLowerCase().startsWith(query))
   );
   const container = document.getElementById('insp-history-list');
   if (!container) return;
