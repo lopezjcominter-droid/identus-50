@@ -78,7 +78,7 @@
     const box = document.getElementById('fiUnitResults'); if (!box) return;
     const term = String(value || '').toLowerCase().trim();
     document.getElementById('fiUnit').value = '';
-    const list = units().map((u, i) => ({ u, i })).filter(({ u }) => !term || unitLabel(u).toLowerCase().includes(term)).slice(0, 30);
+    const list = units().map((u, i) => ({ u, i })).filter(({ u }) => !term || String(u.apt || unitLabel(u)).toLowerCase().startsWith(term)).slice(0, 30);
     box.innerHTML = list.map(({ u, i }) => `<button type="button" onmousedown="fiUnitChoose(${i})">${esc(unitLabel(u))}</button>`).join('') || '<div class="fi-empty">No match</div>';
     box.style.display = 'block';
   };
@@ -303,7 +303,7 @@
     ? issues.filter(i => String(i.apt) === String(unit.apt) && (!unit.building || !i.building || i.building === unit.building))
         .sort((a, b) => (a.status === 'resolved') - (b.status === 'resolved') || Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0))
     : issues.filter(i => (filter === 'all' || i.status === filter)
-      && (!search || `${i.apt} ${i.building} ${i.issue_type} ${i.description || ''}`.toLowerCase().includes(search)));
+      && (!search || String(i.apt || '').toLowerCase().startsWith(search)));
   // Compact row: unit, type, the comment highlighted, a 📷 icon (tap to see
   // the photos) and small actions. Keeps long lists short.
   // Open issues older than 7 days are flagged in red.

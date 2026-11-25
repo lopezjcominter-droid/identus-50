@@ -401,7 +401,7 @@
       <div id="insp-tab-history" style="display:none">
         <div class="insp-card">
           <div class="insp-card-header">
-            <h3>Inspection History</h3><input id="insp-history-search" type="search" placeholder="Search unit, type, or inspector..." oninput="inspLoadHistory()" style="margin-left:auto;max-width:260px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px">
+            <h3>Inspection History</h3><input id="insp-history-search" type="search" placeholder="Search unit..." oninput="inspLoadHistory()" style="margin-left:auto;max-width:260px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px">
             <button class="insp-btn insp-btn-sm insp-btn-outline" onclick="inspLoadHistory()">🔄 Actualizar</button>
           </div>
           <div id="insp-history-list"></div>
@@ -2404,7 +2404,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const floor = document.getElementById('quantityModelAssignmentsFloor')?.value || '';
       const term = String(document.getElementById('quantityModelAssignmentsSearch')?.value || '').trim().toLowerCase();
       const store = quantityStore(); const model = quantityTemplateByType(type, store);
-      const matches = unit => (!building || String(unit.building) === building) && (!floor || String(unit.floor) === floor) && (!term || `${unit.apt} ${unit.building} ${unit.floor} ${unit.specialAreaKind || ''}`.toLowerCase().includes(term));
+      const matches = unit => (!building || String(unit.building) === building) && (!floor || String(unit.floor) === floor) && (!term || String(unit.apt).toLowerCase().startsWith(term));
       // Keep the final assignment list complete; search/building/floor only affect suggestions.
       const assigned = quantityModelAssignedUnits(type).reverse();
       const assignedKeys = new Set(quantityModelAssignedUnits(type).map(unit => quantityUnitKey(unit)));
@@ -3617,13 +3617,13 @@ Object.assign(APP_TRANSLATIONS.en, {
       const building = document.getElementById('quantityBuildingSelect')?.value || '';
       const floor = document.getElementById('quantityFloorSelect')?.value || '';
       const term = (document.getElementById('quantityUnitSearch')?.value || '').trim().toLowerCase();
-      return quantityAllUnits().filter(unit => (!building || String(unit.building) === building) && (!floor || String(unit.floor) === floor) && (!term || `${unit.apt} ${unit.building} ${unit.floor} ${unit.specialAreaKind || ''}`.toLowerCase().includes(term)));
+      return quantityAllUnits().filter(unit => (!building || String(unit.building) === building) && (!floor || String(unit.floor) === floor) && (!term || String(unit.apt).toLowerCase().startsWith(term)));
     }
     function quantityHandleUnitSearch() {
       const input = document.getElementById('quantityUnitSearch'); const term = String(input?.value || '').trim().toLowerCase();
       if (!term) { renderQuantityControl(); return; }
       const building = document.getElementById('quantityBuildingSelect')?.value || '';
-      const candidates = quantityAllUnits().filter(unit => (!building || String(unit.building) === building) && `${unit.apt} ${unit.building} ${unit.floor} ${unit.specialAreaKind || ''}`.toLowerCase().includes(term));
+      const candidates = quantityAllUnits().filter(unit => (!building || String(unit.building) === building) && String(unit.apt).toLowerCase().startsWith(term));
       const exact = candidates.find(unit => String(unit.apt).toLowerCase() === term);
       const floors = [...new Set(candidates.map(unit => String(unit.floor || '')))].filter(Boolean);
       // Automatically change floor only when the search identifies one unit or
@@ -9096,20 +9096,14 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     function shouldShowUnit(unit) {
       // Sidebar search filter
       if (searchTerm) {
-        const aptMatch = unit.apt.toString().toLowerCase().includes(searchTerm);
-        const buildingMatch = unit.building.toLowerCase().includes(searchTerm);
-        const floorMatch = unit.floor.toLowerCase().includes(searchTerm);
-        if (!aptMatch && !buildingMatch && !floorMatch) {
+        if (!unit.apt.toString().toLowerCase().startsWith(searchTerm)) {
           return false;
         }
       }
 
       // Units list search filter
       if (unitsSearchTerm) {
-        const aptMatch = unit.apt.toString().toLowerCase().includes(unitsSearchTerm);
-        const buildingMatch = unit.building.toLowerCase().includes(unitsSearchTerm);
-        const floorMatch = unit.floor.toLowerCase().includes(unitsSearchTerm);
-        if (!aptMatch && !buildingMatch && !floorMatch) {
+        if (!unit.apt.toString().toLowerCase().startsWith(unitsSearchTerm)) {
           return false;
         }
       }
@@ -9196,7 +9190,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
         && filters.buildings.has(area.building)
         && filters.floors.has(area.floor)
         && Object.keys(area.systems || {}).some(system => filters.systems.has(system) && filters.statuses.has(dashboardStatus(area.systems[system])))
-        && (!(searchTerm || unitsSearchTerm) || (area.name + ' ' + area.building + ' ' + area.kind + ' ' + area.floor).toLowerCase().includes(searchTerm || unitsSearchTerm)));
+        && (!(searchTerm || unitsSearchTerm) || String(area.name || '').toLowerCase().startsWith(searchTerm || unitsSearchTerm)));
       container.style.display = visible.length ? 'block' : 'none';
       if (!visible.length) { container.innerHTML = ''; return; }
       container.innerHTML = '<div style="font-size:13px;font-weight:700;color:#1E3A8A;margin:8px 0;">Areas within the selected building and floor</div>' + visible.map(area => {
@@ -9211,7 +9205,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     function specialAreaMatchesFilters(area) {
       return filters.specialAreas.has(area.id) && filters.buildings.has(area.building) && filters.floors.has(area.floor)
         && Object.keys(area.systems || {}).some(system => filters.systems.has(system) && filters.statuses.has(dashboardStatus(area.systems[system])))
-        && (!(searchTerm || unitsSearchTerm) || (area.name + ' ' + area.building + ' ' + area.kind + ' ' + area.floor).toLowerCase().includes(searchTerm || unitsSearchTerm));
+        && (!(searchTerm || unitsSearchTerm) || String(area.name || '').toLowerCase().startsWith(searchTerm || unitsSearchTerm));
     }
 
     function specialAreaChartRecord(area) {
@@ -9501,7 +9495,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
       const search = (document.getElementById('officialBatchSearch')?.value || '').trim().toLowerCase();
       return officialInspectableLocations().filter(unit => {
         const unitArea = unit.area || unit.floor || '';
-        return (!building || unit.building === building) && (!floor || unit.floor === floor) && (!area || unitArea === area) && (!search || String(unit.apt || '').toLowerCase().includes(search));
+        return (!building || unit.building === building) && (!floor || unit.floor === floor) && (!area || unitArea === area) && (!search || String(unit.apt || '').toLowerCase().startsWith(search));
       });
     }
     function officialBatchRefreshFilters() {
@@ -9562,7 +9556,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     }
     function officialFilterRows(value) {
       const term = String(value || '').trim().toLowerCase();
-      document.querySelectorAll('#officialUnitTable tbody tr').forEach(tr => { tr.style.display = !term || tr.textContent.toLowerCase().includes(term) ? '' : 'none'; });
+      document.querySelectorAll('#officialUnitTable tbody tr').forEach(tr => { tr.style.display = !term || String(tr.cells[0]?.textContent || '').trim().toLowerCase().startsWith(term) ? '' : 'none'; });
     }
     // Dashboard tab: Official Final overview for all units + batch requests.
     // Each unit's record is still entered in View → Official Final.
@@ -10823,7 +10817,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     // shows 1U, 2U, 3U…) and match any part of the unit number.
     function unitSuggestionMatches(value, building, floor) {
       const term = String(value || '').toLowerCase().trim();
-      return data.filter(u => (!building || u.building === building) && (!floor || u.floor === floor) && (!term || String(u.apt || '').toLowerCase().includes(term)))
+      return data.filter(u => (!building || u.building === building) && (!floor || u.floor === floor) && (!term || String(u.apt || '').toLowerCase().startsWith(term)))
         .sort((a, b) => (String(a.apt).toLowerCase().startsWith(term) ? 0 : 1) - (String(b.apt).toLowerCase().startsWith(term) ? 0 : 1))
         .map(u => u.apt).filter((v, i, a) => a.indexOf(v) === i).slice(0, 40);
     }
@@ -13906,6 +13900,12 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
     el.setAttribute('autocomplete', 'off'); el.setAttribute('autocorrect', 'off'); el.setAttribute('autocapitalize', 'off'); el.setAttribute('spellcheck', 'false');
     el.setAttribute('data-lpignore', 'true'); el.setAttribute('data-1p-ignore', 'true'); el.setAttribute('data-bwignore', 'true'); el.setAttribute('data-form-type', 'other');
     if (!el.name || /mail|user|login|pass/i.test(el.name)) el.setAttribute('name', 'f' + Math.random().toString(36).slice(2, 9));
+    if ((el.type === 'search' || /search|buscar|filter/i.test((el.placeholder || '') + ' ' + (el.id || ''))) && !el.readOnly) {
+      el.readOnly = true;
+      const unlock = () => { el.readOnly = false; };
+      el.addEventListener('pointerdown', unlock, { once: true });
+      el.addEventListener('keydown', unlock, { once: true });
+    }
   };
   document.addEventListener('focusin', e => tame(e.target), true);
   document.querySelectorAll('input').forEach(tame);
