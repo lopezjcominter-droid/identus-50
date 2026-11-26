@@ -20,6 +20,20 @@
       }
     });
   </script>
+  <script>
+    // Until the selected project's data arrives, keep the filters/dashboard
+    // hidden so a refresh never flashes another project's defaults.
+    (function () {
+      var q = new URLSearchParams(location.search);
+      if (q.get('local') === '1' || location.protocol === 'file:') return;
+      document.documentElement.classList.add('proj-loading');
+      setTimeout(function () { document.documentElement.classList.remove('proj-loading'); }, 20000);
+    })();
+  </script>
+  <style>
+    html.proj-loading #appContent, html.proj-loading .sidebar .filter-group ~ .filter-group { visibility: hidden; }
+    html.proj-loading body::after { content: 'Loading project…'; position: fixed; top: 45%; left: 58%; transform: translateX(-50%); font: 600 15px system-ui, sans-serif; color: #64748B; }
+  </style>
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -1416,10 +1430,12 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     // Project name/address are shared through the Supabase `projects` table (same for every device)
     let sharedProject = null;
-    function getProjectName() { return (sharedProject && sharedProject.name) || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? localStorage.getItem('cfg_project_name') : '') || (String(PROJECT_ID) === String(DEFAULT_PROJECT_ID) ? 'Ability Housing' : 'Project'); }
-    function getProjectAddress() { return (sharedProject && sharedProject.address) || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? (localStorage.getItem('cfg_project_address') ?? '') : '') || (String(PROJECT_ID) === String(DEFAULT_PROJECT_ID) ? '5121 North Pine Hills Road' : ''); }
+    function cachedProject(key) { try { return (JSON.parse(localStorage.getItem('cfg_pn_' + PROJECT_ID) || '{}'))[key] || ''; } catch (e) { return ''; } }
+    function getProjectName() { return (sharedProject && sharedProject.name) || cachedProject('n') || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? localStorage.getItem('cfg_project_name') : '') || (String(PROJECT_ID) === String(DEFAULT_PROJECT_ID) ? 'Ability Housing' : 'Project'); }
+    function getProjectAddress() { return (sharedProject && sharedProject.address) || cachedProject('a') || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? (localStorage.getItem('cfg_project_address') ?? '') : '') || (String(PROJECT_ID) === String(DEFAULT_PROJECT_ID) ? '5121 North Pine Hills Road' : ''); }
     function applyProjectName() {
       const n = getProjectName();
+      if (sharedProject && sharedProject.name) { try { localStorage.setItem('cfg_pn_' + PROJECT_ID, JSON.stringify({ n: sharedProject.name, a: sharedProject.address || '' })); } catch (e) {} }
       const el = document.getElementById('projectNameLabel');
       if (el) el.textContent = n;
       const ad = document.getElementById('projectAddressLabel');
@@ -5966,6 +5982,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
 
     function renderLoadedShell({ deferHeavy = false } = {}) {
+      if ((Array.isArray(data) && data.length) || LOCAL_PROJECT_MODE || window.location.protocol === 'file:') document.documentElement.classList.remove('proj-loading');
       setupFilterUI();
       window.data = data;
       renderUnits();
@@ -6055,6 +6072,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           }
         }
         if (!projectDataLoaded) console.warn('Supabase project data did not arrive after retries.');
+        document.documentElement.classList.remove('proj-loading');
         renderLoadedShell();
         // Punch List, Inspection History and Quantity Control are not needed
         // to draw the first Dashboard shell. Quantity Control is hydrated only
