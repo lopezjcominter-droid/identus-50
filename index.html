@@ -1430,8 +1430,9 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     // Project name/address are shared through the Supabase `projects` table (same for every device)
     let sharedProject = null;
+    let projectInfoLoaded = false;
     function cachedProject(key) { try { return (JSON.parse(localStorage.getItem('cfg_pn_' + PROJECT_ID) || '{}'))[key] || ''; } catch (e) { return ''; } }
-    function getProjectName() { return (sharedProject && sharedProject.name) || cachedProject('n') || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? localStorage.getItem('cfg_project_name') : '') || (String(PROJECT_ID) === String(DEFAULT_PROJECT_ID) ? 'Ability Housing' : 'Project'); }
+    function getProjectName() { return (sharedProject && sharedProject.name) || cachedProject('n') || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? localStorage.getItem('cfg_project_name') : '') || (String(PROJECT_ID) === String(DEFAULT_PROJECT_ID) ? 'Ability Housing' : (projectInfoLoaded ? 'Project' : 'Loading…')); }
     function getProjectAddress() { return (sharedProject && sharedProject.address) || cachedProject('a') || ((LOCAL_PROJECT_MODE || window.location.protocol === 'file:') ? (localStorage.getItem('cfg_project_address') ?? '') : '') || (String(PROJECT_ID) === String(DEFAULT_PROJECT_ID) ? '5121 North Pine Hills Road' : ''); }
     function applyProjectName() {
       const n = getProjectName();
@@ -1466,8 +1467,9 @@ Object.assign(APP_TRANSLATIONS.en, {
           name: data.name && data.name !== 'Identus 50' ? data.name : '',
           address: data.address && data.address !== '123 Biscayne Ave' ? data.address : ''
         };
+        projectInfoLoaded = true;
         applyProjectName();
-      } catch (e) { console.warn('loadSharedProject', e); }
+      } catch (e) { projectInfoLoaded = true; applyProjectName(); console.warn('loadSharedProject', e); }
     }
     async function saveSharedProject(name, address) {
       if (LOCAL_PROJECT_MODE || window.location.protocol === 'file:') {
