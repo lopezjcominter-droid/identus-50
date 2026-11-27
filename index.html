@@ -33,7 +33,8 @@
   <style>
     html.proj-loading #appContent, html.proj-loading .sidebar .filter-group ~ .filter-group { visibility: hidden; }
     html.proj-loading body::after { content: 'Loading project…'; position: fixed; top: 45%; left: 58%; transform: translateX(-50%); font: 600 15px system-ui, sans-serif; color: #64748B; }
-  </style>
+  b.ckt{color:#1D4ED8;font-weight:700;}
+</style>
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -3351,7 +3352,8 @@ Object.assign(APP_TRANSLATIONS.en, {
     // MC 10/3, #12 AWG…) so long circuit descriptions are easy to scan.
     function quantityFormatItemDescription(text) {
       let html = officialFinalEscape(String(text || ''));
-      html = html.replace(/^(\s*CKT\s*#?\s*[0-9][0-9\/,&\s-]*?)(?=\s*[—–-]\s|\s*$|\s+[A-Z])/i, '<b class="ckt">$1</b>');
+      html = html.replace(/^(\s*CKT\s*#?\s*[A-Z0-9][A-Z0-9\/,&\s-]*?)(?=\s+[—–-]\s|\s*$)/i, '<b class="ckt">$1</b>');
+      html = html.replace(/(\b\d#\d{1,2}(?:,\s*#\d{1,2}G)?(?:,\s*\d\/\d&quot;C)?)/g, '<b>$1</b>');
       html = html.replace(/\b((?:NM-?B|MC|AC|UF|SER|SEU|THHN|THWN(?:-2)?|XHHW(?:-2)?|USE(?:-2)?|ROMEX)\s*#?\s*\d{1,2}(?:\/0)?\s*\/\s*\d(?:\s*\+\s*G(?:ND)?)?)/gi, '<b>$1</b>');
       html = html.replace(/(#\s*\d{1,2}(?:\/0)?\s*AWG)/gi, '<b>$1</b>');
       return html;
