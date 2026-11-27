@@ -3960,7 +3960,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           board.style.margin = '12px auto';
           canvas.dataset.boardRatio = `${pdfRatio}`;
         }
-        const renderQuality = Math.max(1, Math.min(Number(qualityScale) || 1, 5));
+        const renderQuality = Math.max(1, Math.min(Number(qualityScale) || 1, 8));
         const maxWidth = Math.max(320, ((board?.clientWidth || 800) - 2) * renderQuality);
         const maxHeight = Math.max(320, ((board?.clientHeight || 560) - 2) * renderQuality);
         const scale = Math.min(maxWidth / baseViewport.width, maxHeight / baseViewport.height);
@@ -4809,13 +4809,13 @@ Object.assign(APP_TRANSLATIONS.en, {
         const canvas = document.querySelector('#quantityUnitContent .quantity-pdf-canvas');
         const source = canvas?.dataset?.pdf;
         // Re-render only when more sharpness is actually needed (quality caps at 5).
-        const needed = Math.min(5, Math.max(2, quantityDrawingZoom));
+        const needed = Math.min(8, Math.max(2, quantityDrawingZoom));
         if (Number(canvas?.dataset?.renderedQuality || 0) >= needed - 0.05) return;
         if (canvas && source) quantityRenderPdf(canvas, source, needed, canvas.dataset.pdfKey || '');
       }, 260);
     }
     function quantityAdjustDrawingZoom(delta) {
-      quantityDrawingZoom = Math.max(.5, Math.min(5, quantityDrawingZoom + delta));
+      quantityDrawingZoom = Math.max(.5, Math.min(10, quantityDrawingZoom + delta));
       quantityApplyDrawingView();
       quantityScheduleDrawingPdfQuality();
     }
@@ -4849,7 +4849,7 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (!quantityPinch || event.touches.length < 2) return;
         event.preventDefault();
         const m = mid(event.touches, quantityPinch.rect);
-        quantityDrawingZoom = Math.max(.5, Math.min(5, quantityPinch.z0 * dist(event.touches) / quantityPinch.d0));
+        quantityDrawingZoom = Math.max(.5, Math.min(10, quantityPinch.z0 * dist(event.touches) / quantityPinch.d0));
         quantityDrawingPanX = m.x - quantityPinch.lx * quantityDrawingZoom;
         quantityDrawingPanY = m.y - quantityPinch.ly * quantityDrawingZoom;
         if (!quantityPinch.frame) quantityPinch.frame = requestAnimationFrame(() => { if (quantityPinch) quantityPinch.frame = 0; quantityApplyDrawingView(); });
@@ -4908,7 +4908,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     }
     function quantityDrawingWheel(event) {
       event.preventDefault();
-      quantityDrawingZoom = Math.max(.5, Math.min(5, quantityDrawingZoom + (event.deltaY < 0 ? .1 : -.1)));
+      quantityDrawingZoom = Math.max(.5, Math.min(10, quantityDrawingZoom + (event.deltaY < 0 ? .25 : -.25)));
       quantityApplyDrawingView();
       quantityScheduleDrawingPdfQuality();
     }
@@ -4947,7 +4947,7 @@ Object.assign(APP_TRANSLATIONS.en, {
     function quantityDrawingTouchMove(event) {
       if (event.touches.length !== 2 || !quantityDrawingTouchStartDistance) return;
       event.preventDefault();
-      quantityDrawingZoom = Math.max(.5, Math.min(5, quantityDrawingTouchStartZoom * (quantityTouchDistance(event.touches) / quantityDrawingTouchStartDistance)));
+      quantityDrawingZoom = Math.max(.5, Math.min(10, quantityDrawingTouchStartZoom * (quantityTouchDistance(event.touches) / quantityDrawingTouchStartDistance)));
       quantityApplyDrawingView();
     }
     function quantityDrawingTouchEnd(event) {
