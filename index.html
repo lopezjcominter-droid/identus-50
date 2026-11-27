@@ -3960,7 +3960,7 @@ Object.assign(APP_TRANSLATIONS.en, {
           board.style.margin = '12px auto';
           canvas.dataset.boardRatio = `${pdfRatio}`;
         }
-        const renderQuality = Math.max(1, Math.min(Number(qualityScale) || 1, 4));
+        const renderQuality = Math.max(1, Math.min(Number(qualityScale) || 1, 5));
         const maxWidth = Math.max(320, ((board?.clientWidth || 800) - 2) * renderQuality);
         const maxHeight = Math.max(320, ((board?.clientHeight || 560) - 2) * renderQuality);
         const scale = Math.min(maxWidth / baseViewport.width, maxHeight / baseViewport.height);
@@ -4808,8 +4808,8 @@ Object.assign(APP_TRANSLATIONS.en, {
       quantityPdfQualityTimer = setTimeout(() => {
         const canvas = document.querySelector('#quantityUnitContent .quantity-pdf-canvas');
         const source = canvas?.dataset?.pdf;
-        // Re-render only when more sharpness is actually needed (quality caps at 3).
-        const needed = Math.min(3, Math.max(2, quantityDrawingZoom));
+        // Re-render only when more sharpness is actually needed (quality caps at 5).
+        const needed = Math.min(5, Math.max(2, quantityDrawingZoom));
         if (Number(canvas?.dataset?.renderedQuality || 0) >= needed - 0.05) return;
         if (canvas && source) quantityRenderPdf(canvas, source, needed, canvas.dataset.pdfKey || '');
       }, 260);
