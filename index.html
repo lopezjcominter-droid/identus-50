@@ -11707,7 +11707,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           maintainAspectRatio: false,
           scales: {
             x: { stacked: true, grid: { color: 'rgba(226, 232, 240, 0.5)' } },
-            y: { stacked: true }
+            y: { stacked: true, ticks: { autoSkip: false } }
           },
           plugins: { legend: { position: 'top', align: 'start', labels: { boxWidth: 12, font: { size: window.innerWidth < 700 ? 10 : 12, weight: '600' }, padding: 12 } } }
         }
@@ -11743,7 +11743,7 @@ Systems: remove ${sysToRemove.length} system row(s)` + (sysToRemoveWithData ? ` 
           maintainAspectRatio: false,
           scales: {
             x: { stacked: true, grid: { color: 'rgba(226, 232, 240, 0.5)' } },
-            y: { stacked: true }
+            y: { stacked: true, ticks: { autoSkip: false } }
           },
           plugins: { legend: { position: 'top', align: 'start', labels: { boxWidth: 12, font: { size: window.innerWidth < 700 ? 10 : 12, weight: '600' }, padding: 12 } } }
         }
