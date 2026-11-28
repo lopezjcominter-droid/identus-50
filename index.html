@@ -4804,6 +4804,7 @@ Object.assign(APP_TRANSLATIONS.en, {
       const hand = document.querySelector('#quantityUnitContent .quantity-drawing-tools button[aria-label="Pan with hand"]');
       if (hand) hand.classList.toggle('active', quantityDrawingHand);
       quantityEnsureHistoryPanel();
+      quantityDrawingScheduleDetail();
     }
     function quantityScheduleDrawingPdfQuality() {
       clearTimeout(quantityPdfQualityTimer);
@@ -4815,6 +4816,39 @@ Object.assign(APP_TRANSLATIONS.en, {
         if (Number(canvas?.dataset?.renderedQuality || 0) >= needed - 0.05) return;
         if (canvas && source) quantityRenderPdf(canvas, source, needed, canvas.dataset.pdfKey || '');
       }, 260);
+    }
+    // Zoomed unit drawings: redraw only the visible part straight from the PDF at
+    // full device resolution (like the floor plan), so iPad stays as sharp as a PC
+    // without needing a huge full-page canvas that iOS caps.
+    let quantityDrawingDetailTimer = null, quantityDrawingDetailTask = null;
+    function quantityDrawingScheduleDetail() { clearTimeout(quantityDrawingDetailTimer); quantityDrawingDetailTimer = setTimeout(quantityDrawingRenderDetail, 200); }
+    async function quantityDrawingRenderDetail() {
+      const stage = document.querySelector('#quantityUnitContent .quantity-drawing-stage');
+      const board = document.querySelector('#quantityUnitContent .quantity-drawing-board');
+      const base = stage?.querySelector('canvas.quantity-pdf-canvas');
+      try { quantityDrawingDetailTask?.cancel(); } catch (_) {}
+      const old = stage?.querySelector('canvas.quantity-drawing-detail');
+      if (!stage || !board || !base || quantityDrawingZoom <= 1.05) { old?.remove(); return; }
+      const br = board.getBoundingClientRect(), cr = base.getBoundingClientRect();
+      const left = Math.max(br.left, cr.left), top = Math.max(br.top, cr.top), right = Math.min(br.right, cr.right), bottom = Math.min(br.bottom, cr.bottom);
+      if (right - left < 4 || bottom - top < 4) { old?.remove(); return; }
+      const z = quantityDrawingZoom, dpr = Math.min(window.devicePixelRatio || 1, 3);
+      const bw = base.offsetWidth, bx = base.offsetLeft || 0, by = base.offsetTop || 0;
+      const lx = bx + (left - cr.left) / z, ly = by + (top - cr.top) / z, lw = (right - left) / z, lh = (bottom - top) / z;
+      try {
+        const page = await quantityFloorPage(base); if (!page || stage.querySelector('canvas.quantity-pdf-canvas') !== base) return;
+        const v1 = page.getViewport({ scale: 1 });
+        const scale = (bw / v1.width) * z * dpr;
+        const viewport = page.getViewport({ scale, offsetX: -((left - cr.left) / z) * z * dpr, offsetY: -((top - cr.top) / z) * z * dpr });
+        const canvas = document.createElement('canvas'); canvas.className = 'quantity-drawing-detail';
+        canvas.width = Math.ceil((right - left) * dpr); canvas.height = Math.ceil((bottom - top) * dpr);
+        canvas.style.cssText = `position:absolute;left:${lx}px;top:${ly}px;width:${lw}px;height:${lh}px;pointer-events:none;`;
+        const task = page.render({ canvasContext: canvas.getContext('2d', { alpha: false }), viewport }); quantityDrawingDetailTask = task;
+        await task.promise;
+        if (stage.querySelector('canvas.quantity-pdf-canvas') !== base || quantityDrawingZoom <= 1.05) return;
+        stage.querySelector('canvas.quantity-drawing-detail')?.remove();
+        base.insertAdjacentElement('afterend', canvas);
+      } catch (_) { /* replaced by a newer zoom/pan */ }
     }
     function quantityAdjustDrawingZoom(delta) {
       quantityDrawingZoom = Math.max(.5, Math.min(10, quantityDrawingZoom + delta));
